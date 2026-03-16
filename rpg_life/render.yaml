@@ -1,0 +1,165 @@
+services:
+  - type: keyvalue
+    name: rpg-life-redis
+    plan: starter
+    ipAllowList: []
+
+  - type: web
+    name: rpg-life-api
+    runtime: docker
+    plan: starter
+    autoDeploy: true
+    healthCheckPath: /healthz
+    dockerCommand: /bin/sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 2"
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: ALLOW_SQLITE_FALLBACK
+        value: "false"
+      - key: USE_INTERNAL_SCHEDULER
+        value: "false"
+      - key: AUTO_CREATE_TABLES
+        value: "false"
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: COOKIE_SAMESITE
+        value: lax
+      - key: ENABLE_PUSH_DISPATCH
+        value: "true"
+      - key: ACCESS_TOKEN_EXPIRE_DAYS
+        value: "7"
+      - key: PUSH_QUEUE_BATCH_SIZE
+        value: "50"
+      - key: PUSH_QUEUE_MAX_ATTEMPTS
+        value: "5"
+      - key: PUSH_QUEUE_RETRY_DELAY_SECONDS
+        value: "60"
+      - key: SOCIAL_AUTH_REDIRECT_SCHEME
+        value: rpglife
+      - key: DATABASE_URL
+        fromDatabase:
+          name: rpg-life-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: rpg-life-redis
+          type: keyvalue
+          property: connectionString
+      - key: CELERY_BROKER_URL
+        fromService:
+          name: rpg-life-redis
+          type: keyvalue
+          property: connectionString
+      - key: CELERY_RESULT_BACKEND
+        fromService:
+          name: rpg-life-redis
+          type: keyvalue
+          property: connectionString
+      - key: SECRET_KEY
+        sync: false
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+      - key: EXPO_PUSH_ACCESS_TOKEN
+        sync: false
+      - key: GOOGLE_AUTH_ENABLED
+        sync: false
+      - key: GOOGLE_AUTH_MOBILE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_AUTH_CLIENT_SECRET
+        sync: false
+      - key: YANDEX_AUTH_ENABLED
+        sync: false
+      - key: YANDEX_AUTH_MOBILE_CLIENT_ID
+        sync: false
+      - key: YANDEX_AUTH_CLIENT_SECRET
+        sync: false
+      - key: TELEGRAM_AUTH_ENABLED
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_BOT_USERNAME
+        sync: false
+      - key: TELEGRAM_AUTH_MAX_AGE_SECONDS
+        value: "900"
+
+  - type: worker
+    name: rpg-life-celery-worker
+    runtime: docker
+    plan: starter
+    autoDeploy: true
+    dockerCommand: celery -A app.core.celery_app:celery_app worker --loglevel=info --concurrency=2
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: ALLOW_SQLITE_FALLBACK
+        value: "false"
+      - key: USE_INTERNAL_SCHEDULER
+        value: "false"
+      - key: AUTO_CREATE_TABLES
+        value: "false"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: rpg-life-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: rpg-life-redis
+          type: keyvalue
+          property: connectionString
+      - key: CELERY_BROKER_URL
+        fromService:
+          name: rpg-life-redis
+          type: keyvalue
+          property: connectionString
+      - key: CELERY_RESULT_BACKEND
+        fromService:
+          name: rpg-life-redis
+          type: keyvalue
+          property: connectionString
+      - key: SECRET_KEY
+        sync: false
+      - key: EXPO_PUSH_ACCESS_TOKEN
+        sync: false
+
+  - type: worker
+    name: rpg-life-celery-beat
+    runtime: docker
+    plan: starter
+    autoDeploy: true
+    dockerCommand: celery -A app.core.celery_app:celery_app beat --loglevel=info
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: ALLOW_SQLITE_FALLBACK
+        value: "false"
+      - key: USE_INTERNAL_SCHEDULER
+        value: "false"
+      - key: AUTO_CREATE_TABLES
+        value: "false"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: rpg-life-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: rpg-life-redis
+          type: keyvalue
+          property: connectionString
+      - key: CELERY_BROKER_URL
+        fromService:
+          name: rpg-life-redis
+          type: keyvalue
+          property: connectionString
+      - key: CELERY_RESULT_BACKEND
+        fromService:
+          name: rpg-life-redis
+          type: keyvalue
+          property: connectionString
+      - key: SECRET_KEY
+        sync: false
+
+databases:
+  - name: rpg-life-db
+    plan: starter
+    databaseName: rpg_life
+    user: rpg_user

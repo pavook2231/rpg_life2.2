@@ -1,0 +1,806 @@
+{
+  "navigation": {
+    "home": "Главная",
+    "quests": "Задания",
+    "character": "Персонаж",
+    "inventory": "Инвентарь",
+    "shop": "Магазин",
+    "leaderboard": "Таблица лидеров",
+    "profile": "Профиль",
+    "achievements": "Достижения",
+    "events": "События",
+    "challenges": "Испытания",
+    "multiplayer": "Мультиплеер"
+  },
+  "screens": {
+    "home": {
+      "title": "Главная",
+      "subtitle": "Вводный экран по миру RPG Life, механикам героя и прогрессу аккаунта",
+      "syncMessage": "Синхронизация прогресса...",
+      "heroName": "Герой",
+      "levelProgress": "Прогресс уровня",
+      "toQuests": "К заданиям",
+      "character": "Персонаж",
+      "shop": "Магазин",
+      "claimDaily": "Забрать",
+      "dailyRewardObtained": "Ежедневная награда получена",
+      "dailyRewardDescription": "+{xp} XP и +{gold} золота",
+      "heroDescription": "Ты развиваешь героя через реальные ежедневные задания: получаешь опыт, золото, предметы и достижения.",
+      "rewardTitle": "Ежедневная награда",
+      "aboutTitle": "Что здесь происходит",
+      "aboutText": "RPG Life превращает повседневные задачи в RPG-прогресс. Выполняй задания, получай опыт и золото, собирай предметы, усиливай героя и открывай достижения.",
+      "statsTitle": "За что отвечают характеристики",
+      "statsIntro": "Ниже собраны все ключевые характеристики героя. Чем лучше экипировка и выше базовые параметры, тем заметнее прирост наград.",
+      "nextTitle": "Что делать дальше",
+      "summary": {
+        "achievementsEarned": "получено достижений",
+        "streakDays": "дней серии",
+        "xpBonus": "бонус к опыту",
+        "goldBonus": "бонус к золоту"
+      },
+      "stats": {
+        "strength": {
+          "title": "Сила",
+          "icon": "arm-flex",
+          "description": "Увеличивает опыт за задания и ускоряет рост уровня."
+        },
+        "agility": {
+          "title": "Ловкость",
+          "icon": "run-fast",
+          "description": "Отвечает за шанс критической награды и может усилить полученный лут."
+        },
+        "intellect": {
+          "title": "Интеллект",
+          "icon": "brain",
+          "description": "Дает бонус к золоту за задания и поддерживает магические механики героя."
+        },
+        "stamina": {
+          "title": "Выносливость",
+          "icon": "heart-plus",
+          "description": "Увеличивает запас здоровья и помогает выдерживать больше активности в день."
+        },
+        "armor": {
+          "title": "Броня",
+          "icon": "shield",
+          "description": "Снижает потери при пропуске заданий и делает героя устойчивее."
+        },
+        "crit": {
+          "title": "Крит",
+          "icon": "flash",
+          "description": "Показывает вероятность увеличить награду после успешного задания."
+        },
+        "luck": {
+          "title": "Удача",
+          "icon": "clover",
+          "description": "Повышает шанс получить редкие предметы и дополнительные награды."
+        },
+        "mana": {
+          "title": "Мана",
+          "icon": "auto-fix",
+          "description": "Нужна для особых игровых действий, событий и мультиплеерных активностей."
+        }
+      },
+      "features": {
+        "quests": {
+          "title": "Задания",
+          "description": "Выполняй ежедневные квесты, получай XP и золото, прокачивай героя."
+        },
+        "inventory": {
+          "title": "Инвентарь и экипировка",
+          "description": "Собирай предметы, сравнивай бонусы и усиливай персонажа через экипировку."
+        },
+        "achievements": {
+          "title": "Достижения",
+          "description": "Закрывай игровые цели, открывай награды и получай редкие бонусы."
+        },
+        "shop": {
+          "title": "Магазин",
+          "description": "Трать золото на улучшения, чтобы быстрее расти и усиливать сбор наград."
+        }
+      }
+    },
+    "quests": {
+      "title": "Задания",
+      "subtitle": "Ежедневные квесты, анимированный XP bar и единый RPG-стиль карточек",
+      "progress": "Прогресс уровня",
+      "addQuest": "+ Квест",
+      "level": "Уровень",
+      "active": "Активные",
+      "completed": "Выполненные",
+      "noQuests": "Нет заданий",
+      "createQuest": "Создать задание",
+      "questTitle": "Название задания",
+      "questDescription": "Описание задания",
+      "selectIcon": "Выбрать иконку",
+      "create": "Создать",
+      "cancel": "Отменить",
+      "completeAction": "Завершить",
+      "emptyActive": "Активных заданий нет. Создай новое или дождись обновления.",
+      "emptyCompleted": "Пока нет выполненных заданий.",
+      "newDailyQuest": "Новый ежедневный квест",
+      "errors": {
+        "failedToComplete": "Не удалось завершить квест",
+        "failedToDelete": "Не удалось удалить квест",
+        "failedToCreate": "Не удалось создать задание"
+      }
+    },
+    "character": {
+      "title": "Персонаж",
+      "subtitle": "Экипировка и характеристики героя",
+      "stats": {
+        "strength": "Сила",
+        "agility": "Ловкость",
+        "intellect": "Интеллект",
+        "stamina": "Выносливость",
+        "armor": "Броня",
+        "crit": "Крит",
+        "luck": "Удача",
+        "mana": "Мана"
+      },
+      "manaLabel": "Мана",
+      "characterExperience": "Опыт персонажа",
+      "equip": "Экипировать",
+      "sell": "Продать",
+      "slot": "Слот",
+      "sellPrice": "Цена продажи",
+      "setBonusesTitle": "Бонусы сетов",
+      "gold": "золота",
+      "sections": {
+        "primaryStats": "Основные характеристики",
+        "bag": "Сумка",
+        "equipment": "Экипировка"
+      },
+      "tabs": {
+        "overview": "Overview",
+        "equipment": "Equipment",
+        "stats": "Stats",
+        "inventory": "Inventory"
+      },
+      "tooltips": {
+        "strength": "Сила повышает бонус к опыту. Сейчас: +{xpBonus}% XP",
+        "agility": "Ловкость отвечает за шанс критической награды. Сейчас шанс усилить награду: {critRewardChance}%",
+        "intellect": "Интеллект отвечает за бонус к золоту. Сейчас бонус к золоту: +{goldBonus}%",
+        "stamina": "Выносливость увеличивает запас здоровья. Сейчас: {health}",
+        "armor": "Броня снижает потери при провале задания. Текущая защита: {armor}",
+        "crit": "Критический шанс показывает текущую вероятность усиленной награды. Сейчас: {critRewardChance}%",
+        "luck": "Удача повышает шанс редкой добычи. Сейчас: +{lootChance}%"
+      },
+      "errors": {
+        "failedToOpen": "Не удалось открыть предмет",
+        "failedToEquip": "Не удалось экипировать предмет",
+        "failedToSell": "Не удалось продать предмет",
+        "unknownError": "Неизвестная ошибка"
+      }
+    },
+    "profile": {
+      "title": "Профиль",
+      "subtitle": "Аккаунт, прогресс героя и достижения в едином игровом стиле",
+      "accountSummary": "Сводка аккаунта",
+      "email": "Почта",
+      "gender": "Пол",
+      "gold": "Золото",
+      "streak": "Серия",
+      "days": "дн.",
+      "characterSettings": "Настройки персонажа",
+      "accountName": "Имя аккаунта",
+      "characterName": "Имя персонажа",
+      "birthYear": "Год рождения",
+      "save": "Сохранить",
+      "logout": "Выйти",
+      "achievements": "Достижения",
+      "clickForDetails": "Нажми для подробного описания",
+      "level": "Уровень",
+      "rating": "Рейтинг",
+      "heroProgress": "Прогресс героя",
+      "unknownHero": "Герой",
+      "appSections": "Разделы приложения",
+      "achievementStatus": {
+        "earned": "Получено",
+        "available": "Доступно",
+        "locked": "Заблокировано",
+        "unknown": "Неизвестно"
+      },
+      "earnedAt": "Получено",
+      "errors": {
+        "failedToSave": "Не удалось сохранить",
+        "profileUpdated": "Профиль обновлен",
+        "changesSaved": "Изменения сохранены."
+      }
+    },
+    "login": {
+      "title": "Вход",
+      "subtitle": "С возвращением, герой!",
+      "mode": "Вход",
+      "register": "Регистрация",
+      "apiConnection": "Подключение к API",
+      "apiHint": "Введи адрес компьютера. Можно и без `/api/v1` - приложение добавит его само.",
+      "apiPlaceholder": "http://192.168.0.148:8000",
+      "save": "Сохранить",
+      "saving": "Сохраняем...",
+      "check": "Проверить",
+      "checking": "Проверяем...",
+      "reset": "Сброс",
+      "accountLogin": "Вход в аккаунт",
+      "emailPlaceholder": "Email",
+      "passwordPlaceholder": "Пароль",
+      "login": "Войти",
+      "noAccount": "Нет аккаунта? Создать персонажа",
+      "apiSaved": "API сохранен",
+      "apiWillBeUsed": "Будет использоваться адрес:",
+      "apiReset": "API сброшен",
+      "apiResetMessage": "Адрес API возвращен к значению по умолчанию.",
+      "connectionWorks": "Связь работает",
+      "connectionStatus": "Статус:",
+      "connectionFailed": "Связь не работает",
+      "errors": {
+        "loginFailed": "Ошибка входа",
+        "error": "Ошибка",
+        "unknownError": "Неизвестная ошибка"
+      }
+    },
+    "register": {
+      "title": "Регистрация",
+      "subtitle": "Добро пожаловать в RPG Life!",
+      "mode": "Регистрация",
+      "login": "Вход",
+      "accountSetup": "Создание аккаунта",
+      "namePlaceholder": "Имя",
+      "emailPlaceholder": "Email",
+      "passwordPlaceholder": "Пароль",
+      "confirmPasswordPlaceholder": "Подтвердить пароль",
+      "register": "Создать персонажа",
+      "haveAccount": "Уже есть аккаунт? Войти",
+      "basicData": "Основные данные",
+      "characterClass": "Класс персонажа",
+      "gender": "Пол",
+      "birthYear": "Год рождения",
+      "class": {
+        "warrior": "Воин",
+        "warriorBonus": "Сила, броня, двуручное оружие",
+        "archer": "Лучник",
+        "archerBonus": "Ловкость, крит, дальний бой",
+        "mage": "Маг",
+        "mageBonus": "Интеллект, опыт, магические бонусы"
+      },
+      "genderOption": {
+        "male": "Мужской",
+        "female": "Женский",
+        "nonbinary": "Небинарный"
+      },
+      "errors": {
+        "registrationFailed": "Ошибка регистрации",
+        "unknownError": "Неизвестная ошибка"
+      }
+    },
+    "inventory": {
+      "title": "Инвентарь",
+      "subtitle": "Управление предметами и экипировкой",
+      "bagTitle": "Содержимое сумок",
+      "summaryItems": "Предметов: {count}",
+      "summaryEquipped": "Надето: {count}",
+      "searchPlaceholder": "Поиск по инвентарю",
+      "sort": {
+        "rarity": "Редкость",
+        "name": "Название",
+        "slot": "Слот",
+        "equipped": "Надето"
+      },
+      "confirmUnequipMessageNamed": "Вы действительно хотите снять \"{itemName}\"?",
+      "confirmSellMessageNamed": "Продать \"{itemName}\" за {price} золота?"
+    },
+    "shop": {
+      "title": "Shop",
+      "subtitle": "A wandering merchant with featured loot, rare finds, and a separate chest stand.",
+      "introTitle": "Торговая лавка",
+      "introText": "Чем выше редкость, тем богаче выглядит предмет. Открывай карточку, сравнивай с надетым и покупай без потери контекста.",
+      "walletLabel": "Золото",
+      "levelBadge": "Ур. {level}",
+      "searchPlaceholder": "Поиск по магазину",
+      "pageOf": "Страница {page} из {totalPages}",
+      "totalItems": "Всего предметов: {count}",
+      "itemPurchased": "Куплен предмет: {itemName}",
+      "itemAddedToInventory": "Предмет добавлен в инвентарь.",
+      "purchaseFailed": "Не удалось купить",
+      "confirmPurchase": "Подтвердите покупку",
+      "confirmPurchaseMessage": "Купить \"{itemName}\" за {price}?",
+      "cancel": "Отмена",
+      "buy": "Купить",
+      "buyItem": "Купить предмет",
+      "unavailable": "Недоступен",
+      "previous": "Назад",
+      "next": "Дальше",
+      "priceLabel": "Цена",
+      "requiredLevelLabel": "Требуемый уровень",
+      "slotsLabel": "Слоты",
+      "unknownSlot": "Неизвестно",
+      "comparisonTitle": "Сравнение с надетой вещью",
+      "comparisonCurrent": "Сейчас надето: {items}",
+      "comparisonEmpty": "В этих слотах сейчас ничего не надето. Новый предмет даст чистый прирост.",
+      "levelLocked": "Недоступен по уровню",
+      "stats": {
+        "minDamage": "Мин. урон",
+        "maxDamage": "Макс. урон",
+        "armor": "Броня",
+        "strength": "Сила",
+        "agility": "Ловкость",
+        "intellect": "Интеллект",
+        "stamina": "Выносливость",
+        "crit": "Крит",
+        "luck": "Удача",
+        "health": "Здоровье",
+        "xpBonus": "Бонус XP",
+        "goldBonus": "Бонус золота"
+      },
+      "categories": {
+        "all": "Все",
+        "weapon": "Оружие",
+        "armor": "Броня",
+        "accessory": "Аксессуар",
+        "chest": "Сундуки"
+      },
+      "merchantEyebrow": "Shop",
+      "merchantTitle": "Wandering Merchant",
+      "heroItemText": "Today's best offers are on display: inspect cards, compare gear, and upgrade your hero without losing context.",
+      "heroChestText": "The merchant brought heavy chests with boosted loot today. Check them before the display rotates.",
+      "featuredLive": "Featured item: {name}",
+      "featuredFallback": "coming soon",
+      "nextRefreshIn": "Refresh in {time}",
+      "playerLevel": "Level",
+      "refreshAction": "Refresh stock",
+      "refreshingAction": "Refreshing stock...",
+      "refreshCooldown": "Refresh available in {time}",
+      "refreshedTitle": "Shop refreshed",
+      "refreshedDescription": "The merchant rotated the stock and highlighted new premium offers.",
+      "refreshFailedTitle": "Failed to refresh the shop",
+      "craftingAction": "Crafting",
+      "featuredSectionTitle": "Item of the Day",
+      "featuredItemText": "The strongest pick in the current rotation with the clearest stat upgrade.",
+      "featuredChestText": "A special chest of the day with elevated rare loot chances.",
+      "featuredBadge": "Item of the Day",
+      "rareFindTitle": "Rare Find",
+      "rareFindDescription": "The best rare offer on the shelf right now.",
+      "rareFindBadge": "Rare Find",
+      "catalogTitle": "Merchant Catalog",
+      "catalogSummary": "{items} items and {chests} chests in the current rotation",
+      "catalogHint": "Top offers are highlighted by rarity and value.",
+      "chestSectionTitle": "Merchant Chests",
+      "chestSectionDescription": "A separate stand with oversized chests across rarity tiers.",
+      "chestBadge": "Chest",
+      "openForGold": "Open for gold",
+      "buyNow": "Buy now",
+      "refreshCostHint": "Refresh cost: {cost} gold",
+      "merchantTip1": "Welcome, adventurer! Check the daily deal for the best value.",
+      "merchantTip2": "Rare items glow with power. Don't miss the featured chest!",
+      "merchantTip3": "Stock rotates daily. Come back tomorrow for new treasures."
+    },
+    "loading": {
+      "subtitle": "Подготовка игрового мира..."
+    },
+    "multiplayer": {
+      "title": "Мультиплеер",
+      "subtitle": "Co-op квесты, групповые задания и вызовы другим игрокам",
+      "form": {
+        "defaultTitle": "Совместный рейд",
+        "defaultDescription": "Объединитесь и выполните общую цель в срок.",
+        "titlePlaceholder": "Название рейда",
+        "descriptionPlaceholder": "Описание",
+        "goalPlaceholder": "Цель"
+      },
+      "sections": {
+        "createCoop": "Создать co-op квест",
+        "friends": "Друзья и группа",
+        "activePvp": "Активные PvP вызовы",
+        "coopQuests": "Совместные квесты"
+      },
+      "actions": {
+        "launchCoop": "Запустить co-op квест",
+        "duel": "Дуэль"
+      },
+      "friendStats": "Ур. {level} • квестов {quests} • побед {wins}",
+      "challengeMeta": "{activity} • цель {goal} • статус {status}",
+      "coopMeta": "{activity} • {progress}/{goal} • {status}",
+      "emptyFriends": "Пока нет друзей. Добавьте друзей в профиле и используйте social endpoints.",
+      "emptyPvp": "Активных PvP испытаний пока нет.",
+      "emptyCoop": "Совместных квестов пока нет.",
+      "feedback": {
+        "coopCreated": "Co-op квест создан",
+        "invitedFriends": "Приглашены: {friends}",
+        "singleRaidCreated": "Рейд создан для одиночного прохождения.",
+        "duelTitle": "Дуэль создана",
+        "duelDescription": "Вы бросили вызов другому игроку.",
+        "invitationSent": "Приглашение отправлено",
+        "invitationDescription": "PvP-испытание ждёт ответа друга."
+      },
+      "errors": {
+        "createCoop": "Не удалось создать co-op квест",
+        "createDuel": "Не удалось создать дуэль"
+      },
+      "status": {
+        "active": "Активно",
+        "pending": "Ожидает",
+        "resolved": "Завершено",
+        "completed": "Выполнено",
+        "failed": "Провалено",
+        "scheduled": "Запланировано",
+        "declined": "Отклонено",
+        "expired": "Истекло",
+        "finished": "Завершено",
+        "unknown": "Неизвестно"
+      }
+    },
+    "leaderboard": {
+      "title": "Таблица лидеров",
+      "subtitle": "Лучшие игроки по ключевым метрикам",
+      "fields": {
+        "score": "Score",
+        "level": "Level",
+        "class": "Class",
+        "goal": "Goal",
+        "quests": "Quests",
+        "steps": "Steps",
+        "challengeWins": "Challenge Wins"
+      },
+      "metrics": {
+        "level": "Уровень",
+        "quests": "Квесты",
+        "steps": "Шаги",
+        "challenge_wins": "Победы"
+      }
+    },
+    "friends": {
+      "title": "Friends",
+      "subtitle": "Add friends and track their progress",
+      "searchPlaceholder": "Search by name or email",
+      "searchResults": "Search Results",
+      "myFriends": "My Friends",
+      "addFriend": "Add",
+      "requestPending": "Request sent",
+      "friendsSince": "Friends since",
+      "tabs": {
+        "friends": "Friends",
+        "leaderboard": "Leaderboard",
+        "global": "Global"
+      }
+    },
+    "challengeInvitations": {
+      "title": "Challenge Invitations"
+    },
+    "achievements": {
+      "title": "Достижения",
+      "subtitle": "Закрывай цели и получай награды"
+    },
+    "challenges": {
+      "title": "Испытания",
+      "subtitle": "PvP-испытания и асинхронные вызовы другим игрокам",
+      "fields": {
+        "activity": "Активность",
+        "goal": "Цель",
+        "status": "Статус",
+        "reward": "Награда",
+        "opponent": "Соперник"
+      },
+      "openSlot": "Свободно",
+      "empty": "Испытаний пока нет.",
+      "status": {
+        "active": "Активно",
+        "pending": "Ожидает",
+        "resolved": "Завершено",
+        "completed": "Выполнено",
+        "failed": "Провалено",
+        "scheduled": "Запланировано",
+        "declined": "Отклонено",
+        "expired": "Истекло",
+        "finished": "Завершено",
+        "unknown": "Неизвестно"
+      },
+      "invitations": "Invitations",
+      "invitationAccepted": "Invitation accepted",
+      "invitationDeclined": "Invitation declined",
+      "noInvitations": "No active invitations",
+      "pvp": "PvP",
+      "coop": "Co-op",
+      "objective": "Objective",
+      "objectives": {
+        "steps": "Steps",
+        "workouts": "Workouts",
+        "quests_completed": "Completed quests"
+      }
+    },
+    "events": {
+      "title": "События",
+      "subtitle": "Игровые события, сезоны и ограниченные активности",
+      "fields": {
+        "type": "Тип",
+        "status": "Статус"
+      },
+      "empty": "Активных событий пока нет.",
+      "status": {
+        "scheduled": "Запланировано",
+        "active": "Активно",
+        "completed": "Завершено",
+        "unknown": "Неизвестно"
+      },
+      "types": {
+        "world_boss": "Мировой босс",
+        "season": "Сезон",
+        "limited": "Ограниченное событие",
+        "limited_time": "Событие по времени",
+        "beta": "Бета",
+        "unknown": "Неизвестно"
+      }
+    },
+    "settings": {
+      "title": "Настройки",
+      "subtitle": "Параметры приложения, безопасность и синхронизация",
+      "general": "Общие",
+      "notificationsTitle": "Уведомления",
+      "notificationsDescription": "Включайте и выключайте push-уведомления на этом устройстве.",
+      "themeTitle": "Тема",
+      "themeDescription": "Предпочтение темы уже сохраняется. Полное переключение по всему интерфейсу потребует отдельного UI-рефактора.",
+      "themeDark": "Тёмная",
+      "themeLight": "Светлая",
+      "security": "Безопасность",
+      "currentPassword": "Текущий пароль",
+      "newPassword": "Новый пароль",
+      "changePassword": "Сменить пароль",
+      "passwordChangedTitle": "Пароль обновлён",
+      "passwordChangedDescription": "Ваш пароль успешно изменён.",
+      "passwordChangeFailed": "Не удалось сменить пароль",
+      "recoverySection": "Восстановление аккаунта",
+      "recoveryEmail": "Email для восстановления",
+      "restoreAccount": "Восстановить аккаунт",
+      "recoveryTitle": "Запрос принят",
+      "recoveryDescription": "Если аккаунт существует, инструкция по восстановлению будет отправлена на email.",
+      "recoveryFailed": "Не удалось отправить запрос",
+      "syncSection": "Синхронизация",
+      "online": "Соединение: онлайн",
+      "offline": "Соединение: оффлайн",
+      "pendingActions": "Отложенные действия: {count}",
+      "logout": "Выйти"
+    },
+    "help": {
+      "title": "Помощь",
+      "subtitle": "Короткие ответы про синхронизацию, уведомления и безопасность аккаунта",
+      "tipOffline": "Если сервер недоступен, приложение использует кэш и сохраняет поддерживаемые действия локально.",
+      "tipSync": "Как только соединение восстановится, очередь действий автоматически отправится на сервер.",
+      "tipNotifications": "Push-уведомления можно отключить для этого устройства в Настройках.",
+      "tipSecurity": "Смена пароля и восстановление аккаунта доступны на странице Настроек."
+    },
+    "about": {
+      "title": "О приложении",
+      "subtitle": "Что такое RPG Life и какие системы уже встроены в приложение",
+      "appName": "RPG Life",
+      "description": "RPG Life превращает повседневные действия в прогрессию персонажа, квесты, награды и долгосрочные RPG-системы.",
+      "version": "Версия",
+      "whatsInside": "Что внутри",
+      "features": "Ежедневные квесты, боссы, инвентарь, достижения, мультиплеерные челленджи, оффлайн-очередь и синхронизированные уведомления."
+    },
+    "crafting": {
+      "title": "Crafting",
+      "subtitle": "Resources, recipes, and upgrades for your base gear.",
+      "backToShop": "Back to shop",
+      "resources": "Resources",
+      "recipes": "Recipes",
+      "upgrades": "Upgrades",
+      "createdTitle": "Crafted",
+      "upgradedTitle": "Upgraded",
+      "craftUnavailable": "Crafting unavailable",
+      "upgradeUnavailable": "Upgrade unavailable",
+      "unknownError": "Unknown error",
+      "resultLabel": "Result",
+      "requiredLevel": "Required level",
+      "ingredients": "Ingredients",
+      "craft": "Craft",
+      "upgrade": "Upgrade",
+      "upgradeCost": "Cost",
+      "noUpgrades": "No items available for upgrade yet."
+    }
+  },
+  "common": {
+    "loading": "Загрузка данных...",
+    "loadingInterface": "Загрузка интерфейса и данных",
+    "item": "Предмет",
+    "quest": "Квест",
+    "error": "Ошибка",
+    "success": "Успешно",
+    "warning": "Внимание",
+    "info": "Информация",
+    "ok": "ОК",
+    "cancel": "Отменить",
+    "close": "Закрыть",
+    "delete": "Удалить",
+    "confirm": "Подтвердить",
+    "yes": "Да",
+    "no": "Нет",
+    "gold": "золото",
+    "xp": "XP",
+    "hp": "HP",
+    "mana": "мана",
+    "crystals": "gold",
+    "levelShort": "??.",
+    "equipped": "Надето",
+    "noBonuses": "Без бонусов",
+    "price": "Цена",
+    "participants": "Участники",
+    "itemStatsTitle": "Характеристики предмета",
+    "noItemBonuses": "У предмета нет дополнительных бонусов.",
+    "comparisonUnavailable": "Сравнение недоступно.",
+    "comparisonColumns": {
+      "stat": "Stat",
+      "current": "Current",
+      "next": "New",
+      "delta": "Delta"
+    }
+  },
+  "settings": {
+    "language": "Язык интерфейса",
+    "languageSwitcher": {
+      "ru": "Русский",
+      "en": "English"
+    }
+  },
+  "game": {
+    "reward": {
+      "questCompleted": "Квест завершен",
+      "itemObtained": "Получен предмет:",
+      "itemAdded": "Предмет добавлен в инвентарь.",
+      "achievementUnlocked": "Достижение:",
+      "statsIncreased": "Характеристики героя выросли.",
+      "newReward": "Новая награда",
+      "questCompletedDescription": "+{xp} XP и +{gold} золота",
+      "achievementTitle": "Достижение: {title}",
+      "achievementDescription": "Новая цель выполнена.",
+      "itemObtainedTitle": "Получен предмет: {title}",
+      "levelUpTitle": "Новый уровень: {level}"
+    },
+    "stats": {
+      "xpBonus": "XP",
+      "critChance": "крит",
+      "goldBonus": "золота",
+      "health": "HP",
+      "armor": "защиты",
+      "critPercent": "шанс",
+      "loot": "добычи"
+    },
+    "class": {
+      "warrior": "Воин",
+      "archer": "Лучник",
+      "mage": "Маг",
+      "hero": "Герой"
+    },
+    "slots": {
+      "head": "Голова",
+      "neck": "Шея",
+      "shoulders": "Плечи",
+      "chest": "Броня",
+      "hands": "Руки",
+      "legs": "Ноги",
+      "feet": "Ступни",
+      "ring1": "Кольцо 1",
+      "ring2": "Кольцо 2",
+      "trinket1": "Аксессуар 1",
+      "trinket2": "Аксессуар 2",
+      "mainHand": "Оружие",
+      "offHand": "Левая рука",
+      "ranged": "Дальний бой"
+    },
+    "objectives": {
+      "steps": "Шаги",
+      "questsCompleted": "Задания",
+      "xpGained": "Опыт",
+      "workouts": "Тренировки",
+      "activity": "Активность"
+    },
+    "rarities": {
+      "common": "Обычный",
+      "uncommon": "Необычный",
+      "rare": "Редкий",
+      "epic": "Эпический",
+      "legendary": "Легендарный",
+      "immortal": "Бессмертный"
+    },
+    "gender": {
+      "male": "Мужской",
+      "female": "Женский",
+      "nonbinary": "Небинарный",
+      "unspecified": "Не указан"
+    },
+    "itemStats": {
+      "strength": "Сила",
+      "agility": "Ловкость",
+      "intellect": "Интеллект",
+      "stamina": "Выносливость",
+      "armor": "Броня",
+      "damage": "Урон",
+      "crit": "Крит",
+      "luck": "Удача",
+      "health": "Здоровье",
+      "xpBonus": "Бонус XP",
+      "goldBonus": "Бонус золота"
+    }
+  },
+  "errors": {
+    "unknownError": "Неизвестная ошибка",
+    "networkError": "Ошибка сети",
+    "serverError": "Ошибка сервера",
+    "validationError": "Ошибка валидации",
+    "api": {
+      "networkUnavailable": "Сеть недоступна. Проверьте API URL: {url}",
+      "invalidServerResponse": "Сервер вернул некорректный ответ: {status}",
+      "requestFailed": "Запрос не выполнен"
+    }
+  },
+  "shop": {
+    "itemPurchased": "Item purchased: {itemName}",
+    "purchaseFailed": "Purchase failed",
+    "confirmPurchase": "Confirm purchase",
+    "confirmPurchaseMessage": "Are you sure you want to buy {itemName} for {price}?",
+    "show": "Show:",
+    "availableOnly": "Available",
+    "allItems": "All",
+    "sortBy": "Sort by:",
+    "byLevel": "By level",
+    "byRarity": "By rarity"
+  },
+  "inventory": {
+    "openItem": "Открыть предмет",
+    "openItemFailed": "Не удалось открыть предмет",
+    "equipItem": "Экипировать",
+    "equipItemFailed": "Не удалось экипировать предмет",
+    "unequipItem": "Снять предмет",
+    "unequipItemFailed": "Не удалось снять предмет",
+    "confirmUnequip": "Подтвердите снятие",
+    "confirmUnequipMessage": "Вы уверены, что хотите снять этот предмет?",
+    "sellItem": "Продать",
+    "sellItemFailed": "Не удалось продать предмет",
+    "confirmSell": "Подтвердите продажу",
+    "confirmSellMessage": "Вы уверены, что хотите продать этот предмет за {price}?",
+    "slot": "Слот",
+    "rarity": "Редкость",
+    "sellPrice": "Цена продажи"
+  },
+  "character": {
+    "stats": {
+      "strength": "Сила",
+      "agility": "Ловкость",
+      "intellect": "Интеллект",
+      "stamina": "Выносливость",
+      "armor": "Броня",
+      "crit": "Крит",
+      "luck": "Удача",
+      "mana": "Мана"
+    }
+  },
+  "multiplayer": {
+    "coopQuestCreated": "Co-op квест создан",
+    "coopQuestFailed": "Не удалось создать co-op",
+    "invitationSent": "Приглашение отправлено",
+    "duelCreated": "Дуэль создана",
+    "duelFailed": "Не удалось создать дуэль"
+  },
+  "home": {
+    "dailyRewardClaimed": "Ежедневная награда получена"
+  },
+  "login": {
+    "loginError": "Ошибка входа",
+    "apiSaved": "API сохранен",
+    "apiWillBeUsed": "Будет использоваться адрес:\n{url}",
+    "apiReset": "API сброшен",
+    "apiResetMessage": "Адрес API возвращен к значению по умолчанию.",
+    "connectionWorks": "Связь работает",
+    "connectionStatus": "Статус: {status}",
+    "connectionFailed": "Связь не работает"
+  },
+  "offline": {
+    "queuedActionTitle": "Сохранено для синхронизации",
+    "questQueuedDescription": "Завершение квеста сохранено локально и будет отправлено после восстановления соединения.",
+    "dailyBonusQueuedDescription": "Ежедневная награда поставлена в очередь и будет получена автоматически после восстановления сети.",
+    "offlineTitle": "Оффлайн-режим",
+    "offlineDescription": "Соединение недоступно. Отложенных действий: {count}.",
+    "syncingTitle": "Идёт синхронизация",
+    "syncingDescription": "Отправляем на сервер отложенные действия: {count}.",
+    "syncInProgress": "Синхронизация выполняется.",
+    "syncCompleteTitle": "Синхронизация завершена",
+    "syncCompleteDescription": "Успешно обработано действий: {count}."
+  }
+}

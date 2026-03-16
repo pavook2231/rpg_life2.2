@@ -1,0 +1,57 @@
+{
+  "expo": {
+    "name": "RPG Life",
+    "slug": "rpg-life",
+    "version": "1.0.1-beta.1",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "scheme": "rpglife",
+    "icon": "./android/app/src/main/res/drawable-xxxhdpi/splashscreen_logo.png",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "splash": {
+      "image": "./android/app/src/main/res/drawable-xxxhdpi/splashscreen_logo.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#111827"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.rpglife.mobile",
+      "buildNumber": "2"
+    },
+    "android": {
+      "package": "com.rpglife.mobile",
+      "versionCode": 2,
+      "adaptiveIcon": {
+        "foregroundImage": "./android/app/src/main/res/drawable-xxxhdpi/splashscreen_logo.png",
+        "backgroundColor": "#111827"
+      },
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ],
+          "data": [
+            {
+              "scheme": "rpglife"
+            }
+          ]
+        }
+      ]
+    },
+    "extra": {
+      "apiBaseUrl": "http://10.0.2.2:8000/api/v1",
+      "eas": {
+        "projectId": "161a1a7b-1136-4d34-88e1-3e0e6297c89c"
+      }
+    },
+    "plugins": [
+      "expo-secure-store",
+      "expo-notifications"
+    ],
+    "owner": "ponka22311"
+  }
+}
