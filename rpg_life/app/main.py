@@ -54,6 +54,10 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    @app.get("/", include_in_schema=False)
+    async def root():
+        return {"status": "ok"}
+
     @app.get("/healthz", include_in_schema=False)
     async def healthz():
         return {"status": "ok", "service": "RPG Life API", "env": APP_ENV, "version": app.version}
