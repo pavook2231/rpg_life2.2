@@ -1,0 +1,79 @@
+param(
+  [string]$ProjectRoot = (Split-Path -Parent $PSScriptRoot),
+  [string]$PostgresPassword = "rpg_password_123",
+  [string]$CorsOrigins = "http://192.168.0.174:8000,http://192.168.0.175:8000,http://localhost:8000"
+)
+
+$ErrorActionPreference = "Stop"
+
+$envPath = Join-Path $ProjectRoot ".env"
+$secretKey = [guid]::NewGuid().ToString("N") + [guid]::NewGuid().ToString("N")
+
+$content = @"
+APP_ENV=production
+
+SECRET_KEY=$secretKey
+ALGORITHM=HS256
+ACCESS_TOKEN_EXPIRE_DAYS=7
+
+POSTGRES_DB=rpg_life
+POSTGRES_USER=rpg_user
+POSTGRES_PASSWORD=$PostgresPassword
+
+DATABASE_URL=postgresql+psycopg2://rpg_user:$PostgresPassword@postgres:5432/rpg_life
+ALLOW_SQLITE_FALLBACK=false
+
+REDIS_URL=redis://redis:6379/0
+CELERY_BROKER_URL=redis://redis:6379/0
+CELERY_RESULT_BACKEND=redis://redis:6379/0
+
+USE_INTERNAL_SCHEDULER=false
+AUTO_CREATE_TABLES=false
+
+CACHE_TTL_LEADERBOARD=60
+CACHE_TTL_PROFILE=45
+CACHE_TTL_INVENTORY=30
+CACHE_TTL_EVENTS=60
+
+COOKIE_SECURE=false
+COOKIE_SAMESITE=lax
+
+CORS_ALLOWED_ORIGINS=$CorsOrigins
+CORS_ALLOW_ORIGIN_REGEX=
+
+ENABLE_ACCOUNT_RECOVERY=false
+ENABLE_PUSH_DISPATCH=false
+
+SOCIAL_AUTH_REDIRECT_SCHEME=rpglife
+EXPO_PUBLIC_SOCIAL_AUTH_REDIRECT_SCHEME=rpglife
+
+OPENAI_API_KEY=
+OPENAI_BASE_URL=https://api.openai.com/v1
+OPENAI_QUEST_REWRITE_ENABLED=true
+OPENAI_QUEST_MODEL=gpt-5-mini
+OPENAI_QUEST_TIMEOUT_SECONDS=20
+QUEST_TEXT_PROVIDER=free
+OLLAMA_BASE_URL=http://127.0.0.1:11434/v1
+OLLAMA_API_KEY=
+OLLAMA_QUEST_MODEL=qwen2.5:7b-instruct
+OLLAMA_QUEST_TIMEOUT_SECONDS=20
+
+GOOGLE_AUTH_ENABLED=true
+GOOGLE_AUTH_MOBILE_CLIENT_ID=723557656382-3k94tuoejci6bovt2i9hn0qd728cl4so.apps.googleusercontent.com
+GOOGLE_AUTH_CLIENT_SECRET=
+EXPO_PUBLIC_GOOGLE_AUTH_CLIENT_ID=723557656382-3k94tuoejci6bovt2i9hn0qd728cl4so.apps.googleusercontent.com
+
+YANDEX_AUTH_ENABLED=false
+YANDEX_AUTH_MOBILE_CLIENT_ID=
+YANDEX_AUTH_CLIENT_SECRET=
+
+TELEGRAM_AUTH_ENABLED=false
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_BOT_USERNAME=
+TELEGRAM_AUTH_MAX_AGE_SECONDS=900
+
+EXPO_PUSH_ACCESS_TOKEN=
+"@
+
+Set-Content -Path $envPath -Value $content -Encoding ASCII
+Write-Host "Created $envPath"
