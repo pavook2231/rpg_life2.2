@@ -64,7 +64,7 @@ function getRuntimeDevApiBaseUrl() {
   return `http://${host}:8000/api/v1`;
 }
 
-export const DEFAULT_API_BASE_URL = getRuntimeDevApiBaseUrl() ?? extra.apiBaseUrl ?? "https://192.168.0.174:8000";
+export const DEFAULT_API_BASE_URL = getRuntimeDevApiBaseUrl() ?? extra.apiBaseUrl ?? "http://192.168.0.174:8000";
 
 export function isDeprecatedLocalApiBaseUrl(value: string | null | undefined) {
   if (!value) {
