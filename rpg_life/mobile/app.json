@@ -53,7 +53,7 @@
       ]
     },
     "extra": {
-      "apiBaseUrl": "https://six-moose-push.loca.lt/api/v1",
+      "apiBaseUrl": "https://192.168.0.174:8000",
       "eas": {
         "projectId": "161a1a7b-1136-4d34-88e1-3e0e6297c89c"
       }
