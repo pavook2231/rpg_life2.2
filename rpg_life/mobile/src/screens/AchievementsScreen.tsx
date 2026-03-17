@@ -4,13 +4,17 @@ import { Animated, Pressable, StyleSheet, Text, View } from "react-native";
 import { type AchievementItem } from "../api/game";
 import { Screen } from "../components/Screen";
 import { useGame } from "../context/GameContext";
+import { useTranslation } from "../context/LocalizationContext";
 import { getRarityColor, normalizeDisplayText } from "../lib/gameUi";
 import { Card, Modal, radii, useThemeColors, useThemeMode } from "../ui";
 
-function statusLabel(status: AchievementItem["status"]) {
-  if (status === "earned") return "Получено";
-  if (status === "available") return "Доступно";
-  return "Заблокировано";
+function statusLabel(
+  t: (key: string, params?: Record<string, string | number>) => string,
+  status: AchievementItem["status"],
+) {
+  if (status === "earned") return t("screens.achievements.quick.status.earned");
+  if (status === "available") return t("screens.achievements.quick.status.available");
+  return t("screens.achievements.quick.status.locked");
 }
 
 function themeSurface(theme?: string) {
@@ -25,10 +29,12 @@ function AchievementVisualTile({
   achievement,
   onPress,
   styles,
+  t,
 }: {
   achievement: AchievementItem;
   onPress: () => void;
   styles: ReturnType<typeof createStyles>;
+  t: (key: string, params?: Record<string, string | number>) => string;
 }) {
   const pulse = useRef(new Animated.Value(0.5)).current;
   const surface = themeSurface(achievement.theme);
@@ -61,14 +67,17 @@ function AchievementVisualTile({
             {normalizeDisplayText(achievement.title)}
           </Text>
           <Text style={[styles.tierBadge, { color: borderColor }]}>
-            {statusLabel(achievement.status)}
+            {statusLabel(t, achievement.status)}
           </Text>
         </View>
         <Text style={styles.tileDescription} numberOfLines={2}>
           {normalizeDisplayText(achievement.description)}
         </Text>
         <Text style={styles.rewardText}>
-          +{achievement.xp_reward} XP • +{achievement.crystal_reward} золота
+          {t("screens.achievements.quick.rewardLine", {
+            xp: achievement.xp_reward,
+            gold: achievement.crystal_reward,
+          })}
         </Text>
       </View>
     </Pressable>
@@ -77,6 +86,7 @@ function AchievementVisualTile({
 
 export function AchievementsScreen() {
   const { achievements } = useGame();
+  const t = useTranslation();
   const colors = useThemeColors();
   const themeMode = useThemeMode();
   const styles = useMemo(() => createStyles(colors, themeMode), [colors, themeMode]);
@@ -99,11 +109,11 @@ export function AchievementsScreen() {
   const totalCount = sortedAchievements.length;
 
   return (
-    <Screen title="Достижения" subtitle="Собирай награды, сундуки и титулы за реальный прогресс">
+    <Screen title={t("screens.achievements.title")} subtitle={t("screens.achievements.quick.subtitle")}>
       <Card tone="accent">
-        <Text style={styles.summaryTitle}>Прогресс достижений</Text>
+        <Text style={styles.summaryTitle}>{t("screens.achievements.quick.progressTitle")}</Text>
         <Text style={styles.summaryMeta}>
-          {earnedCount}/{totalCount} получено
+          {t("screens.achievements.quick.progressMeta", { earned: earnedCount, total: totalCount })}
         </Text>
       </Card>
 
@@ -114,6 +124,7 @@ export function AchievementsScreen() {
             achievement={achievement}
             onPress={() => setSelectedAchievement(achievement)}
             styles={styles}
+            t={t}
           />
         ))}
       </View>
@@ -123,7 +134,11 @@ export function AchievementsScreen() {
         title={normalizeDisplayText(selectedAchievement?.title ?? "")}
         subtitle={
           selectedAchievement
-            ? `${statusLabel(selectedAchievement.status)} • +${selectedAchievement.xp_reward} XP • +${selectedAchievement.crystal_reward} золота`
+            ? t("screens.achievements.quick.modalRewardLine", {
+                status: statusLabel(t, selectedAchievement.status),
+                xp: selectedAchievement.xp_reward,
+                gold: selectedAchievement.crystal_reward,
+              })
             : undefined
         }
         description={normalizeDisplayText(selectedAchievement?.description ?? "")}
@@ -132,9 +147,21 @@ export function AchievementsScreen() {
         {selectedAchievement ? (
           <View style={styles.modalBody}>
             <Text style={styles.modalIcon}>{selectedAchievement.icon}</Text>
-            <Text style={styles.modalLine}>Тема: {selectedAchievement.theme ?? "self"}</Text>
-            <Text style={styles.modalLine}>Редкость: {selectedAchievement.tier ?? "common"}</Text>
-            {selectedAchievement.earned_at ? <Text style={styles.modalLine}>Дата: {selectedAchievement.earned_at}</Text> : null}
+            <Text style={styles.modalLine}>
+              {t("screens.achievements.quick.themeLine", {
+                value: selectedAchievement.theme ?? t("screens.achievements.quick.themeFallback"),
+              })}
+            </Text>
+            <Text style={styles.modalLine}>
+              {t("screens.achievements.quick.tierLine", {
+                value: selectedAchievement.tier ?? t("screens.achievements.quick.tierFallback"),
+              })}
+            </Text>
+            {selectedAchievement.earned_at ? (
+              <Text style={styles.modalLine}>
+                {t("screens.achievements.quick.dateLine", { value: selectedAchievement.earned_at })}
+              </Text>
+            ) : null}
           </View>
         ) : null}
       </Modal>
@@ -144,83 +171,83 @@ export function AchievementsScreen() {
 
 function createStyles(colors: ReturnType<typeof useThemeColors>, themeMode: ReturnType<typeof useThemeMode>) {
   return StyleSheet.create({
-  summaryTitle: {
-    color: colors.text,
-    fontSize: 17,
-    fontWeight: "900",
-  },
-  summaryMeta: {
-    color: colors.textMuted,
-    fontSize: 13,
-    fontWeight: "700",
-  },
-  list: {
-    gap: 9,
-  },
-  tile: {
-    borderRadius: radii.lg,
-    borderWidth: 1,
-    overflow: "hidden",
-    backgroundColor: themeMode === "light" ? "rgba(255,250,240,0.92)" : "rgba(8,13,22,0.92)",
-  },
-  tileBanner: {
-    height: 88,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  tileGlow: {
-    position: "absolute",
-    width: 170,
-    height: 170,
-    borderRadius: 85,
-  },
-  tileIcon: {
-    fontSize: 42,
-  },
-  tileBody: {
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    gap: 5,
-  },
-  tileHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    gap: 8,
-    alignItems: "flex-start",
-  },
-  tileTitle: {
-    color: colors.text,
-    fontSize: 15,
-    fontWeight: "900",
-    flex: 1,
-  },
-  tierBadge: {
-    fontSize: 11,
-    fontWeight: "900",
-    textTransform: "uppercase",
-  },
-  tileDescription: {
-    color: colors.textMuted,
-    fontSize: 12,
-    lineHeight: 17,
-  },
-  rewardText: {
-    color: themeMode === "light" ? "#7a4b12" : "#fde68a",
-    fontSize: 12,
-    fontWeight: "800",
-  },
-  modalBody: {
-    alignItems: "center",
-    gap: 8,
-    paddingVertical: 8,
-  },
-  modalIcon: {
-    fontSize: 56,
-  },
-  modalLine: {
-    color: colors.textMuted,
-    fontSize: 13,
-    fontWeight: "700",
-  },
+    summaryTitle: {
+      color: colors.text,
+      fontSize: 17,
+      fontWeight: "900",
+    },
+    summaryMeta: {
+      color: colors.textMuted,
+      fontSize: 13,
+      fontWeight: "700",
+    },
+    list: {
+      gap: 9,
+    },
+    tile: {
+      borderRadius: radii.lg,
+      borderWidth: 1,
+      overflow: "hidden",
+      backgroundColor: themeMode === "light" ? "rgba(255,250,240,0.92)" : "rgba(8,13,22,0.92)",
+    },
+    tileBanner: {
+      height: 88,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    tileGlow: {
+      position: "absolute",
+      width: 170,
+      height: 170,
+      borderRadius: 85,
+    },
+    tileIcon: {
+      fontSize: 42,
+    },
+    tileBody: {
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      gap: 5,
+    },
+    tileHeader: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      gap: 8,
+      alignItems: "flex-start",
+    },
+    tileTitle: {
+      color: colors.text,
+      fontSize: 15,
+      fontWeight: "900",
+      flex: 1,
+    },
+    tierBadge: {
+      fontSize: 11,
+      fontWeight: "900",
+      textTransform: "uppercase",
+    },
+    tileDescription: {
+      color: colors.textMuted,
+      fontSize: 12,
+      lineHeight: 17,
+    },
+    rewardText: {
+      color: themeMode === "light" ? "#7a4b12" : "#fde68a",
+      fontSize: 12,
+      fontWeight: "800",
+    },
+    modalBody: {
+      alignItems: "center",
+      gap: 8,
+      paddingVertical: 8,
+    },
+    modalIcon: {
+      fontSize: 56,
+    },
+    modalLine: {
+      color: colors.textMuted,
+      fontSize: 13,
+      fontWeight: "700",
+    },
   });
 }

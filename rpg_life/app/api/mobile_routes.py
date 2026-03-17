@@ -12,7 +12,6 @@ from app.models import User
 from app.schemas import (
     ChallengeCreateSchema,
     ChangePasswordSchema,
-    CraftRecipeSchema,
     InventoryActionSchema,
     LoginRequestSchema,
     SocialAuthExchangeSchema,
@@ -25,10 +24,10 @@ from app.schemas import (
     RefreshTokenSchema,
     ProfileUpdateSchema,
     ShopPurchaseSchema,
-    UpgradeItemSchema,
+    StepsSyncSchema,
     UserCreate,
 )
-from app.services import auth_service, character_service, crafting_service, mobile_service, multiplayer_service, notification_service, quest_service
+from app.services import auth_service, character_service, mobile_service, multiplayer_service, notification_service, quest_service
 
 router = APIRouter(prefix="/api/v1", tags=["РњРѕР±РёР»СЊРЅРѕРµ API"])
 
@@ -153,6 +152,15 @@ async def unregister_notification_device(
 @router.get("/character/profile", summary="РџСЂРѕС„РёР»СЊ РїРµСЂСЃРѕРЅР°Р¶Р°")
 async def get_character_profile(db: Session = Depends(get_db), current_user: User = Depends(auth.get_current_user)):
     return success_response(mobile_service.get_character_profile(db, current_user))
+
+
+@router.post("/steps/sync", summary="Sync today's steps from device")
+async def sync_steps(
+    payload: StepsSyncSchema,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(auth.get_current_user),
+):
+    return success_response(mobile_service.sync_today_steps(db, current_user, payload.steps, payload.day_started_at, payload.source))
 
 
 @router.get("/quests/daily", summary="Р•Р¶РµРґРЅРµРІРЅС‹Рµ Р·Р°РґР°РЅРёСЏ")
@@ -299,29 +307,6 @@ async def get_shop(db: Session = Depends(get_db), current_user: User = Depends(a
 @router.post("/shop/refresh", summary="Refresh shop")
 async def refresh_shop(db: Session = Depends(get_db), current_user: User = Depends(auth.get_current_user)):
     return success_response(mobile_service.refresh_shop(db, current_user), "Shop refreshed")
-
-
-@router.get("/crafting", summary="Crafting overview")
-async def get_crafting_overview(db: Session = Depends(get_db), current_user: User = Depends(auth.get_current_user)):
-    return success_response(crafting_service.get_crafting_overview(db, current_user))
-
-
-@router.post("/crafting/craft", summary="Craft recipe")
-async def craft_recipe(
-    payload: CraftRecipeSchema,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(auth.get_current_user),
-):
-    return success_response(crafting_service.craft_recipe(db, current_user, payload.recipe_id), "Item crafted")
-
-
-@router.post("/crafting/upgrade", summary="Upgrade item")
-async def upgrade_crafted_item(
-    payload: UpgradeItemSchema,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(auth.get_current_user),
-):
-    return success_response(crafting_service.upgrade_item(db, current_user, payload.inventory_id), "Item upgraded")
 
 
 @router.post("/shop/buy", summary="РљСѓРїРёС‚СЊ РїСЂРµРґРјРµС‚")

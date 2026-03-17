@@ -1,4 +1,5 @@
 import React, { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { Platform } from "react-native";
 
 import {
   type DailyLimitsPayload,
@@ -8,13 +9,15 @@ import {
   fetchInventory,
   fetchProfile,
   fetchRewardsSummary,
+  syncTodaySteps,
   type AchievementItem,
   type CharacterProfilePayload,
   type HealthStatePayload,
   type InventoryItem,
   type ProfilePayload,
 } from "../api/game";
-import { triggerHaptic } from "../lib/haptics";
+import { getTodaySteps, watchTodaySteps } from "../lib/pedometer";
+import { getLastPedometerSyncState, saveLastPedometerSyncState } from "../storage/pedometerSyncStorage";
 import { useAuth } from "./AuthContext";
 import { useFeedback } from "./FeedbackContext";
 import { useOffline } from "./OfflineContext";
@@ -34,6 +37,7 @@ type QuestAchievement = {
   title?: string | null;
   description?: string | null;
   icon?: string | null;
+  tier?: "common" | "uncommon" | "rare" | "epic" | "legendary" | null;
 };
 
 type QuestCompletionResult = {
@@ -52,7 +56,6 @@ type QuestCompletionResult = {
   loot_drop?: QuestRewardItem | null;
   daily_chest?: { item?: QuestRewardItem | null } | null;
   chest_item?: { item?: QuestRewardItem | null } | null;
-  crafting_reward?: QuestRewardItem | null;
   level_ups?: unknown[] | null;
 };
 
@@ -91,6 +94,14 @@ async function fetchAllInventory(): Promise<InventoryItem[]> {
   return items;
 }
 
+function localDayKey(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function localDayStartedAt(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0).toISOString();
+}
+
 export function GameProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const [profile, setProfile] = useState<ProfilePayload | null>(null);
@@ -100,7 +111,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
   const [rewards, setRewards] = useState<RewardsSummary | null>(null);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const { playSound, pushToast } = useFeedback();
+  const { pushToast } = useFeedback();
   const { isOnline } = useOffline();
   const t = useTranslation();
 
@@ -153,9 +164,64 @@ export function GameProvider({ children }: { children: ReactNode }) {
     }
   }, [isOnline, refreshGame, user]);
 
+  useEffect(() => {
+    if (!user) {
+      return;
+    }
+
+    let cancelled = false;
+    let stopWatch: (() => void) | null = null;
+
+    async function syncDeviceStepsIfNeeded(steps: number) {
+      if (!isOnline) {
+        return;
+      }
+
+      const normalizedSteps = Math.max(0, Math.floor(Number(steps || 0)));
+      const now = new Date();
+      const dayKey = localDayKey(now);
+      const lastState = await getLastPedometerSyncState();
+      const lastSteps = lastState?.dayKey === dayKey ? lastState.steps : 0;
+
+      if (normalizedSteps <= lastSteps || normalizedSteps - lastSteps < 20) {
+        return;
+      }
+
+      // Determine source based on platform
+      const source = Platform.OS === "ios" ? "healthkit" : Platform.OS === "android" ? "googlefit" : "pedometer";
+
+      try {
+        await syncTodaySteps(normalizedSteps, localDayStartedAt(now), source);
+        await saveLastPedometerSyncState({ dayKey, steps: normalizedSteps });
+      } catch {
+        // Best-effort sync; step tracking should not break the app when network/api is unavailable.
+      }
+    }
+
+    async function startStepSync() {
+      const initialSteps = await getTodaySteps();
+      if (!cancelled && initialSteps != null) {
+        await syncDeviceStepsIfNeeded(initialSteps);
+      }
+
+      stopWatch = await watchTodaySteps((steps) => {
+        if (!cancelled) {
+          void syncDeviceStepsIfNeeded(steps);
+        }
+      });
+    }
+
+    startStepSync().catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+      stopWatch?.();
+    };
+  }, [isOnline, user]);
+
   const applyQuestResult = useCallback(async (result: QuestCompletionResult) => {
     if (result?.queued) {
-      pushToast({
+      await pushToast({
         title: t("offline.queuedActionTitle"),
         description: t("offline.questQueuedDescription"),
         icon: "cloud-upload-outline",
@@ -164,8 +230,6 @@ export function GameProvider({ children }: { children: ReactNode }) {
       await refreshGame();
       return;
     }
-
-    await playSound("quest");
 
     setHero((current) =>
       current
@@ -180,7 +244,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
         : current,
     );
 
-    pushToast({
+    await pushToast({
       title: t("game.reward.questCompleted"),
       description: t("game.reward.questCompletedDescription", {
         xp: result?.xp_earned ?? 0,
@@ -188,10 +252,10 @@ export function GameProvider({ children }: { children: ReactNode }) {
       }),
       icon: "sword-cross",
       tone: "success",
-    });
+    }, { sound: "quest" });
 
     if (result?.reward_penalty_applied && result.health?.is_wounded) {
-      pushToast({
+      await pushToast({
         title: "Награда снижена",
         description: `Из-за ранения награда уменьшена на ${Math.round(result.health.reward_penalty_percent ?? 0)}%. Осталось ${result.health.penalty_quests_remaining} квестов до восстановления.`,
         icon: "heart-broken",
@@ -200,7 +264,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
     }
 
     if (!hero?.health?.is_wounded && result?.health?.is_wounded) {
-      pushToast({
+      await pushToast({
         title: "Герой ранен",
         description: "После долгого отсутствия персонаж получил урон. Следи за HP на главной странице.",
         icon: "alert-circle",
@@ -209,7 +273,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
     }
 
     if (hero?.health?.is_wounded && result?.health && !result.health.is_wounded) {
-      pushToast({
+      await pushToast({
         title: "Герой восстановился",
         description: "Штраф к наградам снят. Можно снова фармить без потерь.",
         icon: "heart-plus",
@@ -219,14 +283,18 @@ export function GameProvider({ children }: { children: ReactNode }) {
 
     if (Array.isArray(result?.achievements)) {
       for (const achievement of result.achievements) {
-        await playSound("achievement");
-        pushToast({
+        const isMajorAchievement = achievement.tier === "epic" || achievement.tier === "legendary";
+        await pushToast({
           title: t("game.reward.achievementTitle", {
             title: achievement.title ?? t("game.reward.newReward"),
           }),
           description: achievement.description ?? t("game.reward.achievementDescription"),
           icon: achievement.icon ?? "trophy",
           tone: "reward",
+        }, {
+          sound: "achievement",
+          durationMs: isMajorAchievement ? 3400 : 2800,
+          variant: isMajorAchievement ? "achievementLegendary" : "achievement",
         });
       }
     }
@@ -235,35 +303,28 @@ export function GameProvider({ children }: { children: ReactNode }) {
       (reward): reward is QuestRewardItem => Boolean(reward),
     );
 
-    if (result?.crafting_reward) {
-      rewardItems.push(result.crafting_reward);
-    }
-
     for (const reward of rewardItems) {
-      await playSound("item");
-      pushToast({
+      await pushToast({
         title: t("game.reward.itemObtainedTitle", {
           title: reward.name ?? t("game.reward.newReward"),
         }),
         description: reward.description ?? t("game.reward.itemAdded"),
         icon: reward.icon ?? "treasure-chest",
         tone: "reward",
-      });
+      }, { sound: "item" });
     }
 
     if (Array.isArray(result?.level_ups) && result.level_ups.length > 0) {
-      await playSound("level");
-      await triggerHaptic("level");
-      pushToast({
+      await pushToast({
         title: t("game.reward.levelUpTitle", { level: result.new_level ?? 0 }),
         description: t("game.reward.statsIncreased"),
         icon: "chevron-triple-up",
         tone: "reward",
-      });
+      }, { sound: "level", haptic: "level", durationMs: 2500 });
     }
 
     await refreshGame();
-  }, [hero?.health?.is_wounded, playSound, pushToast, refreshGame, t]);
+  }, [hero?.health?.is_wounded, pushToast, refreshGame, t]);
 
   const value = useMemo(
     () => ({

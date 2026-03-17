@@ -81,6 +81,7 @@ export function CharacterScreen() {
   const bagCellWidth = Math.max((width - 56 - bagGap * (bagColumns - 1)) / bagColumns, 56);
 
   const bagItems = useMemo(() => inventory.filter((entry) => !entry.is_equipped), [inventory]);
+  const equippedCount = equipment?.equipment?.length ?? 0;
   const layeredEquipment = useMemo(() => mapEquipmentToLayers(equipment?.equipment ?? []), [equipment?.equipment]);
   const equipmentMap = useMemo(() => {
     const map = new Map<string, any>();
@@ -182,7 +183,7 @@ export function CharacterScreen() {
       const detail = await fetchInventoryItemDetail(inventoryId);
       setSelectedItem(detail);
     } catch (error) {
-      pushToast({
+      await pushToast({
         title: "Не удалось открыть предмет",
         description: error instanceof Error ? error.message : t("screens.character.errors.unknownError"),
         icon: "alert-circle",
@@ -252,7 +253,7 @@ export function CharacterScreen() {
         description: "Сундук открыт, предмет добавлен в сумку.",
         icon: reward.item.icon ?? "treasure-chest",
         tone: "reward",
-      });
+      }, { sound: "item" });
     } catch (error) {
       pushToast({
         title: "Не удалось открыть сундук",
@@ -265,7 +266,7 @@ export function CharacterScreen() {
 
   function renderSlot(slot: string) {
     const entry = equipmentMap.get(slot);
-    const surface = entry ? getRaritySurface(entry.item.rarity) : null;
+    const surface = entry ? getRaritySurface(entry.item.rarity, themeMode) : null;
 
     return (
       <Pressable
@@ -276,8 +277,8 @@ export function CharacterScreen() {
           {
             width: slotSize,
             height: slotSize,
-            backgroundColor: entry ? surface?.background : "rgba(8,14,24,0.8)",
-            borderColor: entry ? surface?.border : "rgba(255,255,255,0.12)",
+            backgroundColor: entry ? surface?.background : themeMode === "light" ? "rgba(251,247,239,0.95)" : "rgba(8,14,24,0.8)",
+            borderColor: entry ? surface?.border : themeMode === "light" ? "rgba(214,199,170,0.9)" : "rgba(255,255,255,0.12)",
           },
         ]}
       >
@@ -303,7 +304,32 @@ export function CharacterScreen() {
   }
 
   return (
-    <Screen title={t("screens.character.title")} subtitle={t("screens.character.subtitle")} showHeader={false}>
+    <Screen
+      title={t("screens.character.title")}
+      subtitle={t("screens.character.subtitle")}
+      showHeader={false}
+      contentTopOffset={10}
+    >
+      <Card style={styles.introCard} animated={false}>
+        <View style={styles.introHeader}>
+          <View style={styles.introCopy}>
+            <Text style={styles.eyebrow}>CHARACTER</Text>
+            <Text style={styles.screenTitle}>{t("screens.character.title")}</Text>
+            <Text style={styles.screenSubtitle}>{t("screens.character.subtitle")}</Text>
+          </View>
+          <View style={styles.introMeta}>
+            <View style={styles.introChip}>
+              <Text style={styles.introChipLabel}>Экипировано</Text>
+              <Text style={styles.introChipValue}>{equippedCount}</Text>
+            </View>
+            <View style={styles.introChip}>
+              <Text style={styles.introChipLabel}>Сумка</Text>
+              <Text style={styles.introChipValue}>{bagItems.length}</Text>
+            </View>
+          </View>
+        </View>
+      </Card>
+
       <ProfileHeroCard
         name={hero?.name ?? equipment?.class_info?.display_name ?? "Герой"}
         heroClass={hero?.class ?? equipment?.class_info?.class_name}
@@ -414,7 +440,7 @@ export function CharacterScreen() {
         </View>
         <View style={styles.bagGrid}>
           {bagItems.map((item, index) => {
-            const surface = getRaritySurface(item.item.rarity);
+            const surface = getRaritySurface(item.item.rarity, themeMode);
             return (
               <Pressable
                 key={`${item.id}-${index}`}
@@ -492,6 +518,58 @@ export function CharacterScreen() {
 
 function createStyles(colors: ReturnType<typeof useThemeColors>, themeMode: ReturnType<typeof useThemeMode>) {
   return StyleSheet.create({
+  introCard: {
+    backgroundColor: themeMode === "light" ? "rgba(255,250,240,0.86)" : "rgba(11,17,31,0.66)",
+  },
+  introHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 12,
+  },
+  introCopy: {
+    flex: 1,
+    gap: 4,
+  },
+  eyebrow: {
+    color: colors.primary,
+    fontSize: 11,
+    fontWeight: "900",
+    letterSpacing: 1.2,
+  },
+  screenTitle: {
+    color: colors.text,
+    fontSize: 28,
+    fontWeight: "900",
+  },
+  screenSubtitle: {
+    color: colors.textMuted,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  introMeta: {
+    width: 112,
+    gap: 8,
+  },
+  introChip: {
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: themeMode === "light" ? "rgba(183,121,31,0.24)" : "rgba(255,255,255,0.08)",
+    backgroundColor: themeMode === "light" ? "rgba(251,247,239,0.92)" : "rgba(8,13,23,0.72)",
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    gap: 2,
+  },
+  introChipLabel: {
+    color: colors.textMuted,
+    fontSize: 10,
+    fontWeight: "700",
+  },
+  introChipValue: {
+    color: colors.text,
+    fontSize: 16,
+    fontWeight: "900",
+  },
   healthHeaderRow: {
     flexDirection: "row",
     alignItems: "flex-start",

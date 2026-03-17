@@ -38,6 +38,15 @@ export type HealthStatePayload = {
   last_health_decay_at?: string | null;
 };
 
+export type StepsSyncPayload = {
+  steps: number;
+  previous_steps: number;
+  delta: number;
+  synced_at?: string | null;
+  day_started_at: string;
+  source: string;
+};
+
 export type DailyLimitsPayload = {
   completed_total: number;
   total_cap: number;
@@ -239,16 +248,6 @@ export type ChallengeItem = {
   role?: string;
 };
 
-export type EventItem = {
-  id: number;
-  event_type: string;
-  title: string;
-  description: string;
-  status: string;
-  start_time?: string | null;
-  end_time?: string | null;
-};
-
 export type AchievementItem = {
   id: string;
   title: string;
@@ -283,6 +282,7 @@ export type QuestCompletionPayload = {
     title?: string | null;
     description?: string | null;
     icon?: string | null;
+    tier?: "common" | "uncommon" | "rare" | "epic" | "legendary" | null;
   }> | null;
   loot_drop?: {
     name?: string | null;
@@ -302,11 +302,6 @@ export type QuestCompletionPayload = {
       description?: string | null;
       icon?: string | null;
     } | null;
-  } | null;
-  crafting_reward?: {
-    name?: string | null;
-    description?: string | null;
-    icon?: string | null;
   } | null;
   level_ups?: unknown[] | null;
 };
@@ -495,6 +490,17 @@ export function fetchProfile() {
   return fetchWithCache("profile", () => apiRequest<ProfilePayload>("/profile"));
 }
 
+export function syncTodaySteps(steps: number, dayStartedAt: string, source = "device") {
+  return apiRequest<StepsSyncPayload>("/steps/sync", {
+    method: "POST",
+    body: JSON.stringify({
+      steps,
+      day_started_at: dayStartedAt,
+      source,
+    }),
+  });
+}
+
 export function fetchCharacterProfile() {
   return fetchWithCache("character-profile", () => apiRequest<CharacterProfilePayload>("/character/profile"));
 }
@@ -593,15 +599,6 @@ export function completeQuest(questId: number) {
               },
             }
           : payload.chest_item,
-        crafting_reward: payload.crafting_reward
-          ? {
-              ...payload.crafting_reward,
-              ...(mapChestRewardToCatalog({
-                name: payload.crafting_reward.name ?? "Награда",
-                icon: payload.crafting_reward.icon ?? undefined,
-              }) as { name: string; icon?: string; rarity?: string }),
-            }
-          : payload.crafting_reward,
       };
     },
     { type: "complete_quest", payload: { questId } },
@@ -791,18 +788,6 @@ export function fetchLeaderboard(metric = "level", scope = "global", page = 1, l
       total_pages: number;
     };
   }>(`/leaderboard?metric=${metric}&scope=${scope}&page=${page}&limit=${limit}`));
-}
-
-export function fetchEvents(page = 1, limit = 20) {
-  return fetchWithCache(`events:${page}:${limit}`, () => apiRequest<{
-    items: EventItem[];
-    pagination: {
-      page: number;
-      page_size: number;
-      total_items: number;
-      total_pages: number;
-    };
-  }>(`/events?page=${page}&limit=${limit}`));
 }
 
 export function fetchRewardsSummary() {

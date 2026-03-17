@@ -9,7 +9,7 @@ from app.chest_items import CHEST_PRESENTATION, ensure_chest_item, get_chest_cat
 from app.core.cache import cache_delete_prefix, cache_get_json, cache_set_json
 from app.core.dates import utc_now
 from app.equipment_service import EquipmentError, equip_item, get_equipped_inventory_ids, get_equipped_items, recalculate_total_stats, unequip_item
-from app.item_service import buy_item, sell_item
+from app.item_service import EquipmentError as ItemEquipmentError, buy_item, sell_item
 from app.items_data import ITEMS
 from app.models import CharacterEquipment, Item, User, UserClassProgress, UserInventory
 from app.text_utils import normalize_item_model, normalize_nested_strings
@@ -401,7 +401,7 @@ def unequip_inventory_item(db: Session, current_user: User, inventory_id: int) -
 def sell_inventory_item(db: Session, current_user: User, inventory_id: int) -> dict:
     try:
         result = sell_item(db, current_user.id, inventory_id)
-    except EquipmentError as exc:
+    except (EquipmentError, ItemEquipmentError) as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     if not result:
         raise HTTPException(status_code=404, detail="Предмет не найден")

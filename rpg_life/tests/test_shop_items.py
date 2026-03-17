@@ -1,4 +1,5 @@
 import pytest
+from fastapi import HTTPException
 
 from app.beta_content import CHEST_CATALOG
 from app.models import User, UserClassProgress, UserInventory
@@ -124,4 +125,47 @@ def test_inventory_chest_opens_without_second_purchase_charge(db_session, monkey
     assert result["item"]["name"]
     assert progress.crystals == crystals_after_purchase
     assert db_session.query(UserInventory).filter(UserInventory.user_id == user.id, UserInventory.id == purchase_result["inventory_id"]).count() == 0
+
+
+def test_shop_item_can_be_equipped_unequipped_and_sold(db_session) -> None:
+    user = _create_user(db_session, "shop-equip-sell@example.com")
+    progress = _create_progress(db_session, user.id, crystals=500)
+
+    context = inventory_service.get_shop_context(db_session, user)
+    armor = next(item for item in context["items"] if item.get("id") == 1101)
+
+    result = inventory_service.buy_shop_item(db_session, user, armor["id"])
+    assert result["ok"] is True
+    assert result["kind"] == "item"
+
+    inventory_item = (
+        db_session.query(UserInventory)
+        .filter(UserInventory.user_id == user.id)
+        .order_by(UserInventory.id.desc())
+        .first()
+    )
+    assert inventory_item is not None
+
+    equip_result = inventory_service.equip_inventory_item(db_session, user, inventory_item.id, "chest", progress.id)
+    detail_after_equip = inventory_service.get_inventory_item_detail(db_session, user, inventory_item.id)
+
+    assert equip_result["ok"] is True
+    assert detail_after_equip["is_equipped"] is True
+
+    with pytest.raises(HTTPException) as sell_exc:
+        inventory_service.sell_inventory_item(db_session, user, inventory_item.id)
+
+    assert sell_exc.value.status_code == 400
+
+    unequip_result = inventory_service.unequip_inventory_item(db_session, user, inventory_item.id)
+    detail_after_unequip = inventory_service.get_inventory_item_detail(db_session, user, inventory_item.id)
+
+    assert unequip_result["ok"] is True
+    assert detail_after_unequip["is_equipped"] is False
+
+    sell_result = inventory_service.sell_inventory_item(db_session, user, inventory_item.id)
+
+    assert sell_result["ok"] is True
+    assert sell_result["sell_price"] > 0
+    assert db_session.query(UserInventory).filter(UserInventory.id == inventory_item.id).count() == 0
 

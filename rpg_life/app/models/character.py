@@ -54,6 +54,7 @@ class DailySteps(Base):
     xp_earned = Column(Integer, default=0)
     crystals_earned = Column(Integer, default=0)
     is_reward_claimed = Column(Boolean, default=False)
+    source = Column(String, default="manual")  # manual, healthkit, googlefit, pedometer, etc.
 
     user = relationship("User", back_populates="steps_records")
     class_prog = relationship("UserClassProgress", back_populates="steps_records")

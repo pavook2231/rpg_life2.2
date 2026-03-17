@@ -317,6 +317,7 @@ def test_level_up_grants_chest_to_inventory_instead_of_direct_loot(db_session, m
     assert result["chest_item"] is not None
     assert result["chest_item"]["item"].type == "chest"
     assert result["chest_item"]["inventory_id"] is not None
+    assert result["loot_drop"] is None
     assert chest_rows
 
 
@@ -369,3 +370,28 @@ def test_daily_chest_grants_chest_to_inventory_after_all_daily_quests(db_session
     assert result["daily_chest"]["chest_name"] == "COMMON_CHEST"
     assert result["daily_chest"]["inventory_id"] is not None
     assert chest_rows
+
+
+def test_achievement_completion_does_not_attach_crafting_resource_reward(db_session, monkeypatch: pytest.MonkeyPatch) -> None:
+    user = _create_user(db_session, "achievement-no-item@example.com")
+    progress = _create_progress(db_session, user.id)
+    quest = Quest(
+        user_id=user.id,
+        class_progress_id=progress.id,
+        title="First quest",
+        description="",
+        xp_reward=25,
+        crystal_reward=5,
+        is_custom=False,
+        is_completed=False,
+        quest_type="daily",
+        created_at=utc_now(),
+    )
+    db_session.add(quest)
+    db_session.commit()
+
+    result = crud.complete_quest(db_session, user.id, quest.id)
+
+    assert result is not None
+    assert result["achievements"]
+    assert "crafting_reward" not in result

@@ -1,7 +1,7 @@
 from pydantic import BaseModel, field_validator
 
 
-SUPPORTED_SOCIAL_PROVIDERS = {"google", "telegram", "yandex"}
+SUPPORTED_SOCIAL_PROVIDERS = {"google", "telegram"}
 
 
 class SocialAuthProviderSchema(BaseModel):

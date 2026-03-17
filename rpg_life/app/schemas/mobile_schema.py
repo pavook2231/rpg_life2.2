@@ -26,3 +26,16 @@ class ChangePasswordSchema(BaseModel):
 
 class RecoverAccountSchema(BaseModel):
     email: EmailStr
+
+
+class StepsSyncSchema(BaseModel):
+    steps: int
+    day_started_at: str | None = None
+    source: str = "device"
+
+    @field_validator("steps")
+    @classmethod
+    def validate_steps(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError("Steps must be non-negative")
+        return value

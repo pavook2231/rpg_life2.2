@@ -1,7 +1,7 @@
 """add refresh token sessions
 
 Revision ID: 20260316_000010
-Revises: 20260314_000009
+Revises: 650a7a8f2763
 Create Date: 2026-03-16 12:30:00
 """
 
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 revision: str = "20260316_000010"
-down_revision: Union[str, None] = "20260314_000009"
+down_revision: Union[str, None] = "650a7a8f2763"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

@@ -434,14 +434,6 @@ def get_social_auth_providers() -> list[dict]:
             "configured": bool(TELEGRAM_BOT_TOKEN and TELEGRAM_BOT_USERNAME),
             "mobile_client_id": TELEGRAM_BOT_USERNAME or None,
         },
-        {
-            "id": "yandex",
-            "label": "Yandex",
-            "kind": "oauth",
-            "enabled": YANDEX_AUTH_ENABLED,
-            "configured": bool(YANDEX_AUTH_MOBILE_CLIENT_ID and YANDEX_AUTH_CLIENT_SECRET),
-            "mobile_client_id": YANDEX_AUTH_MOBILE_CLIENT_ID or None,
-        },
     ]
 
 

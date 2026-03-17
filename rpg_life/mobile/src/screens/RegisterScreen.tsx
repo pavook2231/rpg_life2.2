@@ -23,58 +23,68 @@ type Props = {
 
 type GoalCard = GoalTemplatePayload["goals"][number];
 
-const FALLBACK_GOALS: GoalCard[] = [
-  {
-    id: "weight_health",
-    title: "Похудение и здоровье",
-    description: "Снижение веса, улучшение формы и здоровые привычки.",
-    result_example: "Минус 4-8 кг, стабильная активность.",
-    icon: "run-fast",
-    accent_color: "#2ecc71",
-    recommended_term_months: 6,
-    is_primary: true,
-  },
-  {
-    id: "new_profession",
-    title: "Освоение новой профессии",
-    description: "Переход в новую сферу через обучение и практику.",
-    result_example: "Портфолио и первые реальные проекты.",
-    icon: "briefcase-variant-outline",
-    accent_color: "#8b5cf6",
-    recommended_term_months: 9,
-    is_primary: true,
-  },
-  {
-    id: "financial_growth",
-    title: "Финансовый рост",
-    description: "Рост дохода, контроль расходов и накопления.",
-    result_example: "Подушка безопасности и новый уровень дохода.",
-    icon: "cash-multiple",
-    accent_color: "#f1c40f",
-    recommended_term_months: 6,
-    is_primary: true,
-  },
-  {
-    id: "discipline_productivity",
-    title: "Самодисциплина и продуктивность",
-    description: "Фокус, режим дня и стабильное выполнение задач.",
-    result_example: "Больше завершенных задач без выгорания.",
-    icon: "timer-check-outline",
-    accent_color: "#3498db",
-    recommended_term_months: 3,
-    is_primary: true,
-  },
-  {
-    id: "personal_development",
-    title: "Личностное развитие",
-    description: "Чтение, мышление, навыки и осознанность.",
-    result_example: "Новые привычки и уверенный рост навыков.",
-    icon: "brain",
-    accent_color: "#f39c12",
-    recommended_term_months: 6,
-    is_primary: true,
-  },
-];
+function isValidEmail(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
+function hasLetter(value: string) {
+  return /[A-Za-zА-Яа-я]/.test(value);
+}
+
+function getFallbackGoals(t: (key: string, params?: Record<string, string | number>) => string): GoalCard[] {
+  return [
+    {
+      id: "weight_health",
+      title: t("goals.fallback.weight_health.title"),
+      description: t("goals.fallback.weight_health.description"),
+      result_example: t("goals.fallback.weight_health.result"),
+      icon: "run-fast",
+      accent_color: "#2ecc71",
+      recommended_term_months: 6,
+      is_primary: true,
+    },
+    {
+      id: "new_profession",
+      title: t("goals.fallback.new_profession.title"),
+      description: t("goals.fallback.new_profession.description"),
+      result_example: t("goals.fallback.new_profession.result"),
+      icon: "briefcase-variant-outline",
+      accent_color: "#8b5cf6",
+      recommended_term_months: 9,
+      is_primary: true,
+    },
+    {
+      id: "financial_growth",
+      title: t("goals.fallback.financial_growth.title"),
+      description: t("goals.fallback.financial_growth.description"),
+      result_example: t("goals.fallback.financial_growth.result"),
+      icon: "cash-multiple",
+      accent_color: "#f1c40f",
+      recommended_term_months: 6,
+      is_primary: true,
+    },
+    {
+      id: "discipline_productivity",
+      title: t("goals.fallback.discipline_productivity.title"),
+      description: t("goals.fallback.discipline_productivity.description"),
+      result_example: t("goals.fallback.discipline_productivity.result"),
+      icon: "timer-check-outline",
+      accent_color: "#3498db",
+      recommended_term_months: 3,
+      is_primary: true,
+    },
+    {
+      id: "personal_development",
+      title: t("goals.fallback.personal_development.title"),
+      description: t("goals.fallback.personal_development.description"),
+      result_example: t("goals.fallback.personal_development.result"),
+      icon: "brain",
+      accent_color: "#f39c12",
+      recommended_term_months: 6,
+      is_primary: true,
+    },
+  ];
+}
 
 const GOAL_TERMS = [3, 6, 9] as const;
 
@@ -84,6 +94,7 @@ export function RegisterScreen({ onBackToLogin }: Props) {
   const colors = useThemeColors();
   const themeMode = useThemeMode();
   const styles = useMemo(() => createStyles(colors, themeMode), [colors, themeMode]);
+  const fallbackGoals = useMemo(() => getFallbackGoals(t), [t]);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -92,7 +103,7 @@ export function RegisterScreen({ onBackToLogin }: Props) {
   const [gender, setGender] = useState<"male" | "female" | "nonbinary">("male");
   const [goalType, setGoalType] = useState<string>("personal_development");
   const [goalTermMonths, setGoalTermMonths] = useState<number>(6);
-  const [goals, setGoals] = useState<GoalCard[]>(FALLBACK_GOALS);
+  const [goals, setGoals] = useState<GoalCard[]>(fallbackGoals);
 
   const classes = [
     { id: "warrior" as const, icon: "sword-cross", color: "#7f1d1d" },
@@ -103,13 +114,18 @@ export function RegisterScreen({ onBackToLogin }: Props) {
   const genders = [{ id: "male" as const }, { id: "female" as const }, { id: "nonbinary" as const }];
 
   useEffect(() => {
+    setGoals((current) => (current.length ? current : fallbackGoals));
+  }, [fallbackGoals]);
+
+  useEffect(() => {
     let mounted = true;
     fetchGoalTemplates()
       .then((payload) => {
         if (!mounted || !payload.goals?.length) {
           return;
         }
-        setGoals(payload.goals.filter((goal) => goal.is_primary).length ? payload.goals.filter((goal) => goal.is_primary) : payload.goals);
+        const primaryGoals = payload.goals.filter((goal) => goal.is_primary);
+        setGoals(primaryGoals.length ? primaryGoals : payload.goals);
       })
       .catch(() => undefined);
     return () => {
@@ -118,8 +134,8 @@ export function RegisterScreen({ onBackToLogin }: Props) {
   }, []);
 
   const selectedGoal = useMemo(
-    () => goals.find((goal) => goal.id === goalType) ?? goals[0] ?? FALLBACK_GOALS[0],
-    [goalType, goals],
+    () => goals.find((goal) => goal.id === goalType) ?? goals[0] ?? fallbackGoals[0],
+    [fallbackGoals, goalType, goals],
   );
 
   useEffect(() => {
@@ -132,12 +148,40 @@ export function RegisterScreen({ onBackToLogin }: Props) {
   }, [goalType, goals, selectedGoal]);
 
   async function handleRegister() {
+    const trimmedEmail = email.trim();
+    const trimmedName = name.trim();
+    const numericBirthYear = Number(birthYear);
+    const currentYear = new Date().getFullYear();
+
+    if (!isValidEmail(trimmedEmail)) {
+      Alert.alert(t("screens.register.errors.registrationFailed"), t("screens.register.quick.invalidEmail"));
+      return;
+    }
+
+    if (password.length < 8 || !hasLetter(password)) {
+      Alert.alert(t("screens.register.errors.registrationFailed"), t("screens.register.quick.invalidPassword"));
+      return;
+    }
+
+    if (trimmedName.length < 2 || /^\d/.test(trimmedName)) {
+      Alert.alert(t("screens.register.errors.registrationFailed"), t("screens.register.quick.invalidName"));
+      return;
+    }
+
+    if (!Number.isInteger(numericBirthYear) || numericBirthYear < 1950 || numericBirthYear > currentYear - 10) {
+      Alert.alert(
+        t("screens.register.errors.registrationFailed"),
+        t("screens.register.quick.invalidBirthYear", { year: currentYear - 10 }),
+      );
+      return;
+    }
+
     try {
       await signUp({
-        email: email.trim(),
+        email: trimmedEmail,
         password,
-        name: name.trim(),
-        birthYear: Number(birthYear),
+        name: trimmedName,
+        birthYear: numericBirthYear,
         gender,
         characterClass,
         goalType,
@@ -199,7 +243,7 @@ export function RegisterScreen({ onBackToLogin }: Props) {
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Жизненная цель</Text>
+          <Text style={styles.sectionTitle}>{t("screens.register.quick.goalSectionTitle")}</Text>
           {goals.map((goal) => {
             const isActive = goalType === goal.id;
             return (
@@ -221,14 +265,14 @@ export function RegisterScreen({ onBackToLogin }: Props) {
                   <View style={styles.goalCopy}>
                     <Text style={styles.goalTitle}>{goal.title}</Text>
                     <Text style={styles.goalDescription}>{goal.description}</Text>
-                    <Text style={styles.goalResult}>Пример: {goal.result_example}</Text>
+                    <Text style={styles.goalResult}>{t("screens.register.quick.resultExample", { result: goal.result_example })}</Text>
                   </View>
                 </View>
               </Pressable>
             );
           })}
 
-          <Text style={[styles.sectionTitle, styles.subSectionTitle]}>Срок цели</Text>
+          <Text style={[styles.sectionTitle, styles.subSectionTitle]}>{t("screens.register.quick.goalTermTitle")}</Text>
           <View style={styles.termRow}>
             {GOAL_TERMS.map((months) => {
               const active = goalTermMonths === months;
@@ -238,13 +282,17 @@ export function RegisterScreen({ onBackToLogin }: Props) {
                   style={[styles.termChip, active ? styles.termChipActive : null]}
                   onPress={() => setGoalTermMonths(months)}
                 >
-                  <Text style={[styles.termText, active ? styles.termTextActive : null]}>{months} мес.</Text>
+                  <Text style={[styles.termText, active ? styles.termTextActive : null]}>
+                    {t("screens.register.quick.goalTermMonths", { months })}
+                  </Text>
                 </Pressable>
               );
             })}
           </View>
           {selectedGoal ? (
-            <Text style={styles.goalHint}>Рекомендуемый срок для цели: {selectedGoal.recommended_term_months} мес.</Text>
+            <Text style={styles.goalHint}>
+              {t("screens.register.quick.goalTermHint", { months: selectedGoal.recommended_term_months })}
+            </Text>
           ) : null}
         </View>
 
@@ -310,192 +358,192 @@ export function RegisterScreen({ onBackToLogin }: Props) {
 
 function createStyles(colors: ReturnType<typeof useThemeColors>, themeMode: ReturnType<typeof useThemeMode>) {
   return StyleSheet.create({
-  container: {
-    gap: 16,
-  },
-  modeRow: {
-    flexDirection: "row",
-    backgroundColor: colors.card,
-    borderRadius: 18,
-    padding: 6,
-    borderWidth: 1,
-    borderColor: colors.border,
-    gap: 6,
-  },
-  modeTab: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 12,
-    alignItems: "center",
-  },
-  modeTabActive: {
-    backgroundColor: colors.xp,
-  },
-  modeText: {
-    color: colors.textDim,
-    fontWeight: "700",
-  },
-  modeTextActive: {
-    color: colors.text,
-  },
-  card: {
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 22,
-    padding: 18,
-    gap: 14,
-  },
-  sectionTitle: {
-    color: colors.text,
-    fontSize: 18,
-    fontWeight: "800",
-  },
-  subSectionTitle: {
-    marginTop: 6,
-  },
-  input: {
-    backgroundColor: colors.backgroundInset,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    color: colors.text,
-  },
-  goalCard: {
-    borderRadius: 16,
-    borderWidth: 1,
-    padding: 12,
-  },
-  goalHeader: {
-    flexDirection: "row",
-    gap: 10,
-  },
-  goalIconWrap: {
-    width: 36,
-    height: 36,
-    borderRadius: 12,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1,
-    backgroundColor: colors.backgroundInset,
-  },
-  goalCopy: {
-    flex: 1,
-    gap: 2,
-  },
-  goalTitle: {
-    color: colors.text,
-    fontWeight: "800",
-    fontSize: 15,
-  },
-  goalDescription: {
-    color: colors.textMuted,
-    fontSize: 12,
-    lineHeight: 16,
-  },
-  goalResult: {
-    color: "#93c5fd",
-    fontSize: 11,
-    lineHeight: 15,
-  },
-  termRow: {
-    flexDirection: "row",
-    gap: 8,
-  },
-  termChip: {
-    flex: 1,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.backgroundInset,
-    paddingVertical: 10,
-    alignItems: "center",
-  },
-  termChipActive: {
-    borderColor: colors.primary,
-    backgroundColor: themeMode === "light" ? "#f2dfbf" : "#3f2a08",
-  },
-  termText: {
-    color: colors.textMuted,
-    fontWeight: "700",
-  },
-  termTextActive: {
-    color: themeMode === "light" ? "#7a4b12" : "#fde68a",
-  },
-  goalHint: {
-    color: colors.textDim,
-    fontSize: 12,
-  },
-  classList: {
-    gap: 12,
-  },
-  classCard: {
-    borderRadius: 18,
-    borderWidth: 1,
-    padding: 16,
-    gap: 6,
-  },
-  classIcon: {
-    width: 32,
-    height: 32,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  classTitle: {
-    color: colors.text,
-    fontWeight: "800",
-    fontSize: 18,
-  },
-  classBonus: {
-    color: colors.textMuted,
-    lineHeight: 18,
-  },
-  genderRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-  },
-  genderChip: {
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 999,
-    backgroundColor: colors.backgroundInset,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  genderChipActive: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
-  },
-  genderText: {
-    color: colors.textMuted,
-    fontWeight: "700",
-  },
-  genderTextActive: {
-    color: "#451a03",
-  },
-  primaryButton: {
-    backgroundColor: colors.primary,
-    paddingVertical: 16,
-    borderRadius: 16,
-    alignItems: "center",
-  },
-  primaryText: {
-    color: "#451a03",
-    fontWeight: "800",
-    fontSize: 16,
-  },
-  linkButton: {
-    backgroundColor: colors.cardMuted,
-    paddingVertical: 14,
-    borderRadius: 16,
-    alignItems: "center",
-  },
-  link: {
-    color: colors.xp,
-    fontWeight: "700",
-  },
+    container: {
+      gap: 16,
+    },
+    modeRow: {
+      flexDirection: "row",
+      backgroundColor: colors.card,
+      borderRadius: 18,
+      padding: 6,
+      borderWidth: 1,
+      borderColor: colors.border,
+      gap: 6,
+    },
+    modeTab: {
+      flex: 1,
+      paddingVertical: 12,
+      borderRadius: 12,
+      alignItems: "center",
+    },
+    modeTabActive: {
+      backgroundColor: colors.xp,
+    },
+    modeText: {
+      color: colors.textDim,
+      fontWeight: "700",
+    },
+    modeTextActive: {
+      color: colors.text,
+    },
+    card: {
+      backgroundColor: colors.card,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 22,
+      padding: 18,
+      gap: 14,
+    },
+    sectionTitle: {
+      color: colors.text,
+      fontSize: 18,
+      fontWeight: "800",
+    },
+    subSectionTitle: {
+      marginTop: 6,
+    },
+    input: {
+      backgroundColor: colors.backgroundInset,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 14,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+      color: colors.text,
+    },
+    goalCard: {
+      borderRadius: 16,
+      borderWidth: 1,
+      padding: 12,
+    },
+    goalHeader: {
+      flexDirection: "row",
+      gap: 10,
+    },
+    goalIconWrap: {
+      width: 36,
+      height: 36,
+      borderRadius: 12,
+      alignItems: "center",
+      justifyContent: "center",
+      borderWidth: 1,
+      backgroundColor: colors.backgroundInset,
+    },
+    goalCopy: {
+      flex: 1,
+      gap: 2,
+    },
+    goalTitle: {
+      color: colors.text,
+      fontWeight: "800",
+      fontSize: 15,
+    },
+    goalDescription: {
+      color: colors.textMuted,
+      fontSize: 12,
+      lineHeight: 16,
+    },
+    goalResult: {
+      color: "#93c5fd",
+      fontSize: 11,
+      lineHeight: 15,
+    },
+    termRow: {
+      flexDirection: "row",
+      gap: 8,
+    },
+    termChip: {
+      flex: 1,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.backgroundInset,
+      paddingVertical: 10,
+      alignItems: "center",
+    },
+    termChipActive: {
+      borderColor: colors.primary,
+      backgroundColor: themeMode === "light" ? "#f2dfbf" : "#3f2a08",
+    },
+    termText: {
+      color: colors.textMuted,
+      fontWeight: "700",
+    },
+    termTextActive: {
+      color: themeMode === "light" ? "#7a4b12" : "#fde68a",
+    },
+    goalHint: {
+      color: colors.textDim,
+      fontSize: 12,
+    },
+    classList: {
+      gap: 12,
+    },
+    classCard: {
+      borderRadius: 18,
+      borderWidth: 1,
+      padding: 16,
+      gap: 6,
+    },
+    classIcon: {
+      width: 32,
+      height: 32,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    classTitle: {
+      color: colors.text,
+      fontWeight: "800",
+      fontSize: 18,
+    },
+    classBonus: {
+      color: colors.textMuted,
+      lineHeight: 18,
+    },
+    genderRow: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 8,
+    },
+    genderChip: {
+      paddingHorizontal: 14,
+      paddingVertical: 10,
+      borderRadius: 999,
+      backgroundColor: colors.backgroundInset,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    genderChipActive: {
+      backgroundColor: colors.primary,
+      borderColor: colors.primary,
+    },
+    genderText: {
+      color: colors.textMuted,
+      fontWeight: "700",
+    },
+    genderTextActive: {
+      color: "#451a03",
+    },
+    primaryButton: {
+      backgroundColor: colors.primary,
+      paddingVertical: 16,
+      borderRadius: 16,
+      alignItems: "center",
+    },
+    primaryText: {
+      color: "#451a03",
+      fontWeight: "800",
+      fontSize: 16,
+    },
+    linkButton: {
+      backgroundColor: colors.cardMuted,
+      paddingVertical: 14,
+      borderRadius: 16,
+      alignItems: "center",
+    },
+    link: {
+      color: colors.xp,
+      fontWeight: "700",
+    },
   });
 }

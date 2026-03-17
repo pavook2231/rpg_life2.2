@@ -35,6 +35,22 @@ export type CoopQuest = {
   end_time: string;
 };
 
+export type ChallengeInvitation = {
+  id: number;
+  sender_id: number;
+  receiver_id: number;
+  challenge_type: "pvp" | "coop";
+  title: string;
+  description: string;
+  objective_type: "steps" | "workouts" | "quests_completed";
+  goal: number;
+  reward_xp: number;
+  reward_crystals: number;
+  status: "pending" | "accepted" | "declined" | "expired";
+  created_at: string;
+  responded_at?: string | null;
+};
+
 export function fetchFriends(page = 1, pageSize = 30) {
   return apiRequest<{
     items: FriendItem[];
@@ -74,54 +90,6 @@ export function createCoopQuest(payload: {
     method: "POST",
     body: JSON.stringify(payload),
   });
-}
-
-export type ChallengeInvitation = {
-  id: number;
-  sender_id: number;
-  receiver_id: number;
-  challenge_type: "pvp" | "coop";
-  title: string;
-  description: string;
-  objective_type: string;
-  goal: number;
-  reward_xp: number;
-  reward_crystals: number;
-  status: "pending" | "accepted" | "declined" | "expired";
-  created_at: string;
-  responded_at?: string;
-  sender: {
-    id: number;
-    name: string;
-  };
-};
-
-export function sendChallengeInvitation(payload: {
-  receiver_id: number;
-  challenge_type: "pvp" | "coop";
-  title: string;
-  description?: string;
-  objective_type: "steps" | "workouts" | "quests_completed";
-  goal: number;
-  reward_xp?: number;
-  reward_crystals?: number;
-}) {
-  return apiRequest<{ message: string; invitation_id: number }>(`/social/challenges/invitations`, {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-}
-
-export function respondChallengeInvitation(invitationId: number, action: "accept" | "decline") {
-  return apiRequest<{ message: string; challenge_id?: number; coop_quest_id?: number }>(`/social/challenges/invitations/respond`, {
-    method: "POST",
-    body: JSON.stringify({ invitation_id: invitationId, action }),
-  });
-}
-
-export function fetchChallengeInvitations(status?: "pending" | "accepted" | "declined") {
-  const params = status ? `?status=${status}` : "";
-  return apiRequest<{ invitations: ChallengeInvitation[] }>(`/social/challenges/invitations${params}`);
 }
 
 export function fetchFriendsList(page = 1, pageSize = 30) {
@@ -183,4 +151,19 @@ export function fetchFriendsLeaderboard(metric: string = "level", page = 1, page
       total_pages: number;
     };
   }>(`/social/leaderboard/friends?metric=${encodeURIComponent(metric)}&page=${page}&page_size=${pageSize}`);
+}
+
+export function fetchChallengeInvitations(status?: ChallengeInvitation["status"]) {
+  const suffix = status ? `?status=${encodeURIComponent(status)}` : "";
+  return apiRequest<{ invitations: ChallengeInvitation[] }>(`/social/challenges/invitations${suffix}`);
+}
+
+export function respondToChallengeInvitation(invitationId: number, action: "accept" | "decline") {
+  return apiRequest<{ message: string; challenge_id?: number; coop_quest_id?: number }>(`/social/challenges/invitations/respond`, {
+    method: "POST",
+    body: JSON.stringify({
+      invitation_id: invitationId,
+      action,
+    }),
+  });
 }

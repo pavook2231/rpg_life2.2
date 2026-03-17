@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useState } from "react";
+import { useFocusEffect } from "@react-navigation/native";
+import React, { useCallback, useMemo, useState } from "react";
 import { Alert, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
 
 import { equipInventoryItem, fetchInventory, fetchInventoryItemDetail, openChest, sellInventoryItem, unequipInventoryItem, type InventoryItem } from "../api/game";
@@ -35,14 +36,16 @@ export function InventoryScreen() {
   const [search, setSearch] = useState("");
   const isPhoneLayout = width < 420;
 
-  async function loadInventory() {
+  const loadInventory = useCallback(async () => {
     const payload = await fetchInventory(1, 80);
     setItems(payload.items);
-  }
-
-  useEffect(() => {
-    loadInventory().catch(console.error);
   }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadInventory().catch(console.error);
+    }, [loadInventory]),
+  );
 
   const equippedCount = useMemo(() => items.filter((item) => item.is_equipped).length, [items]);
 
@@ -141,12 +144,12 @@ export function InventoryScreen() {
       setSelectedItem(null);
       await Promise.all([loadInventory(), refreshGame()]);
       setOpenedChestReward(result);
-      pushToast({
+      await pushToast({
         title: `Получен предмет: ${normalizeItemText(result.item.name)}`,
         description: "Сундук открыт и награда добавлена в инвентарь.",
         icon: result.item.icon ?? "treasure-chest",
         tone: "reward",
-      });
+      }, { sound: "item" });
     } catch (error) {
       pushToast({
         title: "Не удалось открыть сундук",

@@ -42,3 +42,21 @@ def test_create_coop_quest_scales_rewards_with_party_size(db_session) -> None:
     assert result["coop_quest"]["reward"]["xp"] == 234
     assert result["coop_quest"]["reward"]["crystals"] == 78
     assert len(result["coop_quest"]["participants"]) == 3
+
+
+def test_search_users_paginates_beyond_first_page(db_session) -> None:
+    seeker = _create_user(db_session, "search-owner@example.com")
+    matches = [_create_user(db_session, f"hero-search-{index}@example.com") for index in range(5)]
+
+    page_one = social_service.search_users(db_session, seeker, "hero-search", page=1, page_size=2)
+    page_two = social_service.search_users(db_session, seeker, "hero-search", page=2, page_size=2)
+    page_three = social_service.search_users(db_session, seeker, "hero-search", page=3, page_size=2)
+
+    found_ids = {item["id"] for item in page_one["items"] + page_two["items"] + page_three["items"]}
+
+    assert page_one["pagination"]["total_items"] == 5
+    assert page_one["pagination"]["total_pages"] == 3
+    assert len(page_one["items"]) == 2
+    assert len(page_two["items"]) == 2
+    assert len(page_three["items"]) == 1
+    assert found_ids == {user.id for user in matches}

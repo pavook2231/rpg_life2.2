@@ -335,7 +335,6 @@ def search_users(db: Session, current_user: User, query: str, page: int, page_si
                 func.lower(User.email).like(like),
             ),
         )
-        .limit(page_size * 2)  # Get more to filter
         .all()
     )
 
@@ -370,7 +369,7 @@ def search_users(db: Session, current_user: User, query: str, page: int, page_si
     # Sort by relevance (name match first)
     items.sort(key=lambda x: (x["name"].lower().find(query.lower()), x["name"]))
 
-    return _paginate(items[:page_size], page, page_size)
+    return _paginate(items, page, page_size)
 
 
 def create_pvp_challenge(db: Session, current_user: User, payload) -> dict:

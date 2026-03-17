@@ -16,6 +16,7 @@ from app.core.config import (
     CORS_ALLOW_ORIGIN_REGEX,
     IS_PRODUCTION,
     REDIS_URL,
+    RUN_STARTUP_DATA_REPAIR,
     USE_INTERNAL_SCHEDULER,
     validate_runtime_config,
 )
@@ -38,7 +39,8 @@ async def lifespan(app: FastAPI):
         bootstrap_beta_content(db)
     finally:
         db.close()
-    normalize_existing_strings()
+    if RUN_STARTUP_DATA_REPAIR:
+        normalize_existing_strings()
     if USE_INTERNAL_SCHEDULER:
         start_scheduler()
     yield

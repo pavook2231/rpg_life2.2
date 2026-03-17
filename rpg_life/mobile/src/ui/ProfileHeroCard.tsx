@@ -59,7 +59,7 @@ export function ProfileHeroCard({
     <View style={[styles.card, style]}>
       <View style={styles.topRow}>
         <View style={styles.identityWrap}>
-          <Avatar icon={getClassIcon(heroClass ?? "warrior")} size={76} />
+          <Avatar icon={getClassIcon(heroClass ?? "warrior")} size={99} />
           <View style={styles.copyWrap}>
             <Text style={styles.nameText}>{safeName}</Text>
             <Text style={styles.metaText}>{subtitle || classLabel}</Text>

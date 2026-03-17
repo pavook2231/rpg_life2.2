@@ -1,17 +1,31 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Alert, KeyboardAvoidingView, Linking, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import * as AuthSession from "expo-auth-session";
+import * as WebBrowser from "expo-web-browser";
 
 import { probeApiConnection } from "../api/auth";
 import { Screen } from "../components/Screen";
-import { DEFAULT_API_BASE_URL, normalizeApiBaseUrl } from "../config/env";
+import {
+  DEFAULT_API_BASE_URL,
+  GOOGLE_AUTH_CLIENT_ID,
+  SOCIAL_AUTH_REDIRECT_SCHEME,
+  isDeprecatedLocalApiBaseUrl,
+  normalizeApiBaseUrl,
+} from "../config/env";
 import { useAuth } from "../context/AuthContext";
 import { useTranslation } from "../context/LocalizationContext";
 import { clearApiBaseUrl, getStoredApiBaseUrl, saveApiBaseUrl } from "../storage/appConfigStorage";
 import { useThemeColors, useThemeMode } from "../ui";
 
+WebBrowser.maybeCompleteAuthSession();
+
 type Props = {
   onShowRegister: () => void;
 };
+
+function isValidEmail(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
 
 export function LoginScreen({ onShowRegister }: Props) {
   const { signIn, signInWithProvider, socialProviders, reloadSocialProviders, authFlowNotice, clearAuthFlowNotice } = useAuth();
@@ -25,37 +39,105 @@ export function LoginScreen({ onShowRegister }: Props) {
   const [isSavingApi, setIsSavingApi] = useState(false);
   const [isCheckingApi, setIsCheckingApi] = useState(false);
   const [isSocialLoading, setIsSocialLoading] = useState(false);
+  const [showApiTools, setShowApiTools] = useState(false);
+  const providerList = Array.isArray(socialProviders) ? socialProviders : [];
+  const googleProvider = providerList.find((entry) => entry.id === "google");
+  const googleClientId = googleProvider?.mobile_client_id || GOOGLE_AUTH_CLIENT_ID;
+  const googleRedirectUri = AuthSession.makeRedirectUri({
+    scheme: SOCIAL_AUTH_REDIRECT_SCHEME,
+    path: "auth/google",
+  });
+  const [googleRequest, googleResponse, promptGoogleAuth] = AuthSession.useAuthRequest(
+    {
+      clientId: googleClientId || "missing-google-client-id",
+      redirectUri: googleRedirectUri,
+      responseType: AuthSession.ResponseType.IdToken,
+      scopes: ["openid", "profile", "email"],
+      extraParams: {
+        nonce: String(Date.now()),
+      },
+    },
+    {
+      authorizationEndpoint: "https://accounts.google.com/o/oauth2/v2/auth",
+      tokenEndpoint: "https://oauth2.googleapis.com/token",
+      revocationEndpoint: "https://oauth2.googleapis.com/revoke",
+    },
+  );
 
   useEffect(() => {
     getStoredApiBaseUrl()
       .then((storedValue) => {
-        if (storedValue) {
+        if (
+          storedValue &&
+          !isDeprecatedLocalApiBaseUrl(storedValue) &&
+          normalizeApiBaseUrl(storedValue) === normalizeApiBaseUrl(DEFAULT_API_BASE_URL)
+        ) {
           setApiBaseUrl(storedValue);
+        } else {
+          setApiBaseUrl(DEFAULT_API_BASE_URL);
         }
       })
       .catch(console.error);
 
     reloadSocialProviders().catch(console.error);
-  }, []);
+  }, [reloadSocialProviders]);
 
   useEffect(() => {
     if (!authFlowNotice) {
       return;
     }
 
-    Alert.alert("Соцвход", authFlowNotice, [
+    Alert.alert(t("screens.login.quick.socialLoginTitle"), authFlowNotice, [
       {
-        text: "OK",
+        text: t("screens.login.quick.ok"),
         onPress: clearAuthFlowNotice,
       },
     ]);
-  }, [authFlowNotice, clearAuthFlowNotice]);
+  }, [authFlowNotice, clearAuthFlowNotice, t]);
+
+  useEffect(() => {
+    if (!googleResponse) {
+      return;
+    }
+
+    if (googleResponse.type !== "success") {
+      if (googleResponse.type === "error") {
+        Alert.alert(t("screens.login.quick.googleTitle"), googleResponse.error?.message || t("errors.unknownError"));
+      }
+      return;
+    }
+
+    const idToken = googleResponse.params?.id_token;
+    if (!idToken) {
+      Alert.alert(t("screens.login.quick.googleTitle"), t("screens.login.quick.googleMissingIdToken"));
+      setIsSocialLoading(false);
+      return;
+    }
+
+    signInWithProvider("google", { id_token: idToken })
+      .catch((error) => {
+        Alert.alert(t("screens.login.quick.socialLoginTitle"), error instanceof Error ? error.message : t("errors.unknownError"));
+      })
+      .finally(() => {
+        setIsSocialLoading(false);
+      });
+  }, [googleResponse, signInWithProvider, t]);
 
   async function handleLogin() {
+    const trimmedEmail = email.trim();
+    if (!isValidEmail(trimmedEmail)) {
+      Alert.alert(t("screens.login.errors.loginFailed"), t("screens.login.quick.invalidEmail"));
+      return;
+    }
+    if (password.length < 8) {
+      Alert.alert(t("screens.login.errors.loginFailed"), t("screens.login.quick.passwordTooShort"));
+      return;
+    }
+
     try {
-      await signIn(email.trim(), password);
+      await signIn(trimmedEmail, password);
     } catch (error) {
-      Alert.alert(t("login.loginError"), error instanceof Error ? error.message : t("errors.unknownError"));
+      Alert.alert(t("screens.login.errors.loginFailed"), error instanceof Error ? error.message : t("errors.unknownError"));
     }
   }
 
@@ -65,7 +147,7 @@ export function LoginScreen({ onShowRegister }: Props) {
       const normalized = normalizeApiBaseUrl(apiBaseUrl);
       await saveApiBaseUrl(normalized);
       setApiBaseUrl(normalized);
-      Alert.alert(t("login.apiSaved"), t("login.apiWillBeUsed", { url: normalized }));
+      Alert.alert(t("screens.login.apiSaved"), t("screens.login.apiWillBeUsed", { url: normalized }));
     } catch (error) {
       Alert.alert(t("common.error"), error instanceof Error ? error.message : t("errors.unknownError"));
     } finally {
@@ -76,7 +158,7 @@ export function LoginScreen({ onShowRegister }: Props) {
   async function handleResetApiUrl() {
     await clearApiBaseUrl();
     setApiBaseUrl(DEFAULT_API_BASE_URL);
-    Alert.alert(t("login.apiReset"), t("login.apiResetMessage"));
+    Alert.alert(t("screens.login.apiReset"), t("screens.login.apiResetMessage"));
   }
 
   async function handleCheckApi() {
@@ -86,26 +168,51 @@ export function LoginScreen({ onShowRegister }: Props) {
       await saveApiBaseUrl(normalized);
       setApiBaseUrl(normalized);
       const result = await probeApiConnection();
-      Alert.alert(t("login.connectionWorks"), `${result.service}\n${t("login.connectionStatus", { status: result.status })}`);
+      Alert.alert(
+        t("screens.login.connectionWorks"),
+        `${result.service}\n${t("screens.login.connectionStatus", { status: result.status })}`,
+      );
     } catch (error) {
-      Alert.alert(t("login.connectionFailed"), error instanceof Error ? error.message : t("errors.unknownError"));
+      Alert.alert(t("screens.login.connectionFailed"), error instanceof Error ? error.message : t("errors.unknownError"));
     } finally {
       setIsCheckingApi(false);
     }
   }
 
-  async function handleSocialLogin(providerId: "google" | "telegram" | "yandex") {
-    const provider = socialProviders.find((entry) => entry.id === providerId);
+  async function handleSocialLogin(providerId: "google" | "telegram") {
+    const provider = providerList.find((entry) => entry.id === providerId);
 
     try {
+      if (providerId === "google") {
+        if (!googleClientId) {
+          Alert.alert(t("screens.login.quick.googleTitle"), t("screens.login.quick.googleClientMissing"));
+          return;
+        }
+
+        if (!googleRequest) {
+          Alert.alert(t("screens.login.quick.googleTitle"), t("screens.login.quick.googleNotReady"));
+          return;
+        }
+
+        setIsSocialLoading(true);
+        const result = await promptGoogleAuth().catch((error) => {
+          setIsSocialLoading(false);
+          throw error;
+        });
+        if (result.type !== "success") {
+          setIsSocialLoading(false);
+          if (result.type !== "dismiss" && result.type !== "cancel") {
+            Alert.alert(t("screens.login.quick.googleTitle"), t("screens.login.quick.googleFailed"));
+          }
+        }
+        return;
+      }
+
       if (providerId === "telegram") {
         const botUsername = provider?.mobile_client_id;
         if (botUsername) {
           await Linking.openURL(`https://t.me/${botUsername}?start=rpglife_login`);
-          Alert.alert(
-            "Telegram",
-            "Открыли бота Telegram. Приложение уже умеет принять возврат по ссылке вида rpglife://auth/telegram?init_data=..., а backend bridge для этого готов по пути /api/v1/auth/telegram/bridge.",
-          );
+          Alert.alert(t("screens.login.quick.telegramTitle"), t("screens.login.quick.telegramOpened"));
           return;
         }
       }
@@ -113,14 +220,16 @@ export function LoginScreen({ onShowRegister }: Props) {
       setIsSocialLoading(true);
       await signInWithProvider(providerId);
     } catch (error) {
-      Alert.alert("Соцвход", error instanceof Error ? error.message : t("errors.unknownError"));
+      Alert.alert(t("screens.login.quick.socialLoginTitle"), error instanceof Error ? error.message : t("errors.unknownError"));
     } finally {
-      setIsSocialLoading(false);
+      if (providerId !== "google") {
+        setIsSocialLoading(false);
+      }
     }
   }
 
   return (
-    <Screen title={t("screens.login.title")} subtitle={t("screens.login.subtitle")} scrollable={false}>
+    <Screen title={t("screens.login.title")} subtitle={t("screens.login.subtitle")}>
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.container}>
         <View style={styles.modeRow}>
           <View style={[styles.modeTab, styles.modeTabActive]}>
@@ -132,34 +241,24 @@ export function LoginScreen({ onShowRegister }: Props) {
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>{t("screens.login.apiConnection")}</Text>
-          <Text style={styles.hint}>{t("screens.login.apiHint")}</Text>
+          <Text style={styles.cardTitle}>{t("screens.login.accountLogin")}</Text>
+          <Text style={styles.hint}>{t("screens.login.quick.accountHint")}</Text>
           <TextInput
-            placeholder={t("screens.login.apiPlaceholder")}
+            placeholder={t("screens.login.emailPlaceholder")}
             placeholderTextColor={colors.textDim}
             style={styles.input}
-            value={apiBaseUrl}
-            onChangeText={setApiBaseUrl}
+            value={email}
+            onChangeText={setEmail}
             autoCapitalize="none"
-            autoCorrect={false}
           />
-          <View style={styles.row}>
-            <TouchableOpacity style={styles.secondaryButton} onPress={handleSaveApiUrl} activeOpacity={0.85} disabled={isSavingApi}>
-              <Text style={styles.secondaryText}>{isSavingApi ? t("screens.login.saving") : t("screens.login.save")}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.secondaryButton} onPress={handleCheckApi} activeOpacity={0.85} disabled={isCheckingApi}>
-              <Text style={styles.secondaryText}>{isCheckingApi ? t("screens.login.checking") : t("screens.login.check")}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.ghostButton} onPress={handleResetApiUrl} activeOpacity={0.85}>
-              <Text style={styles.ghostText}>{t("screens.login.reset")}</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>{t("screens.login.accountLogin")}</Text>
-          <TextInput placeholder={t("screens.login.emailPlaceholder")} placeholderTextColor={colors.textDim} style={styles.input} value={email} onChangeText={setEmail} autoCapitalize="none" />
-          <TextInput placeholder={t("screens.login.passwordPlaceholder")} placeholderTextColor={colors.textDim} style={styles.input} value={password} onChangeText={setPassword} secureTextEntry />
+          <TextInput
+            placeholder={t("screens.login.passwordPlaceholder")}
+            placeholderTextColor={colors.textDim}
+            style={styles.input}
+            value={password}
+            onChangeText={setPassword}
+            secureTextEntry
+          />
           <TouchableOpacity style={styles.primaryButton} onPress={handleLogin} activeOpacity={0.85}>
             <Text style={styles.primaryText}>{t("screens.login.login")}</Text>
           </TouchableOpacity>
@@ -169,20 +268,20 @@ export function LoginScreen({ onShowRegister }: Props) {
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Социальный вход</Text>
-          <Text style={styles.hint}>
-            Подготовлено для Google, Telegram и Yandex. Для Telegram приложение уже умеет поймать возврат по deep link формата `rpglife://auth/telegram?init_data=...`.
-          </Text>
+          <Text style={styles.cardTitle}>{t("screens.login.quick.socialSectionTitle")}</Text>
+          <Text style={styles.hint}>{t("screens.login.quick.socialSectionHint")}</Text>
           <View style={styles.socialColumn}>
-            {socialProviders.map((provider) => {
+            {providerList.map((provider) => {
               const isReady = provider.enabled && provider.configured;
+              const isProviderActionable = provider.id !== "google" || Boolean(googleClientId && googleRequest);
               const metaText = isReady
                 ? provider.id === "telegram"
-                  ? "Бот подключен. Следующий шаг - автоматический возврат из Telegram в приложение."
-                  : "Провайдер сконфигурирован"
+                  ? t("screens.login.quick.provider.telegramReady")
+                  : t("screens.login.quick.provider.configured")
                 : provider.id === "telegram"
-                  ? "Нужно добавить bot token и username"
-                  : "Нужно добавить client id / bot settings";
+                  ? t("screens.login.quick.provider.telegramPending")
+                  : t("screens.login.quick.provider.pending");
+
               return (
                 <TouchableOpacity
                   key={provider.id}
@@ -191,20 +290,58 @@ export function LoginScreen({ onShowRegister }: Props) {
                     isReady ? styles.socialButtonReady : styles.socialButtonPending,
                   ]}
                   activeOpacity={0.85}
-                  disabled={!isReady || isSocialLoading}
+                  disabled={!isReady || !isProviderActionable || isSocialLoading}
                   onPress={() => handleSocialLogin(provider.id)}
                 >
                   <View style={styles.socialButtonCopy}>
-                    <Text style={styles.socialButtonTitle}>Продолжить через {provider.label}</Text>
+                    <Text style={styles.socialButtonTitle}>{t("screens.login.quick.continueWith", { provider: provider.label })}</Text>
                     <Text style={styles.socialButtonMeta}>{metaText}</Text>
                   </View>
                   <Text style={[styles.socialStatus, isReady ? styles.socialStatusReady : styles.socialStatusPending]}>
-                    {isReady ? "Готово" : "Скоро"}
+                    {isReady ? t("screens.login.quick.ready") : t("screens.login.quick.comingSoon")}
                   </Text>
                 </TouchableOpacity>
               );
             })}
           </View>
+        </View>
+
+        <View style={styles.apiCard}>
+          <View style={styles.apiHeaderRow}>
+            <View style={styles.apiHeaderCopy}>
+              <Text style={styles.apiLabel}>{t("screens.login.apiConnection")}</Text>
+              <Text style={styles.apiValue}>{normalizeApiBaseUrl(apiBaseUrl)}</Text>
+            </View>
+            <TouchableOpacity style={styles.apiToggleButton} onPress={() => setShowApiTools((value) => !value)} activeOpacity={0.85}>
+              <Text style={styles.apiToggleText}>{showApiTools ? t("screens.login.quick.hide") : t("screens.login.quick.configure")}</Text>
+            </TouchableOpacity>
+          </View>
+
+          {showApiTools ? (
+            <View style={styles.apiTools}>
+              <Text style={styles.hint}>{t("screens.login.apiHint")}</Text>
+              <TextInput
+                placeholder={t("screens.login.apiPlaceholder")}
+                placeholderTextColor={colors.textDim}
+                style={styles.input}
+                value={apiBaseUrl}
+                onChangeText={setApiBaseUrl}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              <View style={styles.row}>
+                <TouchableOpacity style={styles.secondaryButton} onPress={handleSaveApiUrl} activeOpacity={0.85} disabled={isSavingApi}>
+                  <Text style={styles.secondaryText}>{isSavingApi ? t("screens.login.saving") : t("screens.login.save")}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.secondaryButton} onPress={handleCheckApi} activeOpacity={0.85} disabled={isCheckingApi}>
+                  <Text style={styles.secondaryText}>{isCheckingApi ? t("screens.login.checking") : t("screens.login.check")}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.ghostButton} onPress={handleResetApiUrl} activeOpacity={0.85}>
+                  <Text style={styles.ghostText}>{t("screens.login.reset")}</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : null}
         </View>
       </KeyboardAvoidingView>
     </Screen>
@@ -213,151 +350,198 @@ export function LoginScreen({ onShowRegister }: Props) {
 
 function createStyles(colors: ReturnType<typeof useThemeColors>, themeMode: ReturnType<typeof useThemeMode>) {
   return StyleSheet.create({
-  container: {
-    flex: 1,
-    gap: 16,
-  },
-  modeRow: {
-    flexDirection: "row",
-    backgroundColor: colors.card,
-    borderRadius: 18,
-    padding: 6,
-    borderWidth: 1,
-    borderColor: colors.border,
-    gap: 6,
-  },
-  modeTab: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 12,
-    alignItems: "center",
-  },
-  modeTabActive: {
-    backgroundColor: colors.xp,
-  },
-  modeText: {
-    color: colors.textDim,
-    fontWeight: "700",
-  },
-  modeTextActive: {
-    color: colors.text,
-  },
-  card: {
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 22,
-    padding: 18,
-    gap: 14,
-  },
-  cardTitle: {
-    color: colors.text,
-    fontSize: 20,
-    fontWeight: "800",
-  },
-  hint: {
-    color: colors.textMuted,
-    lineHeight: 18,
-  },
-  row: {
-    flexDirection: "row",
-    gap: 10,
-  },
-  input: {
-    backgroundColor: colors.backgroundInset,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    color: colors.text,
-  },
-  primaryButton: {
-    backgroundColor: colors.success,
-    paddingVertical: 14,
-    borderRadius: 14,
-    alignItems: "center",
-  },
-  primaryText: {
-    color: "#052e16",
-    fontWeight: "800",
-    fontSize: 16,
-  },
-  secondaryButton: {
-    flex: 1,
-    backgroundColor: colors.xp,
-    paddingVertical: 12,
-    borderRadius: 14,
-    alignItems: "center",
-  },
-  secondaryText: {
-    color: "#dbeafe",
-    fontWeight: "700",
-  },
-  ghostButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: colors.border,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  ghostText: {
-    color: colors.textMuted,
-    fontWeight: "700",
-  },
-  linkButton: {
-    alignItems: "center",
-  },
-  link: {
-    color: colors.xp,
-    fontWeight: "700",
-  },
-  socialColumn: {
-    gap: 10,
-  },
-  socialButton: {
-    borderRadius: 16,
-    borderWidth: 1,
-    paddingHorizontal: 14,
-    paddingVertical: 14,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12,
-  },
-  socialButtonReady: {
-    backgroundColor: themeMode === "light" ? "#e4f6e9" : "#173326",
-    borderColor: colors.success,
-  },
-  socialButtonPending: {
-    backgroundColor: colors.cardMuted,
-    borderColor: colors.border,
-  },
-  socialButtonCopy: {
-    flex: 1,
-    gap: 3,
-  },
-  socialButtonTitle: {
-    color: colors.text,
-    fontSize: 15,
-    fontWeight: "800",
-  },
-  socialButtonMeta: {
-    color: colors.textMuted,
-    fontSize: 12,
-    lineHeight: 16,
-  },
-  socialStatus: {
-    fontWeight: "800",
-    fontSize: 12,
-  },
-  socialStatusReady: {
-    color: "#86efac",
-  },
-  socialStatusPending: {
-    color: colors.textDim,
-  },
+    container: {
+      flex: 1,
+      gap: 16,
+    },
+    modeRow: {
+      flexDirection: "row",
+      backgroundColor: colors.card,
+      borderRadius: 18,
+      padding: 6,
+      borderWidth: 1,
+      borderColor: colors.border,
+      gap: 6,
+    },
+    modeTab: {
+      flex: 1,
+      paddingVertical: 12,
+      borderRadius: 12,
+      alignItems: "center",
+    },
+    modeTabActive: {
+      backgroundColor: colors.xp,
+    },
+    modeText: {
+      color: colors.textDim,
+      fontWeight: "700",
+    },
+    modeTextActive: {
+      color: colors.text,
+    },
+    card: {
+      backgroundColor: colors.card,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 22,
+      padding: 18,
+      gap: 14,
+    },
+    apiCard: {
+      backgroundColor: themeMode === "light" ? "rgba(255,250,240,0.8)" : "rgba(10,14,24,0.72)",
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 18,
+      padding: 16,
+      gap: 12,
+    },
+    cardTitle: {
+      color: colors.text,
+      fontSize: 20,
+      fontWeight: "800",
+    },
+    hint: {
+      color: colors.textMuted,
+      lineHeight: 18,
+    },
+    row: {
+      flexDirection: "row",
+      gap: 10,
+      flexWrap: "wrap",
+    },
+    apiHeaderRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 12,
+    },
+    apiHeaderCopy: {
+      flex: 1,
+      gap: 2,
+    },
+    apiLabel: {
+      color: colors.textMuted,
+      fontSize: 12,
+      fontWeight: "700",
+      textTransform: "uppercase",
+    },
+    apiValue: {
+      color: colors.text,
+      fontSize: 13,
+      fontWeight: "700",
+    },
+    apiToggleButton: {
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.border,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      backgroundColor: colors.backgroundInset,
+    },
+    apiToggleText: {
+      color: colors.text,
+      fontWeight: "700",
+      fontSize: 13,
+    },
+    apiTools: {
+      gap: 12,
+    },
+    input: {
+      backgroundColor: colors.backgroundInset,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 14,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+      color: colors.text,
+    },
+    primaryButton: {
+      backgroundColor: colors.success,
+      paddingVertical: 14,
+      borderRadius: 14,
+      alignItems: "center",
+    },
+    primaryText: {
+      color: "#052e16",
+      fontWeight: "800",
+      fontSize: 16,
+    },
+    secondaryButton: {
+      flex: 1,
+      minWidth: 110,
+      backgroundColor: colors.xp,
+      paddingVertical: 12,
+      borderRadius: 14,
+      alignItems: "center",
+    },
+    secondaryText: {
+      color: "#dbeafe",
+      fontWeight: "700",
+    },
+    ghostButton: {
+      paddingHorizontal: 16,
+      paddingVertical: 12,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: colors.border,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    ghostText: {
+      color: colors.textMuted,
+      fontWeight: "700",
+    },
+    linkButton: {
+      alignItems: "center",
+    },
+    link: {
+      color: colors.xp,
+      fontWeight: "700",
+    },
+    socialColumn: {
+      gap: 10,
+    },
+    socialButton: {
+      borderRadius: 16,
+      borderWidth: 1,
+      paddingHorizontal: 14,
+      paddingVertical: 14,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 12,
+    },
+    socialButtonReady: {
+      backgroundColor: themeMode === "light" ? "#e4f6e9" : "#173326",
+      borderColor: colors.success,
+    },
+    socialButtonPending: {
+      backgroundColor: colors.cardMuted,
+      borderColor: colors.border,
+    },
+    socialButtonCopy: {
+      flex: 1,
+      gap: 3,
+    },
+    socialButtonTitle: {
+      color: colors.text,
+      fontSize: 15,
+      fontWeight: "800",
+    },
+    socialButtonMeta: {
+      color: colors.textMuted,
+      fontSize: 12,
+      lineHeight: 16,
+    },
+    socialStatus: {
+      fontWeight: "800",
+      fontSize: 12,
+    },
+    socialStatusReady: {
+      color: "#86efac",
+    },
+    socialStatusPending: {
+      color: colors.textDim,
+    },
   });
 }

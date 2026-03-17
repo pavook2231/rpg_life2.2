@@ -13,7 +13,6 @@ from .level_chests import LevelChest
 from app.core.dates import utc_now
 from .goals import GOALS, get_goal_quests, get_goal_info
 from .config import get_xp_for_level
-from .loot_service import roll_level_up_loot
 from .services import health_service, progression_service
 from .text_utils import normalize_nested_strings, repair_mojibake
 logger = logging.getLogger(__name__)
@@ -422,14 +421,9 @@ def complete_quest(db: Session, user_id: int, quest_id: int):
         )
         db.add(completed)
     
+    # Random item drops created noisy rewards with inconsistent naming/icon data.
+    # Progression now uses explicit chest-based rewards instead of ad-hoc loot items.
     loot_drop = None
-    if level_ups:
-        for reached_level in level_ups:
-            drop = roll_level_up_loot(db, user_id, reached_level, loot_bonus=loot_bonus)
-            if drop:
-                loot_drop = drop
-    elif getattr(quest, "quest_type", "daily").startswith("boss") and random.random() < min(0.75, 0.45 + loot_bonus * 0.20):
-        loot_drop = roll_level_up_loot(db, user_id, max(progress.level, 5), loot_bonus=loot_bonus)
 
     db.commit()
 
@@ -451,15 +445,6 @@ def complete_quest(db: Session, user_id: int, quest_id: int):
 
     new_achs = check_achievements(db, user_id, progress)
     daily_chest = _grant_daily_chest_if_earned(db, user_id, progress.id, progress.level)
-    crafting_reward = None
-    if not quest.is_custom and random.random() < 0.55:
-        try:
-            from app.services import crafting_service
-
-            crafting_reward = crafting_service.grant_random_crafting_resource(db, user_id)
-        except Exception:
-            db.rollback()
-            logger.exception("Не удалось выдать ресурс для крафта: user_id=%s quest_id=%s", user_id, quest_id)
 
     next_xp = calculate_next_level_xp(progress.level)
     xp_percentage = (progress.current_xp / next_xp) * 100 if next_xp > 0 else 0
@@ -485,7 +470,6 @@ def complete_quest(db: Session, user_id: int, quest_id: int):
         "chest_item": chest_item,
         "loot_drop": loot_drop,
         "daily_chest": daily_chest,
-        "crafting_reward": crafting_reward,
         "health": health_state_after_quest,
         "daily_limits": progression_service.get_daily_completion_limits(db, user_id, progress),
     }
@@ -1119,6 +1103,7 @@ def check_achievements(db: Session, user_id: int, progress: UserClassProgress = 
                 "id": ach_id,
                 "title": ach["title"],
                 "icon": ach.get("icon", "🏆"),
+                "tier": ach.get("tier", "common"),
                 "xp": ach_record.xp_reward,
                 "crystals": ach_record.crystal_reward,
             }

@@ -10,7 +10,7 @@ services:
     plan: starter
     autoDeploy: true
     healthCheckPath: /healthz
-    dockerCommand: /bin/sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 2"
+    dockerCommand: /bin/sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1"
     envVars:
       - key: APP_ENV
         value: production
@@ -62,9 +62,9 @@ services:
       - key: EXPO_PUSH_ACCESS_TOKEN
         sync: false
       - key: GOOGLE_AUTH_ENABLED
-        sync: false
+        value: "true"
       - key: GOOGLE_AUTH_MOBILE_CLIENT_ID
-        sync: false
+        value: 723557656382-3k94tuoejci6bovt2i9hn0qd728cl4so.apps.googleusercontent.com
       - key: GOOGLE_AUTH_CLIENT_SECRET
         sync: false
       - key: YANDEX_AUTH_ENABLED

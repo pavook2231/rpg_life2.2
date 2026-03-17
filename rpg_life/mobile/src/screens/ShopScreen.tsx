@@ -3,9 +3,10 @@ import { Pressable, StyleSheet, Text, TextInput, View, useWindowDimensions } fro
 
 import { buyShopItem, fetchShop, refreshShop, type ShopPayload } from "../api/game";
 import { Screen } from "../components/Screen";
+import { StateBlock } from "../components/StateBlock";
 import { useFeedback } from "../context/FeedbackContext";
 import { useGame } from "../context/GameContext";
-import { useLocalization } from "../context/LocalizationContext";
+import { useLocalization, useTranslation } from "../context/LocalizationContext";
 import { type ItemStatEntry } from "../lib/equipment";
 import {
   buildCatalogLookupTokens,
@@ -24,13 +25,8 @@ type ShopVisualItem = UnifiedCatalogItem & {
   requiredLevel: number;
 };
 
-const FILTERS: Array<{ key: CatalogFilter; ru: string; en: string }> = [
-  { key: "all", ru: "Все", en: "All" },
-  { key: "weapon", ru: "Оружие", en: "Weapons" },
-  { key: "armor", ru: "Броня", en: "Armor" },
-  { key: "accessory", ru: "Аксессуары", en: "Accessories" },
-  { key: "chest", ru: "Сундуки", en: "Chests" },
-];
+const FILTERS: CatalogFilter[] = ["all", "weapon", "armor", "accessory", "chest"];
+const SORT_MODES: SortMode[] = ["rarity", "price", "level", "name"];
 
 const RARITY_ORDER: Record<string, number> = {
   common: 0,
@@ -39,15 +35,6 @@ const RARITY_ORDER: Record<string, number> = {
   epic: 3,
   legendary: 4,
   immortal: 5,
-};
-
-const RARITY_TITLES: Record<string, { ru: string; en: string }> = {
-  common: { ru: "Обычный", en: "Common" },
-  uncommon: { ru: "Необычный", en: "Uncommon" },
-  rare: { ru: "Редкий", en: "Rare" },
-  epic: { ru: "Эпический", en: "Epic" },
-  legendary: { ru: "Легендарный", en: "Legendary" },
-  immortal: { ru: "Мифический", en: "Mythic" },
 };
 
 function normalizeToken(value?: string | null) {
@@ -67,26 +54,19 @@ function toItemCardType(category: string) {
   return "misc";
 }
 
-function getRarityLabel(rarity: string, language: "ru" | "en") {
-  const label = RARITY_TITLES[rarity];
-  if (!label) return rarity;
-  return language === "en" ? label.en : label.ru;
-}
-
 function toStatEntries(item: UnifiedCatalogItem): ItemStatEntry[] {
   return item.statEntries;
 }
 
 export function ShopScreen() {
   const { language } = useLocalization();
-  const { pushToast, playSound } = useFeedback();
+  const t = useTranslation();
+  const { pushToast } = useFeedback();
   const { hero, refreshGame } = useGame();
   const { width } = useWindowDimensions();
   const colors = useThemeColors();
   const themeMode = useThemeMode();
   const styles = useMemo(() => createStyles(colors, themeMode), [colors, themeMode]);
-  const isEn = language === "en";
-  const activeLanguage: "ru" | "en" = isEn ? "en" : "ru";
 
   const [shopPayload, setShopPayload] = useState<ShopPayload | null>(null);
   const [isLoadingShop, setIsLoadingShop] = useState(false);
@@ -95,6 +75,7 @@ export function ShopScreen() {
   const [filter, setFilter] = useState<CatalogFilter>("all");
   const [sortMode, setSortMode] = useState<SortMode>("level");
   const [search, setSearch] = useState("");
+  const [shopError, setShopError] = useState<string | null>(null);
 
   const catalog = useMemo(() => getUnifiedItemCatalog(), []);
   const catalogByToken = useMemo(() => {
@@ -137,7 +118,7 @@ export function ShopScreen() {
     });
 
     filtered.sort((left, right) => {
-      if (sortMode === "name") return left.name.localeCompare(right.name, "ru");
+      if (sortMode === "name") return left.name.localeCompare(right.name, language === "en" ? "en" : "ru");
       if (sortMode === "price") return left.priceGold - right.priceGold;
       if (sortMode === "level") return left.requiredLevel - right.requiredLevel;
 
@@ -147,7 +128,7 @@ export function ShopScreen() {
     });
 
     return filtered;
-  }, [filter, search, shopItems, sortMode]);
+  }, [filter, language, search, shopItems, sortMode]);
 
   const shopGold = hero?.crystals ?? shopPayload?.crystals ?? 0;
   const heroLevel = hero?.level ?? shopPayload?.character_level ?? 1;
@@ -156,43 +137,53 @@ export function ShopScreen() {
   const gridWidth = Math.max(width - 32, 300);
   const cardWidth = Math.max((gridWidth - gridGap * (gridColumns - 1)) / gridColumns, 240);
 
+  const getRarityLabel = useCallback((rarity: string) => {
+    return t(`game.rarities.${rarity}`);
+  }, [t]);
+
+  const getFilterLabel = useCallback((value: CatalogFilter) => t(`screens.shop.quick.filters.${value}`), [t]);
+  const getSortLabel = useCallback((value: SortMode) => t(`screens.shop.quick.sort.${value}`), [t]);
+
   const loadShop = useCallback(async () => {
     setIsLoadingShop(true);
+    setShopError(null);
     try {
       const payload = await fetchShop();
       setShopPayload(payload);
+    } catch (error) {
+      setShopError(error instanceof Error ? error.message : t("shop.purchaseFailed"));
+      throw error;
     } finally {
       setIsLoadingShop(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     loadShop().catch((error) => {
       pushToast({
-        title: isEn ? "Failed to load shop" : "Не удалось загрузить магазин",
-        description: error instanceof Error ? error.message : isEn ? "Unknown error" : "Неизвестная ошибка",
+        title: t("screens.shop.quick.loadFailed"),
+        description: error instanceof Error ? error.message : t("errors.unknownError"),
         icon: "alert-circle",
         tone: "warning",
       });
     });
-  }, [isEn, loadShop, pushToast]);
+  }, [loadShop, pushToast, t]);
 
   async function handleRefreshRotation() {
     setIsRefreshingShop(true);
     try {
       const payload = await refreshShop();
       setShopPayload(payload);
-      await playSound("item");
-      pushToast({
-        title: isEn ? "Shop refreshed" : "Ассортимент обновлен",
-        description: isEn ? "New rotation is now available." : "Новая ротация уже доступна.",
+      await pushToast({
+        title: t("screens.shop.quick.refreshedTitle"),
+        description: t("screens.shop.quick.refreshedDescription"),
         icon: "refresh",
         tone: "success",
-      });
+      }, { sound: "item" });
     } catch (error) {
       pushToast({
-        title: isEn ? "Refresh failed" : "Не удалось обновить",
-        description: error instanceof Error ? error.message : isEn ? "Unknown error" : "Неизвестная ошибка",
+        title: t("screens.shop.quick.refreshFailed"),
+        description: error instanceof Error ? error.message : t("errors.unknownError"),
         icon: "alert-circle",
         tone: "warning",
       });
@@ -204,10 +195,8 @@ export function ShopScreen() {
   async function handleBuy(item: ShopVisualItem) {
     if (heroLevel < item.requiredLevel) {
       pushToast({
-        title: isEn ? "Level too low" : "Недостаточный уровень",
-        description: isEn
-          ? `Required level: ${item.requiredLevel}`
-          : `Требуется уровень: ${item.requiredLevel}`,
+        title: t("screens.shop.quick.levelTooLow"),
+        description: t("screens.shop.quick.requiredLevelValue", { level: item.requiredLevel }),
         icon: "shield-alert-outline",
         tone: "warning",
       });
@@ -216,8 +205,8 @@ export function ShopScreen() {
 
     if (shopGold < item.priceGold) {
       pushToast({
-        title: isEn ? "Not enough gold" : "Недостаточно золота",
-        description: isEn ? "Earn more from quests and return." : "Получи больше золота в заданиях и возвращайся.",
+        title: t("screens.shop.quick.notEnoughGold"),
+        description: t("screens.shop.quick.notEnoughGoldDescription"),
         icon: "cash-remove",
         tone: "warning",
       });
@@ -226,48 +215,53 @@ export function ShopScreen() {
 
     try {
       const result = await buyShopItem(item.shopItemId);
-      await playSound("item");
       await Promise.all([refreshGame(), loadShop()]);
 
       if (result.kind === "chest") {
-        pushToast({
-          title: isEn ? "Chest purchased" : "Сундук куплен",
-          description: result.chest_item?.name ?? (isEn ? "Open it in inventory." : "Открой его в инвентаре."),
+        await pushToast({
+          title: t("screens.shop.quick.chestPurchased"),
+          description: result.chest_item?.name ?? t("screens.shop.quick.openInInventory"),
           icon: result.chest_item?.icon ?? item.iconName,
           tone: "reward",
-        });
+        }, { sound: "item" });
       } else {
-        pushToast({
-          title: isEn ? "Item purchased" : "Предмет куплен",
+        await pushToast({
+          title: t("screens.shop.quick.itemPurchased"),
           description: item.name,
           icon: item.iconName,
           tone: "reward",
-        });
+        }, { sound: "item" });
       }
     } catch (error) {
       pushToast({
-        title: isEn ? "Purchase failed" : "Покупка не удалась",
-        description: error instanceof Error ? error.message : isEn ? "Unknown error" : "Неизвестная ошибка",
+        title: t("shop.purchaseFailed"),
+        description: error instanceof Error ? error.message : t("errors.unknownError"),
         icon: "alert-circle",
         tone: "warning",
       });
     }
   }
 
+  function resetFilters() {
+    setFilter("all");
+    setSortMode("level");
+    setSearch("");
+  }
+
   return (
     <Screen
-      title={isEn ? "Shop" : "Магазин"}
-      subtitle={isEn ? "Compact server shop with unified items" : "Компактный серверный магазин с единой системой предметов"}
+      title={t("screens.shop.title")}
+      subtitle={t("screens.shop.quick.subtitle")}
       showHeader={false}
+      contentTopOffset={10}
     >
       <Card style={styles.headerCard}>
+        <Text style={styles.eyebrow}>MARKET</Text>
         <View style={styles.headerTop}>
           <View style={styles.headerCopy}>
-            <Text style={styles.headerTitle}>{isEn ? "Compact item market" : "Компактный рынок предметов"}</Text>
+            <Text style={styles.headerTitle}>{t("screens.shop.title")}</Text>
             <Text style={styles.headerText}>
-              {isEn
-                ? `${shopItems.length} items available in current rotation`
-                : `${shopItems.length} предметов в текущей ротации`}
+              {t("screens.shop.quick.itemsInRotation", { count: shopItems.length })}
             </Text>
           </View>
 
@@ -281,12 +275,12 @@ export function ShopScreen() {
           <TextInput
             value={search}
             onChangeText={setSearch}
-            placeholder={isEn ? "Search item..." : "Поиск предмета..."}
+            placeholder={t("screens.shop.quick.searchPlaceholder")}
             placeholderTextColor={colors.textDim}
             style={styles.searchInput}
           />
           <Button
-            label={isEn ? "Refresh" : "Обновить"}
+            label={t("screens.shop.quick.refresh")}
             icon="refresh"
             onPress={handleRefreshRotation}
             variant="secondary"
@@ -298,49 +292,51 @@ export function ShopScreen() {
         <View style={styles.filterRow}>
           {FILTERS.map((entry) => (
             <Pressable
-              key={entry.key}
-              onPress={() => setFilter(entry.key)}
-              style={[styles.filterTab, filter === entry.key ? styles.filterTabActive : null]}
+              key={entry}
+              onPress={() => setFilter(entry)}
+              style={[styles.filterTab, filter === entry ? styles.filterTabActive : null]}
             >
-              <Text style={[styles.filterTabText, filter === entry.key ? styles.filterTabTextActive : null]}>
-                {isEn ? entry.en : entry.ru}
+              <Text style={[styles.filterTabText, filter === entry ? styles.filterTabTextActive : null]}>
+                {getFilterLabel(entry)}
               </Text>
             </Pressable>
           ))}
         </View>
 
         <View style={styles.sortRow}>
-          <Button
-            label={isEn ? "Rarity" : "Редкость"}
-            onPress={() => setSortMode("rarity")}
-            variant={sortMode === "rarity" ? "gold" : "secondary"}
-            style={styles.sortButton}
-          />
-          <Button
-            label={isEn ? "Price" : "Цена"}
-            onPress={() => setSortMode("price")}
-            variant={sortMode === "price" ? "gold" : "secondary"}
-            style={styles.sortButton}
-          />
-          <Button
-            label={isEn ? "Level" : "Уровень"}
-            onPress={() => setSortMode("level")}
-            variant={sortMode === "level" ? "gold" : "secondary"}
-            style={styles.sortButton}
-          />
-          <Button
-            label={isEn ? "Name" : "Имя"}
-            onPress={() => setSortMode("name")}
-            variant={sortMode === "name" ? "gold" : "secondary"}
-            style={styles.sortButton}
-          />
+          {SORT_MODES.map((entry) => (
+            <Button
+              key={entry}
+              label={getSortLabel(entry)}
+              onPress={() => setSortMode(entry)}
+              variant={sortMode === entry ? "gold" : "secondary"}
+              style={styles.sortButton}
+            />
+          ))}
         </View>
       </Card>
 
-      {visibleItems.length ? (
+      {shopError ? (
+        <StateBlock
+          tone="warning"
+          icon="alert-circle"
+          title={t("screens.shop.quick.loadFailed")}
+          description={shopError}
+          actionLabel={t("common.retry")}
+          onAction={() => {
+            void loadShop();
+          }}
+        />
+      ) : null}
+
+      {isLoadingShop && !shopItems.length ? (
+        <StateBlock tone="info" icon="timer-sand" title={t("common.loading")} />
+      ) : null}
+
+      {!isLoadingShop && visibleItems.length ? (
         <View style={styles.grid}>
           {visibleItems.map((item, index) => {
-            const rarityLabel = getRarityLabel(item.rarity, activeLanguage);
+            const rarityLabel = getRarityLabel(item.rarity);
             const lockedByLevel = heroLevel < item.requiredLevel;
 
             return (
@@ -355,7 +351,11 @@ export function ShopScreen() {
                   rarity={item.rarity}
                   description={item.description}
                   statEntries={toStatEntries(item)}
-                  badge={`${rarityLabel} • ${isEn ? "Lv" : "Ур"}.${item.requiredLevel}`}
+                  badge={t("screens.shop.quick.itemBadge", {
+                    rarity: rarityLabel,
+                    level: item.requiredLevel,
+                    levelShort: t("common.levelShort"),
+                  })}
                   actionLabel={String(item.priceGold)}
                   onAction={() => handleBuy(item)}
                   onPress={() => setSelectedItem(item)}
@@ -369,12 +369,13 @@ export function ShopScreen() {
           })}
         </View>
       ) : (
-        <Card>
-          <Text style={styles.emptyTitle}>{isEn ? "No items found" : "Ничего не найдено"}</Text>
-          <Text style={styles.emptyText}>
-            {isEn ? "Try another category or search query." : "Попробуй другую категорию или запрос."}
-          </Text>
-        </Card>
+        <StateBlock
+          icon="package-variant-closed"
+          title={t("screens.shop.quick.emptyTitle")}
+          description={t("screens.shop.quick.emptyDescription")}
+          actionLabel={t("screens.shop.quick.resetFilters")}
+          onAction={resetFilters}
+        />
       )}
 
       <FullscreenItemDetails
@@ -386,35 +387,33 @@ export function ShopScreen() {
         itemSlot={selectedItem?.slot ?? null}
         itemSubclass={selectedItem?.subclass ?? null}
         rarity={selectedItem?.rarity}
-        subtitle={selectedItem ? getRarityLabel(selectedItem.rarity, activeLanguage) : undefined}
+        subtitle={selectedItem ? getRarityLabel(selectedItem.rarity) : undefined}
         description={selectedItem?.description}
         metaRows={
           selectedItem
             ? [
                 {
-                  label: isEn ? "Required level" : "Требуемый уровень",
+                  label: t("screens.shop.quick.requiredLevel"),
                   value: String(selectedItem.requiredLevel),
                 },
                 {
-                  label: isEn ? "Price" : "Цена",
-                  value: `${selectedItem.priceGold} ${isEn ? "gold" : "золота"}`,
+                  label: t("common.price"),
+                  value: t("screens.shop.quick.priceValue", { price: selectedItem.priceGold, gold: t("common.gold") }),
                 },
               ]
             : []
         }
         statEntries={selectedItem ? toStatEntries(selectedItem) : []}
         actions={
-          selectedItem
-            ? heroLevel >= selectedItem.requiredLevel
-              ? [
-                  {
-                    label: String(selectedItem.priceGold),
-                    icon: "cash",
-                    onPress: () => handleBuy(selectedItem),
-                    variant: "gold" as const,
-                  },
-                ]
-              : []
+          selectedItem && heroLevel >= selectedItem.requiredLevel
+            ? [
+                {
+                  label: String(selectedItem.priceGold),
+                  icon: "cash",
+                  onPress: () => handleBuy(selectedItem),
+                  variant: "gold" as const,
+                },
+              ]
             : []
         }
         onClose={() => setSelectedItem(null)}
@@ -425,114 +424,111 @@ export function ShopScreen() {
 
 function createStyles(colors: ReturnType<typeof useThemeColors>, themeMode: ReturnType<typeof useThemeMode>) {
   return StyleSheet.create({
-  headerCard: {
-    gap: 10,
-    backgroundColor: themeMode === "light" ? "rgba(255, 250, 240, 0.92)" : "rgba(12, 17, 28, 0.86)",
-  },
-  headerTop: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: 10,
-  },
-  headerCopy: {
-    flex: 1,
-    gap: 3,
-  },
-  headerTitle: {
-    color: colors.text,
-    fontSize: 22,
-    fontWeight: "900",
-  },
-  headerText: {
-    color: colors.textMuted,
-    fontSize: 13,
-  },
-  walletChip: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: themeMode === "light" ? "rgba(183,121,31,0.38)" : "rgba(245,158,11,0.28)",
-    backgroundColor: themeMode === "light" ? "rgba(183,121,31,0.16)" : "rgba(245,158,11,0.12)",
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  walletValue: {
-    color: colors.text,
-    fontSize: 18,
-    fontWeight: "900",
-  },
-  toolbarRow: {
-    flexDirection: "row",
-    gap: 8,
-  },
-  searchInput: {
-    flex: 1,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: themeMode === "light" ? "rgba(214,199,170,0.9)" : "rgba(255,255,255,0.12)",
-    backgroundColor: themeMode === "light" ? "rgba(251,247,239,0.95)" : "rgba(9,14,24,0.8)",
-    color: colors.text,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 14,
-  },
-  refreshButton: {
-    minWidth: 128,
-  },
-  filterRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-  },
-  filterTab: {
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: themeMode === "light" ? "rgba(214,199,170,0.9)" : "rgba(255,255,255,0.12)",
-    backgroundColor: themeMode === "light" ? "rgba(239,231,215,0.9)" : "rgba(255,255,255,0.04)",
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-  },
-  filterTabActive: {
-    borderColor: themeMode === "light" ? "rgba(183,121,31,0.4)" : "rgba(245,158,11,0.3)",
-    backgroundColor: themeMode === "light" ? "rgba(183,121,31,0.18)" : "rgba(245,158,11,0.16)",
-  },
-  filterTabText: {
-    color: colors.textMuted,
-    fontSize: 12,
-    fontWeight: "700",
-  },
-  filterTabTextActive: {
-    color: colors.text,
-  },
-  sortRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-  },
-  sortButton: {
-    minWidth: 98,
-    flexGrow: 1,
-  },
-  grid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10,
-  },
-  gridCell: {
-    minWidth: 240,
-  },
-  emptyTitle: {
-    color: colors.text,
-    fontSize: 18,
-    fontWeight: "900",
-  },
-  emptyText: {
-    color: colors.textMuted,
-    fontSize: 13,
-    lineHeight: 18,
-  },
+    headerCard: {
+      gap: 12,
+      backgroundColor: themeMode === "light" ? "rgba(255,250,240,0.88)" : "rgba(12,17,28,0.72)",
+    },
+    eyebrow: {
+      color: colors.primary,
+      fontSize: 11,
+      fontWeight: "900",
+      letterSpacing: 1.2,
+    },
+    headerTop: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "flex-start",
+      gap: 10,
+    },
+    headerCopy: {
+      flex: 1,
+      gap: 4,
+    },
+    headerTitle: {
+      color: colors.text,
+      fontSize: 28,
+      fontWeight: "900",
+    },
+    headerText: {
+      color: colors.textMuted,
+      fontSize: 13,
+      lineHeight: 18,
+    },
+    walletChip: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: themeMode === "light" ? "rgba(183,121,31,0.38)" : "rgba(245,158,11,0.28)",
+      backgroundColor: themeMode === "light" ? "rgba(183,121,31,0.16)" : "rgba(245,158,11,0.12)",
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+    },
+    walletValue: {
+      color: colors.text,
+      fontSize: 18,
+      fontWeight: "900",
+    },
+    toolbarRow: {
+      flexDirection: "row",
+      gap: 8,
+    },
+    searchInput: {
+      flex: 1,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: themeMode === "light" ? "rgba(214,199,170,0.9)" : "rgba(255,255,255,0.12)",
+      backgroundColor: themeMode === "light" ? "rgba(251,247,239,0.95)" : "rgba(9,14,24,0.8)",
+      color: colors.text,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      fontSize: 14,
+    },
+    refreshButton: {
+      minWidth: 128,
+    },
+    filterRow: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 8,
+    },
+    filterTab: {
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: themeMode === "light" ? "rgba(214,199,170,0.9)" : "rgba(255,255,255,0.12)",
+      backgroundColor: themeMode === "light" ? "rgba(239,231,215,0.9)" : "rgba(255,255,255,0.04)",
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+    },
+    filterTabActive: {
+      borderColor: themeMode === "light" ? "rgba(183,121,31,0.4)" : "rgba(245,158,11,0.3)",
+      backgroundColor: themeMode === "light" ? "rgba(183,121,31,0.18)" : "rgba(245,158,11,0.16)",
+    },
+    filterTabText: {
+      color: colors.textMuted,
+      fontSize: 12,
+      fontWeight: "700",
+    },
+    filterTabTextActive: {
+      color: colors.text,
+    },
+    sortRow: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 8,
+    },
+    sortButton: {
+      minWidth: 98,
+      flexGrow: 1,
+    },
+    grid: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 10,
+    },
+    gridCell: {
+      minWidth: 240,
+    },
   });
 }

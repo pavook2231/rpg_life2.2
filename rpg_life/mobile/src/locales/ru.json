@@ -10,7 +10,8 @@
     "achievements": "Достижения",
     "events": "События",
     "challenges": "Испытания",
-    "multiplayer": "Мультиплеер"
+    "multiplayer": "Мультиплеер",
+    "coopTasks": "Вместе"
   },
   "screens": {
     "home": {
@@ -26,11 +27,61 @@
       "claimWeekly": "Забрать недельную награду",
       "dailyRewardObtained": "Ежедневная награда получена",
       "dailyRewardDescription": "+{xp} XP и +{gold} золота",
+      "weeklyRewardTitle": "Недельная награда",
       "weeklyRewardObtained": "Недельная награда получена",
       "weeklyRewardDescription": "+{xp} XP и +{gold} золота",
       "weeklyRewardClaimed": "Награда уже забрана",
       "heroDescription": "Ты развиваешь героя через реальные ежедневные задания: получаешь опыт, золото, предметы и достижения.",
       "rewardTitle": "Ежедневная награда",
+      "quick": {
+        "subtitle": "Сводка по герою, цели и наградам",
+        "heroSubtitle": "Текущий статус героя и его прогресс",
+        "goalTitle": "Текущая цель",
+        "goalEmptyTitle": "Цель пока не выбрана",
+        "goalSummary": "{progress}% прогресса • осталось {days} дн. • сегодня выполнено {completed}/{total} • доступно 10 уникальных заданий",
+        "goalEmptyDescription": "Выбери цель в профиле, чтобы приложение подбирало для тебя задания и точнее показывало прогресс.",
+        "goalCtaTitle": "Сначала выбери цель",
+        "goalCtaDescription": "После выбора цели приложение будет лучше подбирать задания и точнее показывать твой прогресс.",
+        "dailyTasks": "Задания дня",
+        "claimReward": "Забрать награду",
+        "weeklyRewardSummary": "Награда: +{xp} XP и +{gold} золота",
+        "seasonalRewardTitle": "Сезонная награда",
+        "seasonalRewardObtained": "Сезонная награда получена",
+        "seasonalQueuedDescription": "Сезонная награда будет получена после синхронизации.",
+        "seasonalRewardWithChest": "+{xp} XP, +{gold} золота и сундук {chest}",
+        "seasonalRewardWithoutChest": "+{xp} XP и +{gold} золота",
+        "seasonalPreviewWithChest": "Награда: +{xp} XP, +{gold} золота и {chest}",
+        "seasonalPreviewWithoutChest": "Награда: +{xp} XP и +{gold} золота",
+        "claimSeasonal": "Забрать сезонную награду",
+        "toEvents": "К событиям",
+        "itemsTitle": "Что дают предметы",
+        "itemsBoostTitle": "Экипировка усиливает героя",
+        "itemsBoostDescription": "Предметы повышают характеристики, броню, шанс крита и удачи. Чем лучше снаряжение, тем выгоднее каждый квест.",
+        "itemsSourceTitle": "Предметы нужны не только для красоты",
+        "itemsSourceDescription": "Их можно купить, выбить из сундуков и надеть на персонажа, чтобы усилить награды и выживаемость.",
+        "healthTitle": "Как работает здоровье",
+        "healthDecayTitle": "Если долго не заходить, герой теряет HP",
+        "healthZeroTitle": "Что будет, если здоровье упадет до нуля",
+        "healthZeroDescription": "Герой станет раненым: серия сбросится, а награды временно уменьшатся.",
+        "healthRecoverTitle": "Как не умереть",
+        "healthRecoverDescription": "Заходи каждый день, выполняй задания, держи броню на персонаже и закрывай квесты после ранения, чтобы восстановиться.",
+        "overview": {
+          "progress": "Прогресс",
+          "streak": "Серия",
+          "status": "Статус",
+          "online": "Онлайн",
+          "offline": "Оффлайн"
+        },
+        "stats": {
+          "strength": "Показывает физическую силу героя и помогает носить более мощную экипировку без просадки по эффективности.",
+          "intellect": "Даёт больше опыта за задания. Сейчас: +{value}% XP.",
+          "agility": "Увеличивает золото за задания. Сейчас: +{value}%.",
+          "stamina": "Увеличивает максимум здоровья героя. Сейчас: {value} HP.",
+          "crit": "Даёт шанс удвоить опыт и золото. Сейчас: {value}%.",
+          "luck": "Повышает шанс сундуков и редких предметов. Сейчас: +{value}%.",
+          "armor": "Снижает урон за пропущенные дни. Сейчас защита: {value}%."
+        }
+      },
       "aboutTitle": "Что здесь происходит",
       "aboutText": "RPG Life превращает повседневные задачи в RPG-прогресс. Выполняй задания, получай опыт и золото, собирай предметы, усиливай героя и открывай достижения.",
       "statsTitle": "За что отвечают характеристики",
@@ -122,6 +173,44 @@
       "emptyActive": "Активных заданий нет. Создай новое или дождись обновления.",
       "emptyCompleted": "Пока нет выполненных заданий.",
       "newDailyQuest": "Новый ежедневный квест",
+      "quick": {
+        "subtitle": "10 ежедневных шагов к твоей цели",
+        "commandCenter": "Центр управления заданиями",
+        "dailyFocus": "Фокус дня",
+        "goalSummary": "{goal} • {progress}% • осталось {days} дн.",
+        "goalSummaryEmpty": "Выбери жизненную цель в профиле, чтобы получать ежедневные задания.",
+        "limitsSummary": "Сегодня: {system}/10 системных • {total}/20 всего",
+        "limitsSummaryEmpty": "Система выдает 10 целевых заданий в день.",
+        "stepsSourceFallback": "Датчики",
+        "todaySteps": "Шагов сегодня",
+        "notAvailable": "нет данных",
+        "refreshList": "Обновить список",
+        "createQuest": "Создать квест",
+        "show": "Показывать",
+        "goalImpact": "Вклад в цель: +{value}%",
+        "today": "Сегодня",
+        "needSteps": "нужно шагов",
+        "complete": "Выполнить",
+        "loadingTitle": "Загружаем задания...",
+        "loadingDescription": "Подбираем задания по твоей цели.",
+        "emptyTitle": "На сегодня список пуст",
+        "emptyDescription": "Обнови экран или создай свое задание.",
+        "refresh": "Обновить",
+        "createCustomQuest": "Создать пользовательский квест",
+        "questTitlePlaceholder": "Название квеста",
+        "descriptionPlaceholder": "Описание",
+        "creating": "Создаем...",
+        "fillAllFields": "Заполни поля",
+        "fillAllFieldsDescription": "Нужны название и описание.",
+        "refreshFailed": "Не удалось обновить список",
+        "tryAgain": "Попробуй еще раз.",
+        "kind": {
+          "support": "Поддержка",
+          "hard": "Сложное",
+          "medium": "Среднее",
+          "daily": "Ежедневное"
+        }
+      },
       "errors": {
         "failedToComplete": "Не удалось завершить квест",
         "failedToDelete": "Не удалось удалить квест",
@@ -205,6 +294,20 @@
         "unknown": "Неизвестно"
       },
       "earnedAt": "Получено",
+      "quick": {
+        "invalidAccountName": "Имя аккаунта должно быть не короче 2 символов и не начинаться с цифры.",
+        "invalidCharacterName": "Имя персонажа должно быть не короче 2 символов и не начинаться с цифры.",
+        "invalidBirthYear": "Год рождения должен быть от 1950 до {year}.",
+        "goalUpdatedTitle": "Цель обновлена",
+        "goalUpdatedDescription": "Новый цикл прогресса запущен.",
+        "goalUpdateFailed": "Не удалось обновить цель",
+        "goalsTitle": "Цели",
+        "goalsSubtitle": "Выбор цели влияет на структуру ежедневных, недельных и долгосрочных заданий.",
+        "goalTermMonths": "{months} мес.",
+        "applyGoalCycle": "Применить цель и начать новый цикл",
+        "achievementsSubtitle": "Полный список и редкость наград",
+        "openAllAchievements": "Открыть все достижения"
+      },
       "errors": {
         "failedToSave": "Не удалось сохранить",
         "profileUpdated": "Профиль обновлен",
@@ -236,6 +339,33 @@
       "connectionWorks": "Связь работает",
       "connectionStatus": "Статус:",
       "connectionFailed": "Связь не работает",
+      "quick": {
+        "socialLoginTitle": "Социальный вход",
+        "ok": "OK",
+        "googleTitle": "Google",
+        "telegramTitle": "Telegram",
+        "googleMissingIdToken": "Google не вернул id_token.",
+        "invalidEmail": "Укажи корректный email.",
+        "passwordTooShort": "Пароль должен быть не короче 8 символов.",
+        "googleClientMissing": "В mobile-конфиге не настроен Google client ID.",
+        "googleNotReady": "Google-авторизация еще не готова. Попробуй снова.",
+        "googleFailed": "Не удалось завершить вход через Google.",
+        "telegramOpened": "Открыли бота Telegram. Приложение уже умеет принять возврат по ссылке вида rpglife://auth/telegram?init_data=..., а backend bridge готов по пути /api/v1/auth/telegram/bridge.",
+        "accountHint": "Войди в аккаунт и продолжай прокачку героя без лишних настроек.",
+        "socialSectionTitle": "Социальный вход",
+        "socialSectionHint": "Подготовлено для Google и Telegram. Для Telegram приложение уже умеет поймать возврат по deep link формата rpglife://auth/telegram?init_data=....",
+        "continueWith": "Продолжить через {provider}",
+        "ready": "Готово",
+        "comingSoon": "Скоро",
+        "hide": "Скрыть",
+        "configure": "Настроить",
+        "provider": {
+          "configured": "Провайдер сконфигурирован",
+          "pending": "Нужно добавить client ID или настройки бота",
+          "telegramReady": "Бот подключен. Следующий шаг - автоматический возврат из Telegram в приложение.",
+          "telegramPending": "Нужно добавить bot token и username"
+        }
+      },
       "errors": {
         "loginFailed": "Ошибка входа",
         "error": "Ошибка",
@@ -271,6 +401,17 @@
         "female": "Женский",
         "nonbinary": "Небинарный"
       },
+      "quick": {
+        "invalidEmail": "Укажи корректный email.",
+        "invalidPassword": "Пароль должен быть не короче 8 символов и содержать хотя бы одну букву.",
+        "invalidName": "Имя должно быть не короче 2 символов и не начинаться с цифры.",
+        "invalidBirthYear": "Год рождения должен быть от 1950 до {year}.",
+        "goalSectionTitle": "Жизненная цель",
+        "resultExample": "Пример: {result}",
+        "goalTermTitle": "Срок цели",
+        "goalTermMonths": "{months} мес.",
+        "goalTermHint": "Рекомендуемый срок для цели: {months} мес."
+      },
       "errors": {
         "registrationFailed": "Ошибка регистрации",
         "unknownError": "Неизвестная ошибка"
@@ -295,6 +436,42 @@
     "shop": {
       "title": "Магазин",
       "subtitle": "Лавка странствующего торговца с витриной дня, редкими находками и отдельной стойкой сундуков.",
+      "quick": {
+        "subtitle": "Магазин со снаряжением, сундуками и актуальной ротацией",
+        "itemsInRotation": "{count} предметов в текущей ротации",
+        "searchPlaceholder": "Найти предмет...",
+        "refresh": "Обновить",
+        "refreshedTitle": "Ассортимент обновлен",
+        "refreshedDescription": "Новая ротация уже доступна.",
+        "refreshFailed": "Не удалось обновить магазин",
+        "loadFailed": "Не удалось загрузить магазин",
+        "levelTooLow": "Недостаточный уровень",
+        "requiredLevel": "Требуемый уровень",
+        "requiredLevelValue": "Требуется уровень: {level}",
+        "notEnoughGold": "Недостаточно золота",
+        "notEnoughGoldDescription": "Получи больше золота в заданиях и возвращайся.",
+        "chestPurchased": "Сундук куплен",
+        "itemPurchased": "Предмет куплен",
+        "openInInventory": "Открой его в инвентаре.",
+        "emptyTitle": "Ничего не найдено",
+        "emptyDescription": "Попробуй другой фильтр или сбрось поиск.",
+        "resetFilters": "Сбросить фильтры",
+        "itemBadge": "{rarity} • {levelShort} {level}",
+        "priceValue": "{price} {gold}",
+        "filters": {
+          "all": "Все",
+          "weapon": "Оружие",
+          "armor": "Броня",
+          "accessory": "Аксессуары",
+          "chest": "Сундуки"
+        },
+        "sort": {
+          "rarity": "Редкость",
+          "price": "Цена",
+          "level": "Уровень",
+          "name": "Название"
+        }
+      },
       "introTitle": "Торговая лавка",
       "introText": "Чем выше редкость, тем богаче выглядит предмет. Открывай карточку, сравнивай с надетым и покупай без потери контекста.",
       "walletLabel": "Золото",
@@ -464,6 +641,53 @@
         "friends": "Друзья",
         "leaderboard": "Лидерборд",
         "global": "Глобальный"
+      },
+      "errorTitle": "Не удалось загрузить раздел",
+      "empty": {
+        "searchTitle": "Друзья не найдены",
+        "searchDescription": "Попробуй другой запрос или найди друга по email.",
+        "friendsTitle": "У тебя пока нет друзей",
+        "friendsDescription": "Добавь первых союзников, чтобы видеть их прогресс и совместные активности.",
+        "leaderboardTitle": "Рейтинг пока пуст",
+        "leaderboardDescription": "Выбери цель и начни выполнять задания, чтобы появиться в рейтинге друзей.",
+        "findFriendsAction": "Найти друзей"
+      },
+      "errors": {
+        "loadFriends": "Не удалось загрузить список друзей.",
+        "loadLeaderboard": "Не удалось загрузить рейтинг.",
+        "search": "Не удалось выполнить поиск.",
+        "searchMinLength": "Введите минимум 2 символа.",
+        "sendRequest": "Не удалось отправить заявку в друзья."
+      }
+    },
+    "coopTasks": {
+      "title": "Задания с друзьями",
+      "subtitle": "Принимай приглашения и выполняй совместные цели",
+      "pendingTitle": "Новые приглашения",
+      "activeTitle": "Активные совместные задания",
+      "noPending": "Сейчас нет новых приглашений в совместные задания.",
+      "noActive": "Пока нет активных совместных заданий.",
+      "accept": "Принять",
+      "decline": "Отклонить",
+      "progress": "Прогресс: {current}/{goal}",
+      "youLabel": "{name} (вы)",
+      "errorTitle": "Не удалось загрузить совместные задания",
+      "empty": {
+        "pendingTitle": "Пока нет новых приглашений",
+        "pendingDescription": "Когда друг позовёт тебя в совместное задание, оно появится здесь.",
+        "activeTitle": "Совместных заданий пока нет",
+        "activeDescription": "Сначала дождись приглашения или позови друга в кооператив.",
+        "activeDescriptionPending": "У тебя уже есть приглашение. Прими его, чтобы начать совместное задание."
+      },
+      "errors": {
+        "load": "Не удалось загрузить совместные задания.",
+        "update": "Не удалось обновить приглашение."
+      },
+      "status": {
+        "scheduled": "Запланировано",
+        "active": "Активно",
+        "completed": "Завершено",
+        "failed": "Не выполнено"
       }
     },
     "challengeInvitations": {
@@ -471,7 +695,24 @@
     },
     "achievements": {
       "title": "Достижения",
-      "subtitle": "Закрывай цели и получай награды"
+      "subtitle": "Закрывай цели и получай награды",
+      "quick": {
+        "subtitle": "Собирай награды, сундуки и титулы за реальный прогресс",
+        "progressTitle": "Прогресс достижений",
+        "progressMeta": "{earned}/{total} получено",
+        "rewardLine": "+{xp} XP • +{gold} золота",
+        "modalRewardLine": "{status} • +{xp} XP • +{gold} золота",
+        "themeLine": "Тема: {value}",
+        "tierLine": "Редкость: {value}",
+        "dateLine": "Дата: {value}",
+        "themeFallback": "self",
+        "tierFallback": "common",
+        "status": {
+          "earned": "Получено",
+          "available": "Доступно",
+          "locked": "Заблокировано"
+        }
+      }
     },
     "challenges": {
       "title": "Испытания",
@@ -560,7 +801,22 @@
       "online": "Соединение: онлайн",
       "offline": "Соединение: оффлайн",
       "pendingActions": "Отложенные действия: {count}",
-      "logout": "Выйти"
+      "logout": "Выйти",
+      "quick": {
+        "generalHint": "Управляй базовыми настройками приложения на этом устройстве.",
+        "securityHint": "Смена пароля применяется сразу и помогает защитить аккаунт героя.",
+        "passwordStateTitle": "Для смены пароля нужно больше данных",
+        "passwordValidation": "Введи текущий и новый пароль. Оба должны быть не короче 8 символов.",
+        "recoveryHint": "Используй email, привязанный к аккаунту, чтобы получить инструкции по восстановлению.",
+        "recoveryStateTitle": "Нужен email для восстановления",
+        "recoveryValidation": "Введи корректный email перед отправкой запроса.",
+        "recoveryDisabledTitle": "Восстановление недоступно",
+        "recoveryDisabledDescription": "В этой сборке восстановление аккаунта отключено. Пароль всё ещё можно сменить в разделе безопасности.",
+        "syncOnlineTitle": "Синхронизация активна",
+        "syncOfflineTitle": "Оффлайн-очередь активна",
+        "syncSummary": "{status}. Отложенных действий: {count}.",
+        "syncHint": "Когда соединение вернётся, очередь действий синхронизируется автоматически."
+      }
     },
     "help": {
       "title": "Помощь",
@@ -568,7 +824,16 @@
       "tipOffline": "Если сервер недоступен, приложение использует кэш и сохраняет поддерживаемые действия локально.",
       "tipSync": "Как только соединение восстановится, очередь действий автоматически отправится на сервер.",
       "tipNotifications": "Push-уведомления можно отключить для этого устройства в Настройках.",
-      "tipSecurity": "Смена пароля и восстановление аккаунта доступны на странице Настроек."
+      "tipSecurity": "Смена пароля и восстановление аккаунта доступны на странице Настроек.",
+      "quick": {
+        "heroTitle": "Быстрый центр помощи",
+        "heroDescription": "Самые важные ответы по приложению и быстрый путь к настройкам, которые на них влияют.",
+        "offlineTitle": "Как работает оффлайн-режим",
+        "syncTitle": "Когда происходит синхронизация",
+        "notificationsTitle": "Где управлять уведомлениями",
+        "securityTitle": "Как защитить аккаунт",
+        "openSettings": "Открыть настройки"
+      }
     },
     "about": {
       "title": "О приложении",
@@ -602,6 +867,12 @@
   },
   "common": {
     "loading": "Загрузка данных...",
+    "search": "Найти",
+    "loadMore": "Загрузить еще",
+    "retry": "Повторить",
+    "findFriends": "Найти друзей",
+    "createGoal": "Создать цель",
+    "acceptInvite": "Принять приглашение",
     "loadingInterface": "Загрузка интерфейса и данных",
     "item": "Предмет",
     "quest": "Квест",
@@ -621,7 +892,8 @@
     "hp": "HP",
     "mana": "мана",
     "crystals": "золото",
-    "levelShort": "??.",
+    "levelShort": "Ур.",
+    "resetFilters": "Сбросить фильтры",
     "equipped": "Надето",
     "noBonuses": "Без бонусов",
     "price": "Цена",
@@ -785,6 +1057,35 @@
   "home": {
     "dailyRewardClaimed": "Ежедневная награда получена"
   },
+  "goals": {
+    "fallback": {
+      "weight_health": {
+        "title": "Похудение и здоровье",
+        "description": "Снижение веса, улучшение формы и здоровые привычки.",
+        "result": "Минус 4-8 кг, стабильная активность."
+      },
+      "new_profession": {
+        "title": "Освоение новой профессии",
+        "description": "Переход в новую сферу через обучение и практику.",
+        "result": "Портфолио и первые реальные проекты."
+      },
+      "financial_growth": {
+        "title": "Финансовый рост",
+        "description": "Рост дохода, контроль расходов и накопления.",
+        "result": "Подушка безопасности и новый уровень дохода."
+      },
+      "discipline_productivity": {
+        "title": "Самодисциплина и продуктивность",
+        "description": "Фокус, режим дня и стабильное выполнение задач.",
+        "result": "Больше завершенных задач без выгорания."
+      },
+      "personal_development": {
+        "title": "Личностное развитие",
+        "description": "Чтение, мышление, навыки и осознанность.",
+        "result": "Новые привычки и уверенный рост навыков."
+      }
+    }
+  },
   "login": {
     "loginError": "Ошибка входа",
     "apiSaved": "API сохранен",
@@ -807,5 +1108,15 @@
     "syncInProgress": "Синхронизация выполняется.",
     "syncCompleteTitle": "Синхронизация завершена",
     "syncCompleteDescription": "Успешно обработано действий: {count}."
+  },
+  "ui": {
+    "characterHeader": {
+      "noGoal": "Нет цели",
+      "noActiveGoal": "Нет активной цели",
+      "streak": "Серия",
+      "sets": "Сеты",
+      "gold": "Золото",
+      "goalProgress": "Прогресс цели"
+    }
   }
 }

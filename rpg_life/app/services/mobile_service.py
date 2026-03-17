@@ -1,11 +1,14 @@
+from datetime import datetime, timedelta
+
 from fastapi import HTTPException
 from sqlalchemy.orm import Session, joinedload
 
 from app import crud
 from app.achievements import ACHIEVEMENTS
 from app.core.cache import cache_get_json, cache_set_json
+from app.core.dates import utc_now
 from app.item_service import SET_BONUSES, calculate_set_bonus
-from app.models import DailyBonus, Item, User, UserInventory
+from app.models import DailyBonus, DailySteps, Item, User, UserClassProgress, UserInventory
 from app.stat_effects import StatEffects
 from app.services import character_service, engagement_service, health_service, inventory_service, quest_service, social_service
 from app.text_utils import normalize_item_model, normalize_nested_strings
@@ -81,6 +84,78 @@ def get_character_profile(db: Session, current_user: User) -> dict:
             "health": health_context["health"],
         },
         "health": health_context["health"],
+    }
+
+
+def sync_today_steps(
+    db: Session,
+    current_user: User,
+    steps: int,
+    day_started_at: str | None = None,
+    source: str = "device",
+) -> dict:
+    normalized_steps = max(0, int(steps or 0))
+    now = utc_now()
+
+    if day_started_at:
+        try:
+            day_start = datetime.fromisoformat(day_started_at.replace("Z", "+00:00"))
+            if day_start.tzinfo is not None:
+                day_start = day_start.astimezone().replace(tzinfo=None)
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail="Invalid day_started_at") from error
+    else:
+        day_start = datetime(now.year, now.month, now.day)
+
+    day_end = day_start + timedelta(days=1)
+
+    main_progress = (
+        db.query(UserClassProgress)
+        .filter(UserClassProgress.user_id == current_user.id, UserClassProgress.is_unlocked == True)
+        .order_by(UserClassProgress.id.asc())
+        .first()
+    )
+
+    record = (
+        db.query(DailySteps)
+        .filter(
+            DailySteps.user_id == current_user.id,
+            DailySteps.date >= day_start,
+            DailySteps.date < day_end,
+        )
+        .order_by(DailySteps.date.desc())
+        .first()
+    )
+
+    previous_steps = int(record.steps or 0) if record else 0
+
+    if record is None:
+        record = DailySteps(
+            user_id=current_user.id,
+            class_progress_id=main_progress.id if main_progress else None,
+            steps=normalized_steps,
+            date=day_start,
+            synced_at=now,
+            source=source,
+        )
+        db.add(record)
+    else:
+        record.steps = max(previous_steps, normalized_steps)
+        record.synced_at = now
+        record.source = source
+        if main_progress and not record.class_progress_id:
+            record.class_progress_id = main_progress.id
+
+    db.commit()
+    db.refresh(record)
+
+    return {
+        "steps": int(record.steps or 0),
+        "previous_steps": previous_steps,
+        "delta": max(0, int(record.steps or 0) - previous_steps),
+        "synced_at": record.synced_at.isoformat() if record.synced_at else None,
+        "day_started_at": day_start.isoformat(),
+        "source": source,
     }
 
 

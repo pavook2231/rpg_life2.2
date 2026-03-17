@@ -18,12 +18,21 @@ module.exports = () => {
   }
   const allowCustomApiOverride = envFlag("EXPO_PUBLIC_ALLOW_CUSTOM_API_OVERRIDE", !isProduction);
   const enableAccountRecovery = envFlag("EXPO_PUBLIC_ENABLE_ACCOUNT_RECOVERY", false);
-  const googleAuthClientId = process.env.EXPO_PUBLIC_GOOGLE_AUTH_CLIENT_ID || "";
+  const googleAuthClientId =
+    process.env.EXPO_PUBLIC_GOOGLE_AUTH_CLIENT_ID ||
+    "723557656382-3k94tuoejci6bovt2i9hn0qd728cl4so.apps.googleusercontent.com";
   const socialAuthRedirectScheme = process.env.EXPO_PUBLIC_SOCIAL_AUTH_REDIRECT_SCHEME || "rpglife";
 
   return {
     ...baseExpoConfig,
     scheme: baseExpoConfig.scheme || socialAuthRedirectScheme,
+    ios: {
+      ...(baseExpoConfig.ios ?? {}),
+      infoPlist: {
+        ...((baseExpoConfig.ios && baseExpoConfig.ios.infoPlist) ?? {}),
+        ITSAppUsesNonExemptEncryption: false,
+      },
+    },
     extra: {
       ...(baseExpoConfig.extra ?? {}),
       apiBaseUrl,

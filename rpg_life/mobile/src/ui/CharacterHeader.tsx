@@ -2,7 +2,7 @@ import React, { useMemo } from "react";
 import { StyleProp, StyleSheet, Text, View, ViewStyle } from "react-native";
 
 import { useGame } from "../context/GameContext";
-import { useLocalization, useTranslation } from "../context/LocalizationContext";
+import { useTranslation } from "../context/LocalizationContext";
 import { buildDerivedStats } from "../lib/gameRules";
 import { getClassIcon, getClassLabel, normalizeDisplayText } from "../lib/gameUi";
 import { Avatar } from "./Avatar";
@@ -41,12 +41,10 @@ function MetricPill({ icon, label, value, compact = false }: MetricProps) {
 
 export function CharacterHeader({ compact = false, style }: CharacterHeaderProps) {
   const t = useTranslation();
-  const { language } = useLocalization();
   const { hero, equipment, profile } = useGame();
   const colors = useThemeColors();
   const themeMode = useThemeMode();
   const styles = useMemo(() => createStyles(colors, themeMode), [colors, themeMode]);
-  const isEn = language === "en";
 
   const stats = useMemo(
     () => buildDerivedStats(equipment?.class_info, equipment?.equipment_totals, equipment?.reward_effects),
@@ -61,20 +59,18 @@ export function CharacterHeader({ compact = false, style }: CharacterHeaderProps
   const xpCurrent = hero?.current_xp ?? equipment?.class_info?.current_xp ?? 0;
   const xpTotal = hero?.next_level_xp ?? 120;
   const goalPercent = profile?.goal?.goal_progress_percent ?? 0;
-  const goalPointsLabel = profile?.goal ? `${profile.goal.goal_progress_percent}/100` : isEn ? "No goal" : "Нет цели";
+  const goalPointsLabel = profile?.goal ? `${profile.goal.goal_progress_percent}/100` : t("ui.characterHeader.noGoal");
   const setBonusCount = equipment?.set_bonuses?.length ?? 0;
   const goalLabel = profile?.goal?.goal_title
     ? normalizeDisplayText(profile.goal.goal_title)
-    : isEn
-      ? "No active goal"
-      : "Нет активной цели";
+    : t("ui.characterHeader.noActiveGoal");
   const classLabel = getClassLabel(heroClass, t);
 
   const metrics = [
     { icon: "shield", label: t("screens.character.stats.armor"), value: stats.armor },
     { icon: "flash", label: t("screens.character.stats.crit"), value: `${stats.crit}%` },
-    { icon: "fire", label: isEn ? "Streak" : "Серия", value: heroStreak },
-    { icon: "star-four-points", label: isEn ? "Sets" : "Сеты", value: setBonusCount },
+    { icon: "fire", label: t("ui.characterHeader.streak"), value: heroStreak },
+    { icon: "star-four-points", label: t("ui.characterHeader.sets"), value: setBonusCount },
   ];
 
   return (
@@ -107,14 +103,14 @@ export function CharacterHeader({ compact = false, style }: CharacterHeaderProps
         </View>
 
         <View style={[styles.walletPanel, compact ? styles.walletPanelCompact : null]}>
-          <Text style={styles.walletLabel}>{isEn ? "Gold" : "Золото"}</Text>
+          <Text style={styles.walletLabel}>{t("ui.characterHeader.gold")}</Text>
           <View style={styles.walletValueRow}>
             <GameIcon name="cash" size={16} color={colors.gold} />
             <Text style={styles.walletValue}>{gold}</Text>
           </View>
           {!compact ? (
             <Text style={styles.walletSubtext}>
-              {isEn ? "Goal progress" : "Прогресс цели"}: {goalPointsLabel}
+              {t("ui.characterHeader.goalProgress")}: {goalPointsLabel}
             </Text>
           ) : null}
         </View>

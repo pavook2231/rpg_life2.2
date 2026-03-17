@@ -2,7 +2,7 @@
   "expo": {
     "name": "RPG Life",
     "slug": "rpg-life",
-    "version": "1.0.1-beta.1",
+    "version": "2.2",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "scheme": "rpglife",
@@ -18,11 +18,21 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.rpglife.mobile",
-      "buildNumber": "2"
+      "buildNumber": "3",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSHealthShareUsageDescription": "This app uses HealthKit to track your daily steps for fitness goals.",
+        "NSHealthUpdateUsageDescription": "This app updates HealthKit with your step data."
+      }
     },
     "android": {
       "package": "com.rpglife.mobile",
-      "versionCode": 2,
+      "versionCode": 3,
+      "permissions": [
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.BODY_SENSORS",
+        "com.google.android.gms.permission.ACTIVITY_RECOGNITION"
+      ],
       "adaptiveIcon": {
         "foregroundImage": "./android/app/src/main/res/drawable-xxxhdpi/splashscreen_logo.png",
         "backgroundColor": "#111827"
@@ -43,13 +53,14 @@
       ]
     },
     "extra": {
-      "apiBaseUrl": "http://10.0.2.2:8000/api/v1",
+      "apiBaseUrl": "https://six-moose-push.loca.lt/api/v1",
       "eas": {
         "projectId": "161a1a7b-1136-4d34-88e1-3e0e6297c89c"
       }
     },
     "plugins": [
       "expo-secure-store",
+      "expo-web-browser",
       "expo-notifications"
     ],
     "owner": "ponka22311"

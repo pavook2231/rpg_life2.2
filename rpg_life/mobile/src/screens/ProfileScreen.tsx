@@ -11,6 +11,66 @@ import { useLocalization, useTranslation } from "../context/LocalizationContext"
 import { getClassLabel, getRarityColor, normalizeDisplayText } from "../lib/gameUi";
 import { Button, Card, GameIcon, Modal, ProfileHeroCard, radii, useThemeColors, useThemeMode } from "../ui";
 
+function getFallbackGoals(t: (key: string, params?: Record<string, string | number>) => string): GoalTemplatePayload["goals"] {
+  return [
+    {
+      id: "weight_health",
+      title: t("goals.fallback.weight_health.title"),
+      description: t("goals.fallback.weight_health.description"),
+      result_example: t("goals.fallback.weight_health.result"),
+      icon: "run-fast",
+      accent_color: "#2ecc71",
+      recommended_term_months: 6,
+      is_primary: true,
+    },
+    {
+      id: "new_profession",
+      title: t("goals.fallback.new_profession.title"),
+      description: t("goals.fallback.new_profession.description"),
+      result_example: t("goals.fallback.new_profession.result"),
+      icon: "briefcase-variant-outline",
+      accent_color: "#8b5cf6",
+      recommended_term_months: 9,
+      is_primary: true,
+    },
+    {
+      id: "financial_growth",
+      title: t("goals.fallback.financial_growth.title"),
+      description: t("goals.fallback.financial_growth.description"),
+      result_example: t("goals.fallback.financial_growth.result"),
+      icon: "cash-multiple",
+      accent_color: "#f1c40f",
+      recommended_term_months: 6,
+      is_primary: true,
+    },
+    {
+      id: "discipline_productivity",
+      title: t("goals.fallback.discipline_productivity.title"),
+      description: t("goals.fallback.discipline_productivity.description"),
+      result_example: t("goals.fallback.discipline_productivity.result"),
+      icon: "timer-check-outline",
+      accent_color: "#3498db",
+      recommended_term_months: 3,
+      is_primary: true,
+    },
+    {
+      id: "personal_development",
+      title: t("goals.fallback.personal_development.title"),
+      description: t("goals.fallback.personal_development.description"),
+      result_example: t("goals.fallback.personal_development.result"),
+      icon: "brain",
+      accent_color: "#f39c12",
+      recommended_term_months: 6,
+      is_primary: true,
+    },
+  ];
+}
+
+function isValidProfileName(value: string) {
+  const trimmed = value.trim();
+  return trimmed.length >= 2 && !/^\d/.test(trimmed);
+}
+
 function getAchievementStatusLabel(t: (key: string, params?: Record<string, string | number>) => string, status?: string | null) {
   if (status === "earned") return t("screens.profile.achievementStatus.earned");
   if (status === "available") return t("screens.profile.achievementStatus.available");
@@ -57,6 +117,7 @@ export function ProfileScreen() {
   const navigation = useNavigation<any>();
   const { language } = useLocalization();
   const t = useTranslation();
+  const fallbackGoals = useMemo(() => getFallbackGoals(t), [t]);
   const { profile, hero, achievements, refreshGame } = useGame();
   const { signOut } = useAuth();
   const colors = useThemeColors();
@@ -68,7 +129,7 @@ export function ProfileScreen() {
   const [selectedAchievement, setSelectedAchievement] = useState<any>(null);
   const [goalType, setGoalType] = useState("personal_development");
   const [goalTermMonths, setGoalTermMonths] = useState(6);
-  const [goalTemplates, setGoalTemplates] = useState<GoalTemplatePayload["goals"]>([]);
+  const [goalTemplates, setGoalTemplates] = useState<GoalTemplatePayload["goals"]>(fallbackGoals);
 
   useEffect(() => {
     setName(profile?.user?.name ?? "");
@@ -83,20 +144,44 @@ export function ProfileScreen() {
     fetchGoalTemplates()
       .then((payload) => {
         if (!active) return;
-        setGoalTemplates(payload.goals ?? []);
+        setGoalTemplates(payload.goals?.length ? payload.goals : fallbackGoals);
       })
-      .catch(() => undefined);
+      .catch(() => {
+        if (active) {
+          setGoalTemplates(fallbackGoals);
+        }
+      });
     return () => {
       active = false;
     };
-  }, []);
+  }, [fallbackGoals]);
 
   async function handleSave() {
+    const trimmedName = name.trim();
+    const trimmedCharacterName = characterName.trim();
+    const numericBirthYear = Number(birthYear);
+    const currentYear = new Date().getFullYear();
+
+    if (!isValidProfileName(trimmedName)) {
+      Alert.alert(t("screens.profile.errors.failedToSave"), t("screens.profile.quick.invalidAccountName"));
+      return;
+    }
+
+    if (!isValidProfileName(trimmedCharacterName)) {
+      Alert.alert(t("screens.profile.errors.failedToSave"), t("screens.profile.quick.invalidCharacterName"));
+      return;
+    }
+
+    if (!Number.isInteger(numericBirthYear) || numericBirthYear < 1950 || numericBirthYear > currentYear - 10) {
+      Alert.alert(t("screens.profile.errors.failedToSave"), t("screens.profile.quick.invalidBirthYear", { year: currentYear - 10 }));
+      return;
+    }
+
     try {
       await updateProfile({
-        name: name.trim(),
-        character_name: characterName.trim(),
-        birth_year: Number(birthYear),
+        name: trimmedName,
+        character_name: trimmedCharacterName,
+        birth_year: numericBirthYear,
         gender: profile?.user?.gender ?? "male",
         goal_type: goalType,
         goal_term_months: goalTermMonths,
@@ -117,13 +202,13 @@ export function ProfileScreen() {
         start_new_goal_cycle: true,
       });
       await refreshGame();
-      Alert.alert("Цель обновлена", "Новый цикл прогресса запущен.");
+      Alert.alert(t("screens.profile.quick.goalUpdatedTitle"), t("screens.profile.quick.goalUpdatedDescription"));
     } catch (error) {
-      Alert.alert("Не удалось обновить цель", error instanceof Error ? error.message : t("common.error"));
+      Alert.alert(t("screens.profile.quick.goalUpdateFailed"), error instanceof Error ? error.message : t("common.error"));
     }
   }
 
-  const currentLanguageLabel = language === "ru" ? t("settings.languageSwitcher.ru") : t("settings.languageSwitcher.en");
+  const currentLanguageLabel = t(`settings.languageSwitcher.${language}`);
   const displayHeroName = normalizeDisplayText(hero?.name ?? profile?.user?.name ?? t("screens.profile.unknownHero"));
   const displayEmail = normalizeDisplayText(profile?.user?.email ?? "-");
   const displayClass = getClassLabel(hero?.class ?? undefined, t);
@@ -185,10 +270,10 @@ export function ProfileScreen() {
 
       <Card>
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Цели</Text>
+          <Text style={styles.sectionTitle}>{t("screens.profile.quick.goalsTitle")}</Text>
           <Text style={styles.sectionMeta}>{profile?.user?.goal_progress_percent ?? 0}%</Text>
         </View>
-        <Text style={styles.quickSubtitle}>Выбор цели влияет на структуру ежедневных, недельных и долгосрочных заданий.</Text>
+        <Text style={styles.quickSubtitle}>{t("screens.profile.quick.goalsSubtitle")}</Text>
 
         <View style={styles.goalGrid}>
           {(goalTemplates.length ? goalTemplates : []).slice(0, 5).map((goal) => {
@@ -215,13 +300,13 @@ export function ProfileScreen() {
               onPress={() => setGoalTermMonths(months)}
             >
               <Text style={[styles.goalTermText, goalTermMonths === months ? styles.goalTermTextActive : null]}>
-                {months} мес.
+                {t("screens.profile.quick.goalTermMonths", { months })}
               </Text>
             </Pressable>
           ))}
         </View>
 
-        <Button label="Применить цель и начать новый цикл" icon="flag-checkered" onPress={handleApplyGoalCycle} />
+        <Button label={t("screens.profile.quick.applyGoalCycle")} icon="flag-checkered" onPress={handleApplyGoalCycle} />
       </Card>
 
       <Card>
@@ -238,13 +323,6 @@ export function ProfileScreen() {
             colors={colors}
           />
           <QuickActionRow
-            icon="email-outline"
-            label={t("screens.challengeInvitations.title")}
-            onPress={() => navigation.navigate("ChallengeInvitations")}
-            styles={styles}
-            colors={colors}
-          />
-          <QuickActionRow
             icon="account-multiple-outline"
             label={t("screens.friends.title")}
             subtitle={t("screens.friends.subtitle")}
@@ -255,7 +333,7 @@ export function ProfileScreen() {
           <QuickActionRow
             icon="trophy-variant-outline"
             label={t("screens.profile.achievements")}
-            subtitle="Полный список и редкость наград"
+            subtitle={t("screens.profile.quick.achievementsSubtitle")}
             onPress={() => navigation.navigate("Achievements")}
             styles={styles}
             colors={colors}
@@ -265,14 +343,6 @@ export function ProfileScreen() {
             label={t("screens.help.title")}
             subtitle={t("screens.help.subtitle")}
             onPress={() => navigation.navigate("Help")}
-            styles={styles}
-            colors={colors}
-          />
-          <QuickActionRow
-            icon="information-outline"
-            label={t("screens.about.title")}
-            subtitle={t("screens.about.subtitle")}
-            onPress={() => navigation.navigate("About")}
             styles={styles}
             colors={colors}
           />
@@ -310,7 +380,7 @@ export function ProfileScreen() {
         </ScrollView>
 
         <Button
-          label="Открыть все достижения"
+          label={t("screens.profile.quick.openAllAchievements")}
           icon="trophy-variant-outline"
           variant="secondary"
           onPress={() => navigation.navigate("Achievements")}
@@ -348,274 +418,274 @@ export function ProfileScreen() {
 
 function createStyles(colors: ReturnType<typeof useThemeColors>, themeMode: ReturnType<typeof useThemeMode>) {
   return StyleSheet.create({
-  heroCard: {
-    gap: 12,
-  },
-  heroTopRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: 12,
-  },
-  heroTopRowCompact: {
-    flexDirection: "column",
-    alignItems: "stretch",
-  },
-  heroIdentity: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-  },
-  heroCopy: {
-    flex: 1,
-    gap: 2,
-  },
-  heroName: {
-    color: colors.text,
-    fontSize: 20,
-    fontWeight: "900",
-  },
-  heroClass: {
-    color: colors.primary,
-    fontWeight: "800",
-    fontSize: 13,
-  },
-  heroEmail: {
-    color: colors.textMuted,
-    fontWeight: "700",
-    fontSize: 13,
-  },
-  levelBadge: {
-    minWidth: 96,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: colors.primary,
-    backgroundColor: themeMode === "light" ? "#f2dfbf" : "#3f2a08",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 2,
-  },
-  levelBadgeCompact: {
-    width: "100%",
-    flexDirection: "row",
-    justifyContent: "space-between",
-  },
-  levelBadgeLabel: {
-    color: themeMode === "light" ? "#7a4b12" : "#fde68a",
-    fontSize: 11,
-    fontWeight: "700",
-  },
-  levelBadgeValue: {
-    color: colors.text,
-    fontSize: 24,
-    fontWeight: "900",
-  },
-  infoChipGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-  },
-  infoChip: {
-    flexGrow: 1,
-    minWidth: 106,
-    flexBasis: "31%",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    padding: 10,
-    borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: themeMode === "light" ? "rgba(255,250,240,0.9)" : "rgba(7, 12, 24, 0.45)",
-  },
-  infoChipIcon: {
-    width: 34,
-    height: 34,
-    borderRadius: 12,
-    borderWidth: 1,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  infoChipCopy: {
-    flex: 1,
-    gap: 2,
-  },
-  infoChipLabel: {
-    color: colors.textDim,
-    fontSize: 11,
-    fontWeight: "700",
-  },
-  infoChipValue: {
-    color: colors.text,
-    fontSize: 14,
-    fontWeight: "900",
-  },
-  sectionHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: 12,
-  },
-  sectionTitle: {
-    color: colors.text,
-    fontSize: 17,
-    fontWeight: "900",
-  },
-  sectionMeta: {
-    color: colors.textDim,
-    fontSize: 12,
-    fontWeight: "800",
-  },
-  input: {
-    backgroundColor: colors.backgroundInset,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radii.md,
-    paddingHorizontal: 14,
-    paddingVertical: 11,
-    color: colors.text,
-  },
-  quickList: {
-    gap: 8,
-  },
-  quickRow: {
-    minHeight: 60,
-    borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.backgroundInset,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12,
-  },
-  quickRowLeft: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-  },
-  quickIconWrap: {
-    width: 38,
-    height: 38,
-    borderRadius: 14,
-    backgroundColor: themeMode === "light" ? "rgba(183,121,31,0.16)" : "rgba(245, 158, 11, 0.12)",
-    borderWidth: 1,
-    borderColor: "rgba(245, 158, 11, 0.24)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  quickCopy: {
-    flex: 1,
-    gap: 2,
-  },
-  quickLabel: {
-    color: colors.text,
-    fontWeight: "800",
-    fontSize: 14,
-  },
-  quickSubtitle: {
-    color: colors.textMuted,
-    fontSize: 12,
-    lineHeight: 16,
-  },
-  goalGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-  },
-  goalChip: {
-    flexGrow: 1,
-    minWidth: 120,
-    borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.backgroundInset,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-  },
-  goalChipActive: {
-    borderColor: colors.gold,
-    backgroundColor: themeMode === "light" ? "#f2dfbf" : "#3f2a08",
-  },
-  goalChipText: {
-    color: colors.textMuted,
-    fontSize: 12,
-    fontWeight: "700",
-  },
-  goalChipTextActive: {
-    color: themeMode === "light" ? "#7a4b12" : "#fde68a",
-  },
-  goalTermRow: {
-    flexDirection: "row",
-    gap: 8,
-  },
-  goalTermChip: {
-    flex: 1,
-    borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.backgroundInset,
-    alignItems: "center",
-    paddingVertical: 9,
-  },
-  goalTermChipActive: {
-    borderColor: colors.primary,
-    backgroundColor: themeMode === "light" ? "#f2dfbf" : "#112036",
-  },
-  goalTermText: {
-    color: colors.textMuted,
-    fontWeight: "700",
-  },
-  goalTermTextActive: {
-    color: themeMode === "light" ? "#7a4b12" : "#bfdbfe",
-  },
-  achievementRow: {
-    gap: 10,
-    paddingRight: 4,
-  },
-  achievementTile: {
-    width: 88,
-    backgroundColor: colors.backgroundInset,
-    borderWidth: 1,
-    borderRadius: radii.md,
-    paddingVertical: 10,
-    paddingHorizontal: 8,
-    alignItems: "center",
-    gap: 6,
-  },
-  achievementArt: {
-    width: 42,
-    height: 42,
-    borderRadius: 14,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  achievementIcon: {
-    fontSize: 22,
-  },
-  achievementName: {
-    color: colors.text,
-    fontSize: 10,
-    lineHeight: 12,
-    textAlign: "center",
-    fontWeight: "700",
-  },
-  modalAchievement: {
-    gap: 8,
-  },
-  modalAchievementIcon: {
-    fontSize: 42,
-    textAlign: "center",
-  },
-  modalAchievementMeta: {
-    color: colors.textMuted,
-    textAlign: "center",
-  },
+    heroCard: {
+      gap: 12,
+    },
+    heroTopRow: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+      gap: 12,
+    },
+    heroTopRowCompact: {
+      flexDirection: "column",
+      alignItems: "stretch",
+    },
+    heroIdentity: {
+      flex: 1,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 12,
+    },
+    heroCopy: {
+      flex: 1,
+      gap: 2,
+    },
+    heroName: {
+      color: colors.text,
+      fontSize: 20,
+      fontWeight: "900",
+    },
+    heroClass: {
+      color: colors.primary,
+      fontWeight: "800",
+      fontSize: 13,
+    },
+    heroEmail: {
+      color: colors.textMuted,
+      fontWeight: "700",
+      fontSize: 13,
+    },
+    levelBadge: {
+      minWidth: 96,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      borderRadius: radii.md,
+      borderWidth: 1,
+      borderColor: colors.primary,
+      backgroundColor: themeMode === "light" ? "#f2dfbf" : "#3f2a08",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 2,
+    },
+    levelBadgeCompact: {
+      width: "100%",
+      flexDirection: "row",
+      justifyContent: "space-between",
+    },
+    levelBadgeLabel: {
+      color: themeMode === "light" ? "#7a4b12" : "#fde68a",
+      fontSize: 11,
+      fontWeight: "700",
+    },
+    levelBadgeValue: {
+      color: colors.text,
+      fontSize: 24,
+      fontWeight: "900",
+    },
+    infoChipGrid: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 8,
+    },
+    infoChip: {
+      flexGrow: 1,
+      minWidth: 106,
+      flexBasis: "31%",
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+      padding: 10,
+      borderRadius: radii.md,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: themeMode === "light" ? "rgba(255,250,240,0.9)" : "rgba(7, 12, 24, 0.45)",
+    },
+    infoChipIcon: {
+      width: 34,
+      height: 34,
+      borderRadius: 12,
+      borderWidth: 1,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    infoChipCopy: {
+      flex: 1,
+      gap: 2,
+    },
+    infoChipLabel: {
+      color: colors.textDim,
+      fontSize: 11,
+      fontWeight: "700",
+    },
+    infoChipValue: {
+      color: colors.text,
+      fontSize: 14,
+      fontWeight: "900",
+    },
+    sectionHeader: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+      gap: 12,
+    },
+    sectionTitle: {
+      color: colors.text,
+      fontSize: 17,
+      fontWeight: "900",
+    },
+    sectionMeta: {
+      color: colors.textDim,
+      fontSize: 12,
+      fontWeight: "800",
+    },
+    input: {
+      backgroundColor: colors.backgroundInset,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: radii.md,
+      paddingHorizontal: 14,
+      paddingVertical: 11,
+      color: colors.text,
+    },
+    quickList: {
+      gap: 8,
+    },
+    quickRow: {
+      minHeight: 60,
+      borderRadius: radii.md,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.backgroundInset,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 12,
+    },
+    quickRowLeft: {
+      flex: 1,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10,
+    },
+    quickIconWrap: {
+      width: 38,
+      height: 38,
+      borderRadius: 14,
+      backgroundColor: themeMode === "light" ? "rgba(183,121,31,0.16)" : "rgba(245, 158, 11, 0.12)",
+      borderWidth: 1,
+      borderColor: "rgba(245, 158, 11, 0.24)",
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    quickCopy: {
+      flex: 1,
+      gap: 2,
+    },
+    quickLabel: {
+      color: colors.text,
+      fontWeight: "800",
+      fontSize: 14,
+    },
+    quickSubtitle: {
+      color: colors.textMuted,
+      fontSize: 12,
+      lineHeight: 16,
+    },
+    goalGrid: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 8,
+    },
+    goalChip: {
+      flexGrow: 1,
+      minWidth: 120,
+      borderRadius: radii.md,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.backgroundInset,
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+    },
+    goalChipActive: {
+      borderColor: colors.gold,
+      backgroundColor: themeMode === "light" ? "#f2dfbf" : "#3f2a08",
+    },
+    goalChipText: {
+      color: colors.textMuted,
+      fontSize: 12,
+      fontWeight: "700",
+    },
+    goalChipTextActive: {
+      color: themeMode === "light" ? "#7a4b12" : "#fde68a",
+    },
+    goalTermRow: {
+      flexDirection: "row",
+      gap: 8,
+    },
+    goalTermChip: {
+      flex: 1,
+      borderRadius: radii.md,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.backgroundInset,
+      alignItems: "center",
+      paddingVertical: 9,
+    },
+    goalTermChipActive: {
+      borderColor: colors.primary,
+      backgroundColor: themeMode === "light" ? "#f2dfbf" : "#112036",
+    },
+    goalTermText: {
+      color: colors.textMuted,
+      fontWeight: "700",
+    },
+    goalTermTextActive: {
+      color: themeMode === "light" ? "#7a4b12" : "#bfdbfe",
+    },
+    achievementRow: {
+      gap: 10,
+      paddingRight: 4,
+    },
+    achievementTile: {
+      width: 88,
+      backgroundColor: colors.backgroundInset,
+      borderWidth: 1,
+      borderRadius: radii.md,
+      paddingVertical: 10,
+      paddingHorizontal: 8,
+      alignItems: "center",
+      gap: 6,
+    },
+    achievementArt: {
+      width: 42,
+      height: 42,
+      borderRadius: 14,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    achievementIcon: {
+      fontSize: 22,
+    },
+    achievementName: {
+      color: colors.text,
+      fontSize: 10,
+      lineHeight: 12,
+      textAlign: "center",
+      fontWeight: "700",
+    },
+    modalAchievement: {
+      gap: 8,
+    },
+    modalAchievementIcon: {
+      fontSize: 42,
+      textAlign: "center",
+    },
+    modalAchievementMeta: {
+      color: colors.textMuted,
+      textAlign: "center",
+    },
   });
 }

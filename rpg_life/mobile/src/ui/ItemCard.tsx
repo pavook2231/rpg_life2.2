@@ -127,11 +127,13 @@ export function ItemCard({
           styles.statChip,
           compactRows ? styles.compactStatChip : null,
           {
-            backgroundColor: locked
-              ? "rgba(255,255,255,0.06)"
-              : compactRows
-                ? "rgba(8,15,30,0.72)"
-                : surface.panel,
+                backgroundColor: locked
+                  ? "rgba(255,255,255,0.06)"
+                  : compactRows
+                    ? themeMode === "light"
+                      ? "rgba(251,247,239,0.96)"
+                      : "rgba(8,15,30,0.72)"
+                    : surface.panel,
             borderColor: locked
               ? colors.border
               : compactRows
@@ -669,7 +671,7 @@ const styles = StyleSheet.create({
     fontSize: 9,
     lineHeight: 11,
     textAlign: "left",
-    color: "#cbd5e1",
+    color: colors.textMuted,
   },
   statusPill: {
     flexDirection: "row",
@@ -725,7 +727,7 @@ const styles = StyleSheet.create({
   },
   compactStatLabel: {
     fontSize: 7,
-    color: "#e2e8f0",
+    color: colors.textMuted,
   },
   statValue: {
     fontSize: 11,
@@ -733,7 +735,7 @@ const styles = StyleSheet.create({
   },
   compactStatValue: {
     fontSize: 7,
-    color: "#f8fafc",
+    color: colors.text,
   },
   empty: {
     color: colors.textDim,
@@ -802,7 +804,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(245,158,11,0.28)",
     borderRadius: 8,
-    backgroundColor: "rgba(15,23,42,0.78)",
+    backgroundColor: colors.backgroundInset,
     paddingHorizontal: 5,
     paddingVertical: 3,
   },
@@ -818,7 +820,7 @@ const styles = StyleSheet.create({
     gap: 1,
   },
   compactPriceLabel: {
-    color: "#fcd34d",
+    color: colors.textMuted,
     fontSize: 7,
     fontWeight: "800",
     textTransform: "uppercase",
@@ -862,15 +864,15 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 2,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.14)",
-    backgroundColor: "rgba(8,15,30,0.72)",
+    borderColor: colors.border,
+    backgroundColor: colors.backgroundInset,
     borderRadius: 6,
     paddingHorizontal: 4,
     paddingVertical: 2,
     minWidth: 0,
   },
   inlineStatValue: {
-    color: "#f8fafc",
+    color: colors.text,
     fontSize: 8,
     fontWeight: "800",
   },

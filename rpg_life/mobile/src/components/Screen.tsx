@@ -1,9 +1,10 @@
-import React, { ReactNode, useMemo } from "react";
+import { useScrollToTop } from "@react-navigation/native";
+import React, { ReactNode, useMemo, useRef } from "react";
 import { ImageBackground, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { spacing } from "../theme/gameTheme";
-import { useThemeColors, useThemeMode } from "../ui/theme";
+import { radii, useThemeColors, useThemeMode } from "../ui/theme";
 
 type Props = {
   title: string;
@@ -11,22 +12,37 @@ type Props = {
   children: ReactNode;
   scrollable?: boolean;
   showHeader?: boolean;
+  contentTopOffset?: number;
 };
 
 // Replace `null` with `require("../../assets/backgrounds/app-bg.png")`
 // after adding your full-screen background image.
 const APP_BACKGROUND_ASSET: number | null = require("../../assets/backgrounds/app-bg.png");
 
-export function Screen({ title, subtitle, children, scrollable = true, showHeader = true }: Props) {
+export function Screen({
+  title,
+  subtitle,
+  children,
+  scrollable = true,
+  showHeader = true,
+  contentTopOffset = 0,
+}: Props) {
+  const scrollRef = useRef<ScrollView | null>(null);
+  const scrollToTopRef = useRef({
+    scrollToTop: () => {
+      scrollRef.current?.scrollTo({ y: 0, animated: true });
+    },
+  });
   const insets = useSafeAreaInsets();
   const colors = useThemeColors();
   const themeMode = useThemeMode();
   const styles = useMemo(() => createStyles(colors, themeMode), [colors, themeMode]);
+  useScrollToTop(scrollToTopRef);
   const contentStyle = [
     styles.content,
     {
-      paddingTop: spacing.md + Math.max(insets.top * 0.25, 0),
-      paddingBottom: spacing.md + insets.bottom + 72,
+      paddingTop: spacing.sm,
+      paddingBottom: insets.bottom + spacing.xl,
     },
   ];
 
@@ -34,11 +50,15 @@ export function Screen({ title, subtitle, children, scrollable = true, showHeade
     <>
       {showHeader ? (
         <View style={styles.header}>
+          <View style={styles.kickerRow}>
+            <View style={styles.kickerDot} />
+            <Text style={styles.kicker}>RPG LIFE</Text>
+          </View>
           <Text style={styles.title}>{title}</Text>
           {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
         </View>
       ) : null}
-      {children}
+      <View style={[styles.body, { marginTop: contentTopOffset }]}>{children}</View>
     </>
   );
 
@@ -48,7 +68,7 @@ export function Screen({ title, subtitle, children, scrollable = true, showHeade
         <ImageBackground source={APP_BACKGROUND_ASSET} style={styles.background} imageStyle={styles.backgroundImage}>
           <View style={styles.overlay}>
             {scrollable ? (
-              <ScrollView contentContainerStyle={contentStyle} keyboardShouldPersistTaps="always">
+              <ScrollView ref={scrollRef} contentContainerStyle={contentStyle} keyboardShouldPersistTaps="always">
                 {content}
               </ScrollView>
             ) : (
@@ -61,7 +81,7 @@ export function Screen({ title, subtitle, children, scrollable = true, showHeade
           <View style={styles.bgOrbTop} />
           <View style={styles.bgOrbBottom} />
           {scrollable ? (
-            <ScrollView contentContainerStyle={contentStyle} keyboardShouldPersistTaps="always">
+            <ScrollView ref={scrollRef} contentContainerStyle={contentStyle} keyboardShouldPersistTaps="always">
               {content}
             </ScrollView>
           ) : (
@@ -94,41 +114,67 @@ function createStyles(colors: ReturnType<typeof useThemeColors>, themeMode: Retu
       backgroundColor: colors.background,
     },
     content: {
-      padding: spacing.md,
-      gap: spacing.sm,
+      paddingHorizontal: spacing.md,
       flexGrow: 1,
     },
     header: {
-      gap: 4,
+      gap: 8,
+      marginTop: spacing.xs,
+      marginBottom: spacing.sm,
+      paddingBottom: spacing.sm,
+      borderBottomWidth: 1,
+      borderBottomColor: themeMode === "light" ? "rgba(183,121,31,0.16)" : "rgba(255,255,255,0.06)",
+    },
+    kickerRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+    },
+    kickerDot: {
+      width: 8,
+      height: 8,
+      borderRadius: 4,
+      backgroundColor: colors.primary,
+    },
+    kicker: {
+      color: colors.primary,
+      fontSize: 11,
+      fontWeight: "900",
+      letterSpacing: 1.2,
+    },
+    body: {
+      gap: 14,
     },
     title: {
       color: colors.text,
-      fontSize: 22,
+      fontSize: 32,
       fontWeight: "900",
-      letterSpacing: 0.2,
+      letterSpacing: 0.3,
+      lineHeight: 34,
     },
     subtitle: {
       color: colors.textMuted,
-      fontSize: 13,
-      lineHeight: 18,
+      fontSize: 14,
+      lineHeight: 20,
+      maxWidth: 560,
     },
     bgOrbTop: {
       position: "absolute",
-      top: -40,
-      right: -20,
-      width: 180,
-      height: 180,
-      borderRadius: 90,
-      backgroundColor: themeMode === "light" ? "rgba(201, 173, 123, 0.18)" : "rgba(98, 208, 255, 0.12)",
+      top: -30,
+      right: -30,
+      width: 220,
+      height: 220,
+      borderRadius: radii.xl,
+      backgroundColor: themeMode === "light" ? "rgba(201,173,123,0.14)" : "rgba(245,158,11,0.09)",
     },
     bgOrbBottom: {
       position: "absolute",
-      bottom: 40,
-      left: -50,
-      width: 220,
-      height: 220,
-      borderRadius: 110,
-      backgroundColor: themeMode === "light" ? "rgba(255, 210, 135, 0.18)" : "rgba(248, 201, 92, 0.08)",
+      bottom: 80,
+      left: -40,
+      width: 240,
+      height: 240,
+      borderRadius: radii.xl,
+      backgroundColor: themeMode === "light" ? "rgba(255,210,135,0.14)" : "rgba(56,189,248,0.08)",
     },
   });
 }

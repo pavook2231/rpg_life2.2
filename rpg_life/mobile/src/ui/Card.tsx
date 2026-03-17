@@ -31,27 +31,27 @@ function createStyles(colors: ReturnType<typeof useThemeColors>, themeMode: Retu
     base: {
       backgroundColor: colors.card,
       borderRadius: radii.lg,
-      padding: 12,
+      padding: 14,
       borderWidth: 1,
-      borderColor: colors.border,
-      gap: 8,
+      borderColor: themeMode === "light" ? "rgba(214,199,170,0.62)" : "rgba(255,255,255,0.08)",
+      gap: 10,
       ...shadows.card,
     },
     default: {},
     accent: {
-      borderColor: colors.primary,
-      backgroundColor: themeMode === "light" ? "#f4e6cc" : "#2c2112",
+      borderColor: themeMode === "light" ? "rgba(183,121,31,0.4)" : "rgba(245,158,11,0.22)",
+      backgroundColor: themeMode === "light" ? "rgba(244,230,204,0.92)" : "rgba(44,33,18,0.76)",
     },
     success: {
-      borderColor: colors.success,
-      backgroundColor: themeMode === "light" ? "#e4f6e9" : "#173126",
+      borderColor: themeMode === "light" ? "rgba(22,163,74,0.3)" : "rgba(34,197,94,0.22)",
+      backgroundColor: themeMode === "light" ? "rgba(228,246,233,0.92)" : "rgba(23,49,38,0.76)",
     },
     danger: {
-      borderColor: colors.danger,
-      backgroundColor: themeMode === "light" ? "#fde7e7" : "#351a1d",
+      borderColor: themeMode === "light" ? "rgba(220,38,38,0.28)" : "rgba(239,68,68,0.22)",
+      backgroundColor: themeMode === "light" ? "rgba(253,231,231,0.92)" : "rgba(53,26,29,0.76)",
     },
     subtle: {
-      backgroundColor: colors.cardMuted,
+      backgroundColor: themeMode === "light" ? "rgba(240,229,211,0.9)" : "rgba(23,34,53,0.68)",
     },
   });
 }

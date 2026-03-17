@@ -1,6 +1,8 @@
-﻿import React, { useEffect, useMemo, useState } from "react";
+import { useNavigation } from "@react-navigation/native";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
+import { fetchLeaderboard } from "../api/game";
 import {
   fetchFriendsLeaderboard,
   fetchFriendsList,
@@ -9,9 +11,9 @@ import {
   type FriendItem,
   type UserSearchResult,
 } from "../api/social";
-import { fetchLeaderboard } from "../api/game";
 import { Card } from "../components/Card";
 import { Screen } from "../components/Screen";
+import { StateBlock } from "../components/StateBlock";
 import { useTranslation } from "../context/LocalizationContext";
 import { useThemeColors } from "../ui/theme";
 
@@ -41,6 +43,8 @@ type LeaderboardItem = {
 };
 
 export function FriendsScreen() {
+  const navigation = useNavigation<any>();
+  const searchInputRef = useRef<TextInput | null>(null);
   const [activeTab, setActiveTab] = useState<(typeof tabs)[number]>("friends");
   const [friends, setFriends] = useState<FriendItem[]>([]);
   const [friendsLoading, setFriendsLoading] = useState(false);
@@ -75,8 +79,10 @@ export function FriendsScreen() {
   const styles = useMemo(() => createStyles(colors), [colors]);
 
   useEffect(() => {
-    void loadFriends({ page: 1, refresh: false, append: false });
-  }, []);
+    if (activeTab === "friends") {
+      void loadFriends({ page: 1, refresh: false, append: false });
+    }
+  }, [activeTab]);
 
   useEffect(() => {
     if (activeTab === "leaderboard" || activeTab === "global") {
@@ -99,7 +105,7 @@ export function FriendsScreen() {
       setFriendsPage(payload.pagination.page);
       setFriendsHasMore(payload.pagination.page < payload.pagination.total_pages);
     } catch (error) {
-      setFriendsError(error instanceof Error ? error.message : "Failed to load friends");
+      setFriendsError(error instanceof Error ? error.message : t("screens.friends.errors.loadFriends"));
     } finally {
       setFriendsLoading(false);
       setFriendsLoadingMore(false);
@@ -131,7 +137,7 @@ export function FriendsScreen() {
         setGlobalLeaderboardHasMore(payload.pagination.page < payload.pagination.total_pages);
       }
     } catch (error) {
-      setLeaderboardError(error instanceof Error ? error.message : "Failed to load leaderboard");
+      setLeaderboardError(error instanceof Error ? error.message : t("screens.friends.errors.loadLeaderboard"));
     } finally {
       setLeaderboardLoading(false);
       setLeaderboardLoadingMore(false);
@@ -154,7 +160,7 @@ export function FriendsScreen() {
       setSearchPage(payload.pagination.page);
       setSearchHasMore(payload.pagination.page < payload.pagination.total_pages);
     } catch (error) {
-      setSearchError(error instanceof Error ? error.message : "Search failed");
+      setSearchError(error instanceof Error ? error.message : t("screens.friends.errors.search"));
     } finally {
       setSearchLoading(false);
       setSearchLoadingMore(false);
@@ -173,7 +179,7 @@ export function FriendsScreen() {
       return;
     }
     if (query.length < 2) {
-      setSearchError("Введите минимум 2 символа");
+      setSearchError(t("screens.friends.errors.searchMinLength"));
       return;
     }
 
@@ -218,7 +224,7 @@ export function FriendsScreen() {
       await sendFriendRequest(userId);
       setSearchResults((prev) => prev.map((user) => (user.id === userId ? { ...user, status: "pending" } : user)));
     } catch (error) {
-      setSearchError(error instanceof Error ? error.message : "Failed to send request");
+      setSearchError(error instanceof Error ? error.message : t("screens.friends.errors.sendRequest"));
     } finally {
       setSendingRequestIds((prev) => prev.filter((id) => id !== userId));
     }
@@ -230,10 +236,14 @@ export function FriendsScreen() {
     return translated === key ? value : translated;
   }
 
+  function focusSearchInput() {
+    searchInputRef.current?.focus();
+  }
+
   const currentLeaderboardItems = activeTab === "leaderboard" ? leaderboardItems : globalLeaderboardItems;
 
   return (
-    <Screen title={t("screens.friends.title")} subtitle={t("screens.friends.subtitle")}>
+    <Screen title={t("screens.friends.title")} subtitle={t("screens.friends.subtitle")} scrollable={false}>
       <View style={styles.tabs}>
         {tabs.map((tab) => (
           <Pressable
@@ -261,6 +271,7 @@ export function FriendsScreen() {
         >
           <View style={styles.searchContainer}>
             <TextInput
+              ref={searchInputRef}
               style={styles.searchInput}
               placeholder={t("screens.friends.searchPlaceholder")}
               value={searchQuery}
@@ -282,9 +293,18 @@ export function FriendsScreen() {
             </Pressable>
           </View>
 
-          {!!searchError && <Text style={styles.errorText}>{searchError}</Text>}
+          {!!searchError ? (
+            <StateBlock
+              tone="warning"
+              icon="alert-circle"
+              title={t("screens.friends.errorTitle")}
+              description={searchError}
+              actionLabel={t("common.retry")}
+              onAction={handleSearch}
+            />
+          ) : null}
 
-          {searchResults.length > 0 && (
+          {searchResults.length > 0 ? (
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>{t("screens.friends.searchResults")}</Text>
               {searchResults.map((user) => {
@@ -296,31 +316,57 @@ export function FriendsScreen() {
                         <Text style={styles.userName}>{user.name}</Text>
                         <Text style={styles.userEmail}>{user.email}</Text>
                       </View>
-                      {user.status === "none" && (
+                      {user.status === "none" ? (
                         <Pressable style={styles.actionButton} onPress={() => handleSendRequest(user.id)} disabled={isSending}>
                           <Text style={styles.actionButtonText}>{isSending ? t("common.loading") : t("screens.friends.addFriend")}</Text>
                         </Pressable>
-                      )}
-                      {user.status === "pending" && <Text style={styles.pendingText}>{t("screens.friends.requestPending")}</Text>}
+                      ) : null}
+                      {user.status === "pending" ? <Text style={styles.pendingText}>{t("screens.friends.requestPending")}</Text> : null}
                     </View>
                   </Card>
                 );
               })}
             </View>
-          )}
-          {searchHasMore && (
-            <Pressable style={styles.loadMoreButton} onPress={handleLoadMoreSearch} disabled={searchLoadingMore}>
-              <Text style={styles.loadMoreButtonText}>{searchLoadingMore ? t("common.loading") : "Загрузить еще"}</Text>
-            </Pressable>
-          )}
+          ) : null}
 
-          {searchAttempted && !searchLoading && searchResults.length === 0 && <Text style={styles.emptyText}>Ничего не найдено</Text>}
+          {searchHasMore ? (
+            <Pressable style={styles.loadMoreButton} onPress={handleLoadMoreSearch} disabled={searchLoadingMore}>
+              <Text style={styles.loadMoreButtonText}>{searchLoadingMore ? t("common.loading") : t("common.loadMore")}</Text>
+            </Pressable>
+          ) : null}
+
+          {searchAttempted && !searchLoading && searchResults.length === 0 ? (
+            <StateBlock
+              icon="account-search-outline"
+              title={t("screens.friends.empty.searchTitle")}
+              description={t("screens.friends.empty.searchDescription")}
+              actionLabel={t("screens.friends.empty.findFriendsAction")}
+              onAction={focusSearchInput}
+            />
+          ) : null}
 
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>{t("screens.friends.myFriends")}</Text>
-            {!!friendsError && <Text style={styles.errorText}>{friendsError}</Text>}
-            {friendsLoading && <Text style={styles.pendingText}>{t("common.loading")}</Text>}
-            {!friendsLoading && friends.length === 0 && <Text style={styles.emptyText}>Пока нет друзей</Text>}
+            {!!friendsError ? (
+              <StateBlock
+                tone="warning"
+                icon="alert-circle"
+                title={t("screens.friends.errorTitle")}
+                description={friendsError}
+                actionLabel={t("common.retry")}
+                onAction={() => loadFriends({ page: 1, refresh: false, append: false })}
+              />
+            ) : null}
+            {friendsLoading ? <StateBlock tone="info" icon="timer-sand" title={t("common.loading")} /> : null}
+            {!friendsLoading && friends.length === 0 ? (
+              <StateBlock
+                icon="account-multiple-plus"
+                title={t("screens.friends.empty.friendsTitle")}
+                description={t("screens.friends.empty.friendsDescription")}
+                actionLabel={t("screens.friends.empty.findFriendsAction")}
+                onAction={focusSearchInput}
+              />
+            ) : null}
             {friends.map((friend) => (
               <Card key={friend.id}>
                 <View style={styles.friendRow}>
@@ -331,18 +377,27 @@ export function FriendsScreen() {
                 </View>
               </Card>
             ))}
-            {friendsHasMore && (
+            {friendsHasMore ? (
               <Pressable style={styles.loadMoreButton} onPress={handleLoadMoreFriends} disabled={friendsLoadingMore}>
-                <Text style={styles.loadMoreButtonText}>{friendsLoadingMore ? t("common.loading") : "Загрузить еще"}</Text>
+                <Text style={styles.loadMoreButtonText}>{friendsLoadingMore ? t("common.loading") : t("common.loadMore")}</Text>
               </Pressable>
-            )}
+            ) : null}
           </View>
         </ScrollView>
       )}
 
       {(activeTab === "leaderboard" || activeTab === "global") && (
         <ScrollView style={styles.content}>
-          {!!leaderboardError && <Text style={styles.errorText}>{leaderboardError}</Text>}
+          {!!leaderboardError ? (
+            <StateBlock
+              tone="warning"
+              icon="alert-circle"
+              title={t("screens.friends.errorTitle")}
+              description={leaderboardError}
+              actionLabel={t("common.retry")}
+              onAction={() => loadLeaderboard({ page: 1, append: false })}
+            />
+          ) : null}
           <View style={styles.filters}>
             {metrics.map((metric) => (
               <Pressable
@@ -357,8 +412,16 @@ export function FriendsScreen() {
             ))}
           </View>
 
-          {leaderboardLoading && <Text style={styles.pendingText}>{t("common.loading")}</Text>}
-          {!leaderboardLoading && currentLeaderboardItems.length === 0 && <Text style={styles.emptyText}>Пока нет данных рейтинга</Text>}
+          {leaderboardLoading ? <StateBlock tone="info" icon="timer-sand" title={t("common.loading")} /> : null}
+          {!leaderboardLoading && currentLeaderboardItems.length === 0 ? (
+            <StateBlock
+              icon="flag-checkered"
+              title={t("screens.friends.empty.leaderboardTitle")}
+              description={t("screens.friends.empty.leaderboardDescription")}
+              actionLabel={t("common.createGoal")}
+              onAction={() => navigation.navigate("GoalSelect")}
+            />
+          ) : null}
 
           {currentLeaderboardItems.map((item) => (
             <Card key={item.user_id}>
@@ -366,12 +429,12 @@ export function FriendsScreen() {
                 #{item.rank} {item.name}
               </Text>
               <Text style={styles.subTitle}>
-                {t("screens.leaderboard.fields.class")}: {item.class_display_name ?? item.class_name ?? "—"}
+                {t("screens.leaderboard.fields.class")}: {item.class_display_name ?? item.class_name ?? "-"}
                 {"  •  "}
                 {t("screens.leaderboard.fields.level")}: {item.class_level ?? item.level}
               </Text>
               <Text style={styles.meta}>
-                {t("screens.leaderboard.fields.goal")}: {item.goal_type ?? "—"}
+                {t("screens.leaderboard.fields.goal")}: {item.goal_type ?? "-"}
                 {item.goal_progress_percent != null
                   ? ` (${item.goal_progress_percent}%${item.goal_target_xp ? `, ${item.goal_cycle_xp}/${item.goal_target_xp} XP` : ""})`
                   : ""}
@@ -382,16 +445,16 @@ export function FriendsScreen() {
               <Text style={styles.meta}>{t("screens.leaderboard.fields.challengeWins")}: {item.challenge_wins}</Text>
             </Card>
           ))}
-          {activeTab === "leaderboard" && leaderboardHasMore && (
+          {activeTab === "leaderboard" && leaderboardHasMore ? (
             <Pressable style={styles.loadMoreButton} onPress={handleLoadMoreLeaderboard} disabled={leaderboardLoadingMore}>
-              <Text style={styles.loadMoreButtonText}>{leaderboardLoadingMore ? t("common.loading") : "Загрузить еще"}</Text>
+              <Text style={styles.loadMoreButtonText}>{leaderboardLoadingMore ? t("common.loading") : t("common.loadMore")}</Text>
             </Pressable>
-          )}
-          {activeTab === "global" && globalLeaderboardHasMore && (
+          ) : null}
+          {activeTab === "global" && globalLeaderboardHasMore ? (
             <Pressable style={styles.loadMoreButton} onPress={handleLoadMoreGlobalLeaderboard} disabled={globalLeaderboardLoadingMore}>
-              <Text style={styles.loadMoreButtonText}>{globalLeaderboardLoadingMore ? t("common.loading") : "Загрузить еще"}</Text>
+              <Text style={styles.loadMoreButtonText}>{globalLeaderboardLoadingMore ? t("common.loading") : t("common.loadMore")}</Text>
             </Pressable>
-          )}
+          ) : null}
         </ScrollView>
       )}
     </Screen>
@@ -530,16 +593,6 @@ function createStyles(colors: ReturnType<typeof useThemeColors>) {
       fontSize: 14,
       color: colors.textDim,
       fontStyle: "italic",
-    },
-    errorText: {
-      fontSize: 13,
-      color: colors.danger,
-      marginBottom: 10,
-    },
-    emptyText: {
-      fontSize: 14,
-      color: colors.textDim,
-      marginBottom: 12,
     },
     friendRow: {
       flexDirection: "row",

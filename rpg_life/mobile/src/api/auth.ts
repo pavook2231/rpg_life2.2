@@ -15,7 +15,7 @@ export type AuthPayload = {
 };
 
 export type SocialAuthProvider = {
-  id: "google" | "telegram" | "yandex";
+  id: "google" | "telegram";
   label: string;
   kind: "oauth" | "telegram";
   enabled: boolean;
