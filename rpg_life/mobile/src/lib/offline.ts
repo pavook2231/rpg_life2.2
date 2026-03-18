@@ -24,6 +24,38 @@ export async function fetchWithCache<T>(cacheKey: string, loader: () => Promise<
   }
 }
 
+type CacheOptions = {
+  ttlMs?: number;
+  forceRefresh?: boolean;
+};
+
+export async function fetchWithTtlCache<T>(
+  cacheKey: string,
+  loader: () => Promise<T>,
+  options: CacheOptions = {},
+): Promise<T> {
+  const { ttlMs = 0, forceRefresh = false } = options;
+  const cached = await getCachedValue<T>(cacheKey);
+
+  if (!forceRefresh && cached && ttlMs > 0) {
+    const ageMs = Date.now() - new Date(cached.savedAt).getTime();
+    if (Number.isFinite(ageMs) && ageMs >= 0 && ageMs <= ttlMs) {
+      return cached.value;
+    }
+  }
+
+  try {
+    const value = await loader();
+    await saveCachedValue(cacheKey, value);
+    return value;
+  } catch (error) {
+    if (cached) {
+      return cached.value;
+    }
+    throw error;
+  }
+}
+
 export async function enqueueOfflineAction(action: Omit<PendingAction, "id" | "createdAt">) {
   const pendingAction: PendingAction = {
     ...action,

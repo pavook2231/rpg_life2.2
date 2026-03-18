@@ -292,7 +292,8 @@ export function LoginScreen({ onShowRegister }: Props) {
       if (providerId === "telegram") {
         const botUsername = provider?.mobile_client_id;
         if (botUsername) {
-          await Linking.openURL(`https://t.me/${botUsername}?start=rpglife_login`);
+          const telegramLoginUrl = `${normalizeApiBaseUrl(apiBaseUrl)}/auth/telegram/login`;
+          await Linking.openURL(telegramLoginUrl);
           await pushToast(
             {
               title: t("screens.login.quick.telegramTitle"),

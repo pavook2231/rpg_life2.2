@@ -276,6 +276,41 @@ def respond_friend_request(db: Session, current_user: User, request_id: int, act
     return {"ok": True, "request_id": request.id, "status": request.status}
 
 
+def _serialize_friend_request(request: FriendRequest, current_user_id: int) -> dict:
+    is_incoming = request.receiver_id == current_user_id
+    other_user = request.requester if is_incoming else request.receiver
+    return {
+        "id": request.id,
+        "status": request.status,
+        "direction": "incoming" if is_incoming else "outgoing",
+        "created_at": request.created_at.isoformat() if request.created_at else None,
+        "responded_at": request.responded_at.isoformat() if request.responded_at else None,
+        "user": {
+            "id": other_user.id,
+            "name": other_user.name or other_user.email,
+            "email": other_user.email,
+        },
+    }
+
+
+def list_friend_requests(db: Session, current_user: User, status: str = "pending") -> dict:
+    rows = (
+        db.query(FriendRequest)
+        .options(joinedload(FriendRequest.requester), joinedload(FriendRequest.receiver))
+        .filter(
+            FriendRequest.status == status,
+            or_(
+                FriendRequest.requester_id == current_user.id,
+                FriendRequest.receiver_id == current_user.id,
+            ),
+        )
+        .order_by(FriendRequest.created_at.desc())
+        .all()
+    )
+    items = [_serialize_friend_request(row, current_user.id) for row in rows]
+    return {"items": items}
+
+
 def list_friends(
     db: Session,
     current_user: User,
@@ -340,10 +375,18 @@ def search_users(db: Session, current_user: User, query: str, page: int, page_si
     )
 
     friend_ids = set(_friend_ids(db, current_user.id))
-    pending_requests = {
+    outgoing_pending_requests = {
         req.receiver_id: req for req in db.query(FriendRequest)
         .filter(
             FriendRequest.requester_id == current_user.id,
+            FriendRequest.status == "pending",
+        )
+        .all()
+    }
+    incoming_pending_requests = {
+        req.requester_id: req for req in db.query(FriendRequest)
+        .filter(
+            FriendRequest.receiver_id == current_user.id,
             FriendRequest.status == "pending",
         )
         .all()
@@ -355,9 +398,12 @@ def search_users(db: Session, current_user: User, query: str, page: int, page_si
             continue  # Already friends
         status = "none"
         request_id = None
-        if user.id in pending_requests:
-            status = "pending"
-            request_id = pending_requests[user.id].id
+        if user.id in outgoing_pending_requests:
+            status = "outgoing_pending"
+            request_id = outgoing_pending_requests[user.id].id
+        elif user.id in incoming_pending_requests:
+            status = "incoming_pending"
+            request_id = incoming_pending_requests[user.id].id
 
         items.append({
             "id": user.id,

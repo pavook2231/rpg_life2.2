@@ -4,10 +4,13 @@ import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, Vie
 
 import { fetchLeaderboard } from "../api/game";
 import {
+  fetchFriendRequests,
   fetchFriendsLeaderboard,
   fetchFriendsList,
+  respondToFriendRequest,
   searchUsers,
   sendFriendRequest,
+  type FriendRequestItem,
   type FriendItem,
   type UserSearchResult,
 } from "../api/social";
@@ -69,6 +72,9 @@ export function FriendsScreen() {
   const [friendsPage, setFriendsPage] = useState(1);
   const [friendsHasMore, setFriendsHasMore] = useState(false);
   const [friendsError, setFriendsError] = useState<string | null>(null);
+  const [friendRequests, setFriendRequests] = useState<FriendRequestItem[]>([]);
+  const [friendRequestsLoading, setFriendRequestsLoading] = useState(false);
+  const [friendRequestsError, setFriendRequestsError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<UserSearchResult[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
@@ -79,6 +85,7 @@ export function FriendsScreen() {
   const [searchActiveQuery, setSearchActiveQuery] = useState("");
   const [searchError, setSearchError] = useState<string | null>(null);
   const [sendingRequestIds, setSendingRequestIds] = useState<number[]>([]);
+  const [respondingRequestIds, setRespondingRequestIds] = useState<number[]>([]);
   const [leaderboardMetric, setLeaderboardMetric] = useState<LeaderboardMetric>("level");
   const [leaderboardItems, setLeaderboardItems] = useState<LeaderboardItem[]>([]);
   const [leaderboardPage, setLeaderboardPage] = useState(1);
@@ -97,7 +104,10 @@ export function FriendsScreen() {
 
   useEffect(() => {
     if (activeTab === "friends") {
-      void loadFriends({ page: 1, refresh: false, append: false });
+      void Promise.all([
+        loadFriends({ page: 1, refresh: false, append: false }),
+        loadFriendRequests(),
+      ]);
     }
   }, [activeTab]);
 
@@ -141,6 +151,19 @@ export function FriendsScreen() {
     }
   }
 
+  async function loadFriendRequests() {
+    setFriendRequestsLoading(true);
+    setFriendRequestsError(null);
+    try {
+      const payload = await fetchFriendRequests();
+      setFriendRequests(payload.items ?? []);
+    } catch (error) {
+      setFriendRequestsError(error instanceof Error ? error.message : t("screens.friends.errors.loadFriends"));
+    } finally {
+      setFriendRequestsLoading(false);
+    }
+  }
+
   async function loadLeaderboard({ page, append, scope }: { page: number; append: boolean; scope: LeaderboardScope }) {
     const requestId = ++leaderboardRequestRef.current;
 
@@ -164,7 +187,9 @@ export function FriendsScreen() {
         setLeaderboardPage(payload.pagination.page);
         setLeaderboardHasMore(payload.pagination.page < payload.pagination.total_pages);
       } else {
-        const payload = await fetchLeaderboard(leaderboardMetric, "global", page, LEADERBOARD_PAGE_SIZE);
+        const payload = await fetchLeaderboard(leaderboardMetric, "global", page, LEADERBOARD_PAGE_SIZE, {
+          forceRefresh: !append,
+        });
         if (requestId !== leaderboardRequestRef.current) {
           return;
         }
@@ -288,12 +313,49 @@ export function FriendsScreen() {
 
     setSendingRequestIds((prev) => [...prev, userId]);
     try {
-      await sendFriendRequest(userId);
-      setSearchResults((prev) => prev.map((user) => (user.id === userId ? { ...user, status: "pending" } : user)));
+      const payload = await sendFriendRequest(userId);
+      setSearchResults((prev) => prev.map((user) => (
+        user.id === userId
+          ? { ...user, status: "outgoing_pending", request_id: payload.request.id }
+          : user
+      )));
+      await loadFriendRequests();
     } catch (error) {
       setSearchError(error instanceof Error ? error.message : t("screens.friends.errors.sendRequest"));
     } finally {
       setSendingRequestIds((prev) => prev.filter((id) => id !== userId));
+    }
+  }
+
+  async function handleRespondToFriendRequest(requestId: number, action: "accept" | "decline", userId?: number) {
+    if (respondingRequestIds.includes(requestId)) {
+      return;
+    }
+
+    setRespondingRequestIds((prev) => [...prev, requestId]);
+    setSearchError(null);
+    try {
+      await respondToFriendRequest(requestId, action);
+      setFriendRequests((prev) => prev.filter((request) => request.id !== requestId));
+      setSearchResults((prev) => prev.flatMap((user) => {
+        if (user.request_id !== requestId && user.id !== userId) {
+          return [user];
+        }
+        if (action === "accept") {
+          return [];
+        }
+        return [{ ...user, status: "none", request_id: undefined }];
+      }));
+      if (action === "accept") {
+        await Promise.all([
+          loadFriends({ page: 1, refresh: false, append: false }),
+          loadLeaderboard({ page: 1, append: false, scope: "leaderboard" }),
+        ]);
+      }
+    } catch (error) {
+      setSearchError(error instanceof Error ? error.message : t("screens.friends.errors.sendRequest"));
+    } finally {
+      setRespondingRequestIds((prev) => prev.filter((id) => id !== requestId));
     }
   }
 
@@ -308,7 +370,9 @@ export function FriendsScreen() {
   }
 
   const currentLeaderboardItems = activeTab === "leaderboard" ? leaderboardItems : globalLeaderboardItems;
-  const pendingRequestCount = searchResults.filter((user) => user.status === "pending").length;
+  const incomingRequests = friendRequests.filter((request) => request.direction === "incoming");
+  const outgoingRequests = friendRequests.filter((request) => request.direction === "outgoing");
+  const pendingRequestCount = friendRequests.length;
   const topLeaderboardEntry = currentLeaderboardItems[0] ?? null;
   const topLeaderboardLabel = topLeaderboardEntry ? `#${topLeaderboardEntry.rank} ${topLeaderboardEntry.name}` : EMPTY_VALUE;
   const socialPulse = friends.length === 0
@@ -370,7 +434,10 @@ export function FriendsScreen() {
           refreshControl={
             <RefreshControl
               refreshing={friendsRefreshing}
-              onRefresh={() => loadFriends({ page: 1, refresh: true, append: false })}
+              onRefresh={() => Promise.all([
+                loadFriends({ page: 1, refresh: true, append: false }),
+                loadFriendRequests(),
+              ])}
               tintColor={colors.primary}
             />
           }
@@ -394,10 +461,87 @@ export function FriendsScreen() {
               <Text style={styles.summaryValue}>{searchResults.length}</Text>
             </View>
             <View style={styles.summaryChip}>
-              <Text style={styles.summaryLabel}>{t("screens.friends.requestPending")}</Text>
+              <Text style={styles.summaryLabel}>{translateOrFallback(t, "screens.friends.pendingTotal", "Ожидают ответа")}</Text>
               <Text style={styles.summaryValue}>{pendingRequestCount}</Text>
             </View>
           </View>
+
+          {!!friendRequestsError ? (
+            <StateBlock
+              tone="warning"
+              icon="alert-circle"
+              title={t("screens.friends.errorTitle")}
+              description={friendRequestsError}
+              actionLabel={t("common.retry")}
+              onAction={loadFriendRequests}
+            />
+          ) : null}
+
+          {friendRequestsLoading ? <StateBlock tone="info" icon="timer-sand" title={t("common.loading")} /> : null}
+
+          {incomingRequests.length > 0 ? (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>
+                {translateOrFallback(t, "screens.friends.incomingRequests", "Входящие заявки")}
+              </Text>
+              {incomingRequests.map((request) => {
+                const isResponding = respondingRequestIds.includes(request.id);
+                return (
+                  <Card key={request.id}>
+                    <View style={styles.requestCard}>
+                      <View style={styles.userInfo}>
+                        <Text style={styles.userName}>{request.user.name}</Text>
+                        <Text style={styles.userEmail}>{request.user.email}</Text>
+                      </View>
+                      <View style={styles.requestActions}>
+                        <Pressable
+                          style={[styles.actionButton, isResponding ? styles.actionButtonDisabled : null]}
+                          onPress={() => handleRespondToFriendRequest(request.id, "accept", request.user.id)}
+                          disabled={isResponding}
+                        >
+                          <Text style={styles.actionButtonText}>
+                            {isResponding
+                              ? t("common.loading")
+                              : translateOrFallback(t, "screens.friends.acceptRequest", "Принять")}
+                          </Text>
+                        </Pressable>
+                        <Pressable
+                          style={[styles.secondaryButton, isResponding ? styles.actionButtonDisabled : null]}
+                          onPress={() => handleRespondToFriendRequest(request.id, "decline", request.user.id)}
+                          disabled={isResponding}
+                        >
+                          <Text style={styles.secondaryButtonText}>
+                            {translateOrFallback(t, "screens.friends.declineRequest", "Отклонить")}
+                          </Text>
+                        </Pressable>
+                      </View>
+                    </View>
+                  </Card>
+                );
+              })}
+            </View>
+          ) : null}
+
+          {outgoingRequests.length > 0 ? (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>
+                {translateOrFallback(t, "screens.friends.outgoingRequests", "Отправленные заявки")}
+              </Text>
+              {outgoingRequests.map((request) => (
+                <Card key={request.id}>
+                  <View style={styles.userRow}>
+                    <View style={styles.userInfo}>
+                      <Text style={styles.userName}>{request.user.name}</Text>
+                      <Text style={styles.userEmail}>{request.user.email}</Text>
+                    </View>
+                    <View style={styles.pendingBadge}>
+                      <Text style={styles.pendingText}>{t("screens.friends.requestPending")}</Text>
+                    </View>
+                  </View>
+                </Card>
+              ))}
+            </View>
+          ) : null}
 
           <View style={styles.searchContainer}>
             <TextInput
@@ -450,9 +594,37 @@ export function FriendsScreen() {
                           <Text style={styles.actionButtonText}>{isSending ? t("common.loading") : t("screens.friends.addFriend")}</Text>
                         </Pressable>
                       ) : null}
-                      {user.status === "pending" ? (
+                      {user.status === "outgoing_pending" ? (
                         <View style={styles.pendingBadge}>
                           <Text style={styles.pendingText}>{t("screens.friends.requestPending")}</Text>
+                        </View>
+                      ) : null}
+                      {user.status === "incoming_pending" ? (
+                        <View style={styles.requestActions}>
+                          <Pressable
+                            style={[
+                              styles.actionButton,
+                              user.request_id && respondingRequestIds.includes(user.request_id) ? styles.actionButtonDisabled : null,
+                            ]}
+                            onPress={() => user.request_id && handleRespondToFriendRequest(user.request_id, "accept", user.id)}
+                            disabled={!user.request_id || respondingRequestIds.includes(user.request_id)}
+                          >
+                            <Text style={styles.actionButtonText}>
+                              {translateOrFallback(t, "screens.friends.acceptRequest", "Принять")}
+                            </Text>
+                          </Pressable>
+                          <Pressable
+                            style={[
+                              styles.secondaryButton,
+                              user.request_id && respondingRequestIds.includes(user.request_id) ? styles.actionButtonDisabled : null,
+                            ]}
+                            onPress={() => user.request_id && handleRespondToFriendRequest(user.request_id, "decline", user.id)}
+                            disabled={!user.request_id || respondingRequestIds.includes(user.request_id)}
+                          >
+                            <Text style={styles.secondaryButtonText}>
+                              {translateOrFallback(t, "screens.friends.declineRequest", "Отклонить")}
+                            </Text>
+                          </Pressable>
                         </View>
                       ) : null}
                     </View>
@@ -751,6 +923,10 @@ function createStyles(colors: ReturnType<typeof useThemeColors>) {
       flexDirection: "row",
       justifyContent: "space-between",
       alignItems: "center",
+      gap: 12,
+    },
+    requestCard: {
+      gap: 12,
     },
     userInfo: {
       flex: 1,
@@ -770,12 +946,29 @@ function createStyles(colors: ReturnType<typeof useThemeColors>) {
       paddingVertical: 8,
       borderRadius: 6,
     },
+    secondaryButton: {
+      backgroundColor: colors.backgroundRaised,
+      borderWidth: 1,
+      borderColor: colors.border,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      borderRadius: 6,
+    },
     actionButtonDisabled: {
       opacity: 0.72,
     },
     actionButtonText: {
       color: colors.text,
       fontSize: 14,
+    },
+    secondaryButtonText: {
+      color: colors.text,
+      fontSize: 14,
+    },
+    requestActions: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 8,
     },
     loadMoreButton: {
       alignSelf: "center",

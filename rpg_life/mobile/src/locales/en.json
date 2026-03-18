@@ -349,7 +349,7 @@
         "googleClientMissing": "Google client ID is not configured in the mobile config.",
         "googleNotReady": "Google authorization is not ready yet. Please try again.",
         "googleFailed": "Failed to complete Google sign-in.",
-        "telegramOpened": "The Telegram bot has been opened. The app can already accept a return deep link like rpglife://auth/telegram?init_data=..., and the backend bridge is ready at /api/v1/auth/telegram/bridge.",
+        "telegramOpened": "The Telegram sign-in page has been opened. After confirmation, Telegram should return you to the app via the deep link rpglife://auth/telegram?init_data=....",
         "accountHint": "Sign in to your account and continue leveling your hero without extra setup.",
         "socialSectionTitle": "Social login",
         "socialSectionHint": "Google and Telegram are available here. For Telegram, the app already supports the rpglife://auth/telegram?init_data=... return deep link.",

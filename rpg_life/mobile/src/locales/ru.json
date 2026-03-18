@@ -350,7 +350,7 @@
         "googleClientMissing": "В mobile-конфиге не настроен Google client ID.",
         "googleNotReady": "Google-авторизация еще не готова. Попробуй снова.",
         "googleFailed": "Не удалось завершить вход через Google.",
-        "telegramOpened": "Открыли бота Telegram. Приложение уже умеет принять возврат по ссылке вида rpglife://auth/telegram?init_data=..., а backend bridge готов по пути /api/v1/auth/telegram/bridge.",
+        "telegramOpened": "Открыли страницу авторизации Telegram. После подтверждения Telegram должен вернуть тебя в приложение по deep link rpglife://auth/telegram?init_data=....",
         "accountHint": "Войди в аккаунт и продолжай прокачку героя без лишних настроек.",
         "socialSectionTitle": "Социальный вход",
         "socialSectionHint": "Подготовлено для Google и Telegram. Для Telegram приложение уже умеет поймать возврат по deep link формата rpglife://auth/telegram?init_data=....",

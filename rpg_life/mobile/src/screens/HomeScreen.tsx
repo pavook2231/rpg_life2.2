@@ -176,7 +176,7 @@ export function HomeScreen() {
       key: "strength",
       icon: "strength",
       title: t("screens.home.stats.strength.title"),
-      description: t("screens.home.quick.stats.strength"),
+      description: `Сила увеличивает дневной лимит системных квестов. Сейчас: +${Math.floor((derivedStats.strength ?? 0) / 10)} квестов.`,
     },
     {
       key: "intellect",
@@ -511,6 +511,30 @@ export function HomeScreen() {
         <Button label={todayPlan.actionLabel} icon={todayPlan.icon} onPress={todayPlan.onPress} variant="secondary" />
       </Card>
 
+      {weeklyGoal ? (
+        <Card tone={weeklyGoal.claimable ? "accent" : "subtle"}>
+          <Text style={styles.cardTitle}>{t("screens.home.weeklyRewardTitle")}</Text>
+          <Text style={styles.bonusText}>{weeklyGoal.title}</Text>
+          <Text style={styles.rewardMeta}>
+            {weeklyGoal.progress}/{weeklyGoal.target} | {weeklyGoal.progress_percent}% | {weeklyGoal.state_message}
+          </Text>
+          <Text style={styles.rewardMeta}>
+            {t("screens.home.quick.weeklyRewardSummary", {
+              xp: weeklyGoal.reward_preview.xp,
+              gold: weeklyGoal.reward_preview.crystals,
+            })}
+          </Text>
+          {weeklyGoal.claimable ? (
+            <Button
+              label={isClaimingWeeklyReward ? t("common.loading") : t("screens.home.claimWeekly")}
+              icon="calendar-check"
+              onPress={handleClaimWeeklyReward}
+              loading={isClaimingWeeklyReward}
+            />
+          ) : null}
+        </Card>
+      ) : null}
+
       <Card>
         <Text style={styles.cardTitle}>{t("screens.home.statsTitle")}</Text>
         <View style={styles.statsGrid}>
@@ -556,30 +580,6 @@ export function HomeScreen() {
           description={t("screens.home.quick.healthRecoverDescription")}
         />
       </Card>
-
-      {weeklyGoal ? (
-        <Card tone={weeklyGoal.claimable ? "accent" : "subtle"}>
-          <Text style={styles.cardTitle}>{t("screens.home.weeklyRewardTitle")}</Text>
-          <Text style={styles.bonusText}>{weeklyGoal.title}</Text>
-          <Text style={styles.rewardMeta}>
-            {weeklyGoal.progress}/{weeklyGoal.target} | {weeklyGoal.progress_percent}% | {weeklyGoal.state_message}
-          </Text>
-          <Text style={styles.rewardMeta}>
-            {t("screens.home.quick.weeklyRewardSummary", {
-              xp: weeklyGoal.reward_preview.xp,
-              gold: weeklyGoal.reward_preview.crystals,
-            })}
-          </Text>
-          {weeklyGoal.claimable ? (
-            <Button
-              label={isClaimingWeeklyReward ? t("common.loading") : t("screens.home.claimWeekly")}
-              icon="calendar-check"
-              onPress={handleClaimWeeklyReward}
-              loading={isClaimingWeeklyReward}
-            />
-          ) : null}
-        </Card>
-      ) : null}
 
       {seasonalGoal ? (
         <Card tone={seasonalGoal.claimable ? "accent" : "subtle"}>

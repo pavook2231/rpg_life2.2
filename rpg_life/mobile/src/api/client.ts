@@ -17,33 +17,58 @@ type HealthPayload = {
   status: string;
 };
 
+const REQUEST_TIMEOUT_MS = 15_000;
+let refreshPromise: Promise<boolean> | null = null;
+
+async function fetchWithTimeout(input: string, init: RequestInit = {}) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+  try {
+    return await fetch(input, {
+      ...init,
+      signal: init.signal ?? controller.signal,
+    });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 async function refreshTokens() {
-  const refreshToken = await getRefreshToken();
-  if (!refreshToken) {
-    return false;
+  if (!refreshPromise) {
+    refreshPromise = (async () => {
+      const refreshToken = await getRefreshToken();
+      if (!refreshToken) {
+        return false;
+      }
+
+      const apiBaseUrl = await getApiBaseUrl();
+      const response = await fetchWithTimeout(`${apiBaseUrl}/auth/refresh`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refresh_token: refreshToken }),
+      });
+
+      if (!response.ok) {
+        await clearTokens();
+        return false;
+      }
+
+      const payload = (await response.json()) as ApiEnvelope<{
+        tokens: {
+          access_token: string;
+          refresh_token: string;
+        };
+      }>;
+
+      await saveTokens(payload.data.tokens.access_token, payload.data.tokens.refresh_token);
+      return true;
+    })().finally(() => {
+      refreshPromise = null;
+    });
   }
 
-  const apiBaseUrl = await getApiBaseUrl();
-  const response = await fetch(`${apiBaseUrl}/auth/refresh`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ refresh_token: refreshToken }),
-  });
-
-  if (!response.ok) {
-    await clearTokens();
-    return false;
-  }
-
-  const payload = (await response.json()) as ApiEnvelope<{
-    tokens: {
-      access_token: string;
-      refresh_token: string;
-    };
-  }>;
-
-  await saveTokens(payload.data.tokens.access_token, payload.data.tokens.refresh_token);
-  return true;
+  return refreshPromise;
 }
 
 async function requestWithBase<T>(baseUrl: string, path: string, options: RequestOptions = {}): Promise<T> {
@@ -52,7 +77,7 @@ async function requestWithBase<T>(baseUrl: string, path: string, options: Reques
   let response: Response;
 
   try {
-    response = await fetch(`${baseUrl}${path}`, {
+    response = await fetchWithTimeout(`${baseUrl}${path}`, {
       ...rest,
       headers: {
         "Content-Type": "application/json",
@@ -60,7 +85,10 @@ async function requestWithBase<T>(baseUrl: string, path: string, options: Reques
         ...(headers ?? {}),
       },
     });
-  } catch {
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error(await translateStored("errors.api.networkUnavailable", { url: baseUrl }));
+    }
     throw new Error(await translateStored("errors.api.networkUnavailable", { url: baseUrl }));
   }
 

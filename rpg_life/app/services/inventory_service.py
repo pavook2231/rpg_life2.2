@@ -6,7 +6,7 @@ from app.class_roles import score_item_for_class
 from app import crud
 from app.beta_content import CHEST_CATALOG
 from app.chest_items import CHEST_PRESENTATION, ensure_chest_item, get_chest_catalog_entry, grant_chest_to_user
-from app.core.cache import cache_delete_prefix, cache_get_json, cache_set_json
+from app.core.cache import cache_get_json, cache_set_json
 from app.core.dates import utc_now
 from app.equipment_service import EquipmentError, equip_item, get_equipped_inventory_ids, get_equipped_items, recalculate_total_stats, unequip_item
 from app.item_service import EquipmentError as ItemEquipmentError, buy_item, sell_item
@@ -15,8 +15,6 @@ from app.models import CharacterEquipment, Item, User, UserClassProgress, UserIn
 from app.text_utils import normalize_item_model, normalize_nested_strings
 
 SHOP_ROTATION_HOURS = 12
-SHOP_REFRESH_COST = 10
-SHOP_REFRESH_COOLDOWN_SECONDS = 10 * 60
 CHEST_SHOP_IDS = {
     "COMMON_CHEST": -9001,
     "RARE_CHEST": -9002,
@@ -62,10 +60,6 @@ def _shop_rotation_end(now: datetime | None = None) -> datetime:
 
 def _catalog_cache_key(user_id: int, rotation_start: datetime, class_name: str | None, level: int) -> str:
     return f"shop:catalog:{user_id}:{class_name or 'none'}:{level}:{rotation_start.isoformat()}"
-
-
-def _cooldown_cache_key(user_id: int) -> str:
-    return f"shop:refresh-cooldown:{user_id}"
 
 
 def _serialize_shop_items(items: list[dict]) -> list[dict]:
@@ -142,32 +136,13 @@ def _resolve_shop_items(db: Session, current_user: User, level: int, force_refre
     return items, rotation_end
 
 
-def _get_refresh_cooldown_state(user_id: int) -> dict | None:
-    payload = cache_get_json(_cooldown_cache_key(user_id))
-    if not payload:
-        return None
-    return payload
-
-
-def _get_shop_meta(user_id: int, next_rotation_at: datetime) -> dict:
-    cooldown = _get_refresh_cooldown_state(user_id)
-    refresh_available_at = cooldown.get("refresh_available_at") if cooldown else None
-    now = utc_now()
-    refresh_remaining = 0
-    if refresh_available_at:
-      try:
-          available_at = datetime.fromisoformat(refresh_available_at)
-          refresh_remaining = max(int((available_at - now).total_seconds()), 0)
-      except ValueError:
-          refresh_available_at = None
-          refresh_remaining = 0
-
+def _get_shop_meta(next_rotation_at: datetime) -> dict:
     return {
-        "refresh_cost": SHOP_REFRESH_COST,
-        "refresh_cooldown_seconds": SHOP_REFRESH_COOLDOWN_SECONDS,
-        "refresh_available_at": refresh_available_at,
-        "refresh_remaining_seconds": refresh_remaining,
-        "can_refresh": refresh_remaining == 0,
+        "refresh_cost": 0,
+        "refresh_cooldown_seconds": 0,
+        "refresh_available_at": None,
+        "refresh_remaining_seconds": 0,
+        "can_refresh": False,
         "next_rotation_at": next_rotation_at.isoformat(),
     }
 
@@ -217,11 +192,11 @@ def get_shop_context(db: Session, current_user: User) -> dict:
         "items": items,
         "crystals": progress.crystals if progress else 0,
         "character_level": level,
-        **_get_shop_meta(current_user.id, next_rotation_at),
+        **_get_shop_meta(next_rotation_at),
     }
 
 
-def refresh_shop_context(db: Session, current_user: User) -> dict:
+def _legacy_refresh_shop_context_unused(db: Session, current_user: User) -> dict:
     progress = _get_main_progress(db, current_user.id)
     if not progress:
         raise HTTPException(status_code=404, detail="Character not found")
@@ -254,7 +229,21 @@ def refresh_shop_context(db: Session, current_user: User) -> dict:
         "items": items,
         "crystals": progress.crystals,
         "character_level": progress.level,
-        **_get_shop_meta(current_user.id, next_rotation_at),
+        **_get_shop_meta(next_rotation_at),
+    }
+
+def refresh_shop_context(db: Session, current_user: User) -> dict:
+    progress = _get_main_progress(db, current_user.id)
+    if not progress:
+        raise HTTPException(status_code=404, detail="Character not found")
+
+    items, next_rotation_at = _resolve_shop_items(db, current_user, progress.level, force_refresh=True)
+
+    return {
+        "items": items,
+        "crystals": progress.crystals,
+        "character_level": progress.level,
+        **_get_shop_meta(next_rotation_at),
     }
 
 

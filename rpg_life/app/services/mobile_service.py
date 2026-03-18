@@ -87,6 +87,105 @@ def get_character_profile(db: Session, current_user: User) -> dict:
     }
 
 
+def get_bootstrap_payload(db: Session, current_user: User) -> dict:
+    health_context = health_service.sync_character_health(db, current_user.id)
+    classes = crud.get_all_unlocked_classes(db, current_user.id)
+    goal_state = quest_service.get_goal_state(db, current_user)
+    main_char = classes[0] if classes else None
+    next_level_xp = crud.calculate_next_level_xp(main_char.level) if main_char else 0
+    xp_percent = ((main_char.current_xp / next_level_xp) * 100) if main_char and next_level_xp > 0 else 0
+
+    daily_bonus = quest_service.get_daily_bonus_info(db, current_user.id)
+    recent_bonus = (
+        db.query(DailyBonus)
+        .filter(DailyBonus.user_id == current_user.id)
+        .order_by(DailyBonus.claimed_at.desc())
+        .first()
+    )
+    streak_summary = engagement_service.get_streak_summary(db, current_user)
+    weekly_goal = engagement_service.get_weekly_goal_summary(db, current_user)
+    seasonal_goal = engagement_service.get_seasonal_goal_summary(db, current_user)
+    active_event = engagement_service.get_active_event_summary(db, current_user)
+    social_pulse = engagement_service.get_social_pulse(db, current_user)
+    class_role = engagement_service.get_class_role_summary(db, current_user)
+
+    return normalize_nested_strings(
+        {
+            "profile": {
+                "user": {
+                    "id": current_user.id,
+                    "email": current_user.email,
+                    "name": current_user.name,
+                    "birth_year": current_user.birth_year,
+                    "gender": current_user.gender,
+                    "goal_type": current_user.selected_goal_type,
+                    "goal_term_months": current_user.goal_term_months,
+                    "goal_cycle_xp": getattr(current_user, "goal_cycle_xp", 0),
+                    "goal_target_xp": getattr(current_user, "goal_target_xp", 0),
+                    "goal_progress_percent": current_user.goal_progress_percent,
+                    "created_at": current_user.created_at.isoformat() if current_user.created_at else None,
+                },
+                "goal": goal_state,
+                "health": health_context["health"],
+                "classes": [
+                    {
+                        "id": progress.id,
+                        "class_name": progress.class_name,
+                        "display_name": progress.display_name,
+                        "level": progress.level,
+                        "current_xp": progress.current_xp,
+                        "crystals": progress.crystals,
+                        "strength": progress.strength,
+                        "agility": progress.agility,
+                        "intellect": progress.intellect,
+                        "stamina": getattr(progress, "stamina", 0),
+                        "max_health": getattr(progress, "max_health", 100),
+                        "current_health": getattr(progress, "current_health", 100),
+                        "streak": progress.streak,
+                    }
+                    for progress in classes
+                ],
+            },
+            "character_profile": {
+                "has_character": bool(main_char),
+                "character": {
+                    "id": main_char.id,
+                    "name": getattr(main_char, "display_name", main_char.class_name),
+                    "level": main_char.level,
+                    "class": main_char.class_name,
+                    "streak": main_char.streak,
+                    "crystals": main_char.crystals,
+                    "goal_cycle_xp": getattr(current_user, "goal_cycle_xp", 0),
+                    "goal_target_xp": getattr(current_user, "goal_target_xp", 0),
+                    "goal_progress_percent": current_user.goal_progress_percent or 0,
+                    "strength": main_char.strength,
+                    "agility": main_char.agility,
+                    "intellect": main_char.intellect,
+                    "stamina": getattr(main_char, "stamina", 0),
+                    "current_xp": main_char.current_xp,
+                    "next_level_xp": next_level_xp,
+                    "xp_percent": xp_percent,
+                    "health": health_context["health"],
+                }
+                if main_char
+                else None,
+                "health": health_context["health"],
+            },
+            "rewards_summary": {
+                "daily_bonus": daily_bonus,
+                "available_achievements": [{"id": achievement["id"], "title": achievement["title"]} for achievement in ACHIEVEMENTS],
+                "last_bonus_claimed_at": recent_bonus.claimed_at.isoformat() if recent_bonus else None,
+                "streak_summary": streak_summary,
+                "weekly_goal": weekly_goal,
+                "seasonal_goal": seasonal_goal,
+                "active_event": active_event,
+                "social_pulse": social_pulse,
+                "class_role": class_role,
+            },
+        }
+    )
+
+
 def sync_today_steps(
     db: Session,
     current_user: User,

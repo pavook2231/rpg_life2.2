@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
 
-import { buyShopItem, fetchShop, refreshShop, type ShopPayload } from "../api/game";
+import { buyShopItem, fetchShop, type ShopItemPayload, type ShopPayload } from "../api/game";
 import { Screen } from "../components/Screen";
 import { StateBlock } from "../components/StateBlock";
 import { useFeedback } from "../context/FeedbackContext";
@@ -58,6 +58,47 @@ function toStatEntries(item: UnifiedCatalogItem): ItemStatEntry[] {
   return item.statEntries;
 }
 
+function buildFallbackShopItem(serverItem: ShopItemPayload): ShopVisualItem {
+  const normalizedType = serverItem.type === "chest" ? "chest" : serverItem.type === "weapon" ? "weapon" : serverItem.type === "armor" ? "armor" : "accessory";
+  const sectionKey =
+    normalizedType === "weapon"
+      ? "weapons"
+      : normalizedType === "armor"
+        ? "armor"
+        : normalizedType === "chest"
+          ? "chests"
+          : "accessories";
+  return {
+    id: serverItem.id,
+    key: `shop-fallback-${serverItem.id}`,
+    sourceId: serverItem.id,
+    iconName: serverItem.icon || "package-variant-closed",
+    aliases: [serverItem.icon || ""].filter(Boolean),
+    sectionKey,
+    category: normalizedType,
+    rarity: (serverItem.rarity as UnifiedCatalogItem["rarity"]) ?? "common",
+    name: serverItem.name,
+    description: serverItem.description || "",
+    requiredLevel: serverItem.required_level ?? 1,
+    priceGold: serverItem.price_crystals ?? 0,
+    slot: serverItem.slot ?? null,
+    subclass: serverItem.subclass ?? null,
+    weaponStats: serverItem.weapon_stats ?? null,
+    armorStats: serverItem.armor_stats ?? null,
+    bonuses: {
+      strength_bonus: serverItem.stats?.strength_bonus ?? 0,
+      agility_bonus: serverItem.stats?.agility_bonus ?? 0,
+      intellect_bonus: serverItem.stats?.intellect_bonus ?? 0,
+      stamina_bonus: serverItem.stats?.stamina_bonus ?? 0,
+      health_bonus: serverItem.stats?.health_bonus ?? 0,
+      xp_bonus: serverItem.stats?.xp_bonus ?? 0,
+      crystal_bonus: serverItem.stats?.crystal_bonus ?? 0,
+    },
+    statEntries: [],
+    shopItemId: serverItem.id,
+  };
+}
+
 export function ShopScreen() {
   const { language } = useLocalization();
   const t = useTranslation();
@@ -70,8 +111,8 @@ export function ShopScreen() {
 
   const [shopPayload, setShopPayload] = useState<ShopPayload | null>(null);
   const [isLoadingShop, setIsLoadingShop] = useState(false);
-  const [isRefreshingShop, setIsRefreshingShop] = useState(false);
   const [selectedItem, setSelectedItem] = useState<ShopVisualItem | null>(null);
+  const [purchasingItemId, setPurchasingItemId] = useState<number | null>(null);
   const [filter, setFilter] = useState<CatalogFilter>("all");
   const [sortMode, setSortMode] = useState<SortMode>("level");
   const [search, setSearch] = useState("");
@@ -94,8 +135,7 @@ export function ShopScreen() {
     for (const serverItem of shopPayload?.items ?? []) {
       const directMatch = findUnifiedItemByIcon(serverItem.icon);
       const tokenMatch = catalogByToken.get(normalizeToken(serverItem.icon));
-      const catalogItem = directMatch ?? tokenMatch;
-      if (!catalogItem) continue;
+      const catalogItem = directMatch ?? tokenMatch ?? buildFallbackShopItem(serverItem);
 
       result.push({
         ...catalogItem,
@@ -144,11 +184,11 @@ export function ShopScreen() {
   const getFilterLabel = useCallback((value: CatalogFilter) => t(`screens.shop.quick.filters.${value}`), [t]);
   const getSortLabel = useCallback((value: SortMode) => t(`screens.shop.quick.sort.${value}`), [t]);
 
-  const loadShop = useCallback(async () => {
+  const loadShop = useCallback(async (forceRefresh = false) => {
     setIsLoadingShop(true);
     setShopError(null);
     try {
-      const payload = await fetchShop();
+      const payload = await fetchShop({ forceRefresh });
       setShopPayload(payload);
     } catch (error) {
       setShopError(error instanceof Error ? error.message : t("shop.purchaseFailed"));
@@ -168,29 +208,6 @@ export function ShopScreen() {
       });
     });
   }, [loadShop, pushToast, t]);
-
-  async function handleRefreshRotation() {
-    setIsRefreshingShop(true);
-    try {
-      const payload = await refreshShop();
-      setShopPayload(payload);
-      await pushToast({
-        title: t("screens.shop.quick.refreshedTitle"),
-        description: t("screens.shop.quick.refreshedDescription"),
-        icon: "refresh",
-        tone: "success",
-      }, { sound: "item" });
-    } catch (error) {
-      pushToast({
-        title: t("screens.shop.quick.refreshFailed"),
-        description: error instanceof Error ? error.message : t("errors.unknownError"),
-        icon: "alert-circle",
-        tone: "warning",
-      });
-    } finally {
-      setIsRefreshingShop(false);
-    }
-  }
 
   async function handleBuy(item: ShopVisualItem) {
     if (heroLevel < item.requiredLevel) {
@@ -213,19 +230,25 @@ export function ShopScreen() {
       return;
     }
 
+    if (purchasingItemId === item.shopItemId) {
+      return;
+    }
+
     try {
+      setPurchasingItemId(item.shopItemId);
+      setSelectedItem(null);
       const result = await buyShopItem(item.shopItemId);
-      await Promise.all([refreshGame(), loadShop()]);
+      await Promise.all([refreshGame(true), loadShop(true)]);
 
       if (result.kind === "chest") {
-        await pushToast({
+        void pushToast({
           title: t("screens.shop.quick.chestPurchased"),
           description: result.chest_item?.name ?? t("screens.shop.quick.openInInventory"),
           icon: result.chest_item?.icon ?? item.iconName,
           tone: "reward",
         }, { sound: "item" });
       } else {
-        await pushToast({
+        void pushToast({
           title: t("screens.shop.quick.itemPurchased"),
           description: item.name,
           icon: item.iconName,
@@ -233,12 +256,14 @@ export function ShopScreen() {
         }, { sound: "item" });
       }
     } catch (error) {
-      pushToast({
+      void pushToast({
         title: t("shop.purchaseFailed"),
         description: error instanceof Error ? error.message : t("errors.unknownError"),
         icon: "alert-circle",
         tone: "warning",
       });
+    } finally {
+      setPurchasingItemId(null);
     }
   }
 
@@ -261,7 +286,7 @@ export function ShopScreen() {
           <View style={styles.headerCopy}>
             <Text style={styles.headerTitle}>{t("screens.shop.title")}</Text>
             <Text style={styles.headerText}>
-              {t("screens.shop.quick.itemsInRotation", { count: shopItems.length })}
+              {`Предметов в магазине: ${shopItems.length}`}
             </Text>
           </View>
 
@@ -278,14 +303,6 @@ export function ShopScreen() {
             placeholder={t("screens.shop.quick.searchPlaceholder")}
             placeholderTextColor={colors.textDim}
             style={styles.searchInput}
-          />
-          <Button
-            label={t("screens.shop.quick.refresh")}
-            icon="refresh"
-            onPress={handleRefreshRotation}
-            variant="secondary"
-            disabled={isRefreshingShop || isLoadingShop}
-            style={styles.refreshButton}
           />
         </View>
 
@@ -324,7 +341,7 @@ export function ShopScreen() {
           description={shopError}
           actionLabel={t("common.retry")}
           onAction={() => {
-            void loadShop();
+            void loadShop(true);
           }}
         />
       ) : null}
@@ -351,16 +368,18 @@ export function ShopScreen() {
                   rarity={item.rarity}
                   description={item.description}
                   statEntries={toStatEntries(item)}
+                  price={item.priceGold}
                   badge={t("screens.shop.quick.itemBadge", {
                     rarity: rarityLabel,
                     level: item.requiredLevel,
                     levelShort: t("common.levelShort"),
                   })}
-                  actionLabel={String(item.priceGold)}
+                  actionLabel={t("screens.shop.buy")}
                   onAction={() => handleBuy(item)}
                   onPress={() => setSelectedItem(item)}
                   compact
                   shopStyle
+                  chestStyle={item.category === "chest"}
                   locked={lockedByLevel}
                   delay={index * 10}
                 />
@@ -408,10 +427,11 @@ export function ShopScreen() {
           selectedItem && heroLevel >= selectedItem.requiredLevel
             ? [
                 {
-                  label: String(selectedItem.priceGold),
+                  label: t("screens.shop.buyNow"),
                   icon: "cash",
                   onPress: () => handleBuy(selectedItem),
                   variant: "gold" as const,
+                  loading: purchasingItemId === selectedItem.shopItemId,
                 },
               ]
             : []

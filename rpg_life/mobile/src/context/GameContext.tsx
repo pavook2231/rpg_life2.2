@@ -2,13 +2,12 @@ import React, { createContext, ReactNode, useCallback, useContext, useEffect, us
 import { InteractionManager, Platform } from "react-native";
 
 import {
+  type BootstrapPayload,
   type DailyLimitsPayload,
   fetchAchievements,
-  fetchCharacterProfile,
+  fetchBootstrap,
   fetchEquipmentOverview,
   fetchInventory,
-  fetchProfile,
-  fetchRewardsSummary,
   syncTodaySteps,
   type AchievementItem,
   type CharacterProfilePayload,
@@ -24,7 +23,7 @@ import { useOffline } from "./OfflineContext";
 import { useTranslation } from "./LocalizationContext";
 
 type EquipmentOverview = Awaited<ReturnType<typeof fetchEquipmentOverview>>;
-type RewardsSummary = Awaited<ReturnType<typeof fetchRewardsSummary>>;
+type RewardsSummary = BootstrapPayload["rewards_summary"];
 type HeroState = CharacterProfilePayload["character"] | null;
 
 type QuestRewardItem = {
@@ -122,20 +121,10 @@ export function GameProvider({ children }: { children: ReactNode }) {
   const t = useTranslation();
 
   const loadCoreGame = useCallback(async (forceRefresh = false) => {
-    setIsRefreshing(true);
-    try {
-      const [profilePayload, heroPayload, rewardsPayload] = await Promise.all([
-        fetchProfile({ forceRefresh }),
-        fetchCharacterProfile({ forceRefresh }),
-        fetchRewardsSummary({ forceRefresh }),
-      ]);
-
-      setProfile(profilePayload);
-      setHero(heroPayload.character ?? null);
-      setRewards(rewardsPayload ?? null);
-    } finally {
-      setIsRefreshing(false);
-    }
+    const bootstrapPayload = await fetchBootstrap({ forceRefresh });
+    setProfile(bootstrapPayload.profile);
+    setHero(bootstrapPayload.character_profile.character ?? null);
+    setRewards(bootstrapPayload.rewards_summary ?? null);
   }, []);
 
   const loadExtendedGame = useCallback(async (forceRefresh = false) => {
@@ -156,8 +145,12 @@ export function GameProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const refreshGame = useCallback(async (forceRefresh = true) => {
-    await loadCoreGame(forceRefresh);
-    await loadExtendedGame(forceRefresh);
+    setIsRefreshing(true);
+    try {
+      await Promise.all([loadCoreGame(forceRefresh), loadExtendedGame(forceRefresh)]);
+    } finally {
+      setIsRefreshing(false);
+    }
   }, [loadCoreGame, loadExtendedGame]);
 
   useEffect(() => {
@@ -253,8 +246,11 @@ export function GameProvider({ children }: { children: ReactNode }) {
   }, [isOnline, user]);
 
   const applyQuestResult = useCallback(async (result: QuestCompletionResult) => {
+    const queueToast = (toast: Parameters<typeof pushToast>[0], options?: Parameters<typeof pushToast>[1]) => {
+      void pushToast(toast, options);
+    };
     if (result?.queued) {
-      await pushToast({
+      queueToast({
         title: t("offline.queuedActionTitle"),
         description: t("offline.questQueuedDescription"),
         icon: "cloud-upload-outline",
@@ -277,7 +273,12 @@ export function GameProvider({ children }: { children: ReactNode }) {
         : current,
     );
 
-    await pushToast({
+    await loadCoreGame(true);
+    InteractionManager.runAfterInteractions(() => {
+      void loadExtendedGame(true);
+    });
+
+    queueToast({
       title: t("game.reward.questCompleted"),
       description: t("game.reward.questCompletedDescription", {
         xp: result?.xp_earned ?? 0,
@@ -288,7 +289,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
     }, { sound: "quest" });
 
     if (result?.reward_penalty_applied && result.health?.is_wounded) {
-      await pushToast({
+      queueToast({
         title: "Награда снижена",
         description: `Из-за ранения награда уменьшена на ${Math.round(result.health.reward_penalty_percent ?? 0)}%. Осталось ${result.health.penalty_quests_remaining} квестов до восстановления.`,
         icon: "heart-broken",
@@ -297,7 +298,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
     }
 
     if (!hero?.health?.is_wounded && result?.health?.is_wounded) {
-      await pushToast({
+      queueToast({
         title: "Герой ранен",
         description: "После долгого отсутствия персонаж получил урон. Следи за HP на главной странице.",
         icon: "alert-circle",
@@ -306,7 +307,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
     }
 
     if (hero?.health?.is_wounded && result?.health && !result.health.is_wounded) {
-      await pushToast({
+      queueToast({
         title: "Герой восстановился",
         description: "Штраф к наградам снят. Можно снова фармить без потерь.",
         icon: "heart-plus",
@@ -317,7 +318,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
     if (Array.isArray(result?.achievements)) {
       for (const achievement of result.achievements) {
         const isMajorAchievement = achievement.tier === "epic" || achievement.tier === "legendary";
-        await pushToast({
+        queueToast({
           title: t("game.reward.achievementTitle", {
             title: achievement.title ?? t("game.reward.newReward"),
           }),
@@ -337,7 +338,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
     );
 
     for (const reward of rewardItems) {
-      await pushToast({
+      queueToast({
         title: t("game.reward.itemObtainedTitle", {
           title: reward.name ?? t("game.reward.newReward"),
         }),
@@ -348,7 +349,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
     }
 
     if (Array.isArray(result?.level_ups) && result.level_ups.length > 0) {
-      await pushToast({
+      queueToast({
         title: t("game.reward.levelUpTitle", { level: result.new_level ?? 0 }),
         description: t("game.reward.statsIncreased"),
         icon: "chevron-triple-up",
@@ -356,8 +357,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
       }, { sound: "level", haptic: "level", durationMs: 2500 });
     }
 
-    await refreshGame(true);
-  }, [hero?.health?.is_wounded, pushToast, refreshGame, t]);
+  }, [hero?.health?.is_wounded, loadCoreGame, loadExtendedGame, pushToast, refreshGame, t]);
 
   const value = useMemo(
     () => ({

@@ -1,11 +1,11 @@
 ﻿from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
-from fastapi.responses import RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from urllib.parse import quote
 
 from app import auth
 from app.api.dependencies import enforce_rate_limit
-from app.core.config import SOCIAL_AUTH_REDIRECT_SCHEME
+from app.core.config import SOCIAL_AUTH_REDIRECT_SCHEME, TELEGRAM_AUTH_ENABLED, TELEGRAM_BOT_USERNAME
 from app.core.database import get_db
 from app.core.responses import success_response
 from app.models import User
@@ -44,6 +44,175 @@ async def auth_telegram_bridge(request: Request):
         return RedirectResponse(url=f"{target_base}?error=telegram_auth_hash_missing", status_code=302)
 
     return RedirectResponse(url=f"{target_base}?init_data={quote(query_string, safe='')}", status_code=302)
+
+
+@router.get("/auth/telegram/login", summary="Telegram login page", include_in_schema=False)
+async def auth_telegram_login_page(request: Request):
+    bridge_url = str(request.url_for("auth_telegram_bridge"))
+    app_link = f"{SOCIAL_AUTH_REDIRECT_SCHEME}://auth/telegram"
+
+    if not TELEGRAM_AUTH_ENABLED:
+        return HTMLResponse(
+            """
+            <!doctype html>
+            <html lang="ru">
+              <head>
+                <meta charset="utf-8" />
+                <meta name="viewport" content="width=device-width, initial-scale=1" />
+                <title>Telegram Sign-in</title>
+                <style>
+                  body { margin: 0; font-family: Arial, sans-serif; background: #0f172a; color: #e5e7eb; }
+                  .shell { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+                  .card { width: 100%; max-width: 520px; background: rgba(15, 23, 42, 0.92); border: 1px solid rgba(148, 163, 184, 0.25); border-radius: 24px; padding: 28px; }
+                  h1 { margin: 0 0 12px; font-size: 28px; }
+                  p { margin: 0; line-height: 1.5; color: #cbd5e1; }
+                  code { background: rgba(15, 23, 42, 0.8); padding: 2px 6px; border-radius: 6px; color: #f8fafc; }
+                </style>
+              </head>
+              <body>
+                <main class="shell">
+                  <section class="card">
+                    <h1>Telegram sign-in is disabled</h1>
+                    <p>Enable <code>TELEGRAM_AUTH_ENABLED=true</code> and set both <code>TELEGRAM_BOT_TOKEN</code> and <code>TELEGRAM_BOT_USERNAME</code> on the server.</p>
+                  </section>
+                </main>
+              </body>
+            </html>
+            """,
+            status_code=503,
+        )
+
+    if not TELEGRAM_BOT_USERNAME:
+        return HTMLResponse(
+            """
+            <!doctype html>
+            <html lang="ru">
+              <head>
+                <meta charset="utf-8" />
+                <meta name="viewport" content="width=device-width, initial-scale=1" />
+                <title>Telegram Sign-in</title>
+                <style>
+                  body { margin: 0; font-family: Arial, sans-serif; background: #0f172a; color: #e5e7eb; }
+                  .shell { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+                  .card { width: 100%; max-width: 520px; background: rgba(15, 23, 42, 0.92); border: 1px solid rgba(148, 163, 184, 0.25); border-radius: 24px; padding: 28px; }
+                  h1 { margin: 0 0 12px; font-size: 28px; }
+                  p { margin: 0; line-height: 1.5; color: #cbd5e1; }
+                  code { background: rgba(15, 23, 42, 0.8); padding: 2px 6px; border-radius: 6px; color: #f8fafc; }
+                </style>
+              </head>
+              <body>
+                <main class="shell">
+                  <section class="card">
+                    <h1>Telegram bot username is missing</h1>
+                    <p>Add <code>TELEGRAM_BOT_USERNAME</code> to the server environment and restart the backend.</p>
+                  </section>
+                </main>
+              </body>
+            </html>
+            """,
+            status_code=503,
+        )
+
+    html = f"""
+    <!doctype html>
+    <html lang="ru">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>RPG Life Telegram Sign-in</title>
+        <style>
+          :root {{
+            color-scheme: dark;
+          }}
+          body {{
+            margin: 0;
+            min-height: 100vh;
+            font-family: Arial, sans-serif;
+            background:
+              radial-gradient(circle at top, rgba(249, 115, 22, 0.14), transparent 38%),
+              linear-gradient(180deg, #0f172a 0%, #111827 100%);
+            color: #f8fafc;
+          }}
+          .shell {{
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+          }}
+          .card {{
+            width: 100%;
+            max-width: 560px;
+            background: rgba(15, 23, 42, 0.9);
+            border: 1px solid rgba(148, 163, 184, 0.22);
+            border-radius: 24px;
+            padding: 28px;
+            box-shadow: 0 30px 80px rgba(2, 6, 23, 0.5);
+          }}
+          .eyebrow {{
+            margin: 0 0 12px;
+            color: #f59e0b;
+            font-size: 14px;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+          }}
+          h1 {{
+            margin: 0 0 12px;
+            font-size: 32px;
+            line-height: 1.1;
+          }}
+          p {{
+            margin: 0 0 16px;
+            color: #cbd5e1;
+            line-height: 1.6;
+          }}
+          .widget {{
+            margin: 24px 0;
+            display: flex;
+            justify-content: center;
+          }}
+          .hint {{
+            padding: 14px 16px;
+            border-radius: 16px;
+            background: rgba(30, 41, 59, 0.65);
+            color: #cbd5e1;
+            font-size: 14px;
+          }}
+          code {{
+            background: rgba(15, 23, 42, 0.9);
+            color: #f8fafc;
+            padding: 2px 6px;
+            border-radius: 6px;
+          }}
+          a {{
+            color: #38bdf8;
+          }}
+        </style>
+      </head>
+      <body>
+        <main class="shell">
+          <section class="card">
+            <p class="eyebrow">RPG Life</p>
+            <h1>Вход через Telegram</h1>
+            <p>Нажми кнопку ниже, подтверди вход в Telegram, и мы автоматически вернём тебя в приложение по deep link <code>{app_link}</code>.</p>
+            <div class="widget">
+              <script async src="https://telegram.org/js/telegram-widget.js?22"
+                data-telegram-login="{TELEGRAM_BOT_USERNAME}"
+                data-size="large"
+                data-auth-url="{bridge_url}"
+                data-request-access="write">
+              </script>
+            </div>
+            <div class="hint">
+              Если кнопка Telegram не появляется, проверь в <a href="https://t.me/BotFather" target="_blank" rel="noreferrer">BotFather</a>, что домен авторизации у бота совпадает с текущим HTTPS-доменом приложения.
+            </div>
+          </section>
+        </main>
+      </body>
+    </html>
+    """
+    return HTMLResponse(html)
 
 
 @router.get("", summary="РљРѕСЂРµРЅСЊ API")
@@ -123,6 +292,11 @@ async def auth_recover_account(request: Request, payload: RecoverAccountSchema, 
 @router.get("/profile", summary="РџСЂРѕС„РёР»СЊ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ")
 async def get_profile(db: Session = Depends(get_db), current_user: User = Depends(auth.get_current_user)):
     return success_response(mobile_service.get_profile(db, current_user))
+
+
+@router.get("/bootstrap", summary="Core bootstrap payload for mobile app")
+async def get_bootstrap(db: Session = Depends(get_db), current_user: User = Depends(auth.get_current_user)):
+    return success_response(mobile_service.get_bootstrap_payload(db, current_user))
 
 
 @router.post("/notifications/devices/register", summary="Register push device")

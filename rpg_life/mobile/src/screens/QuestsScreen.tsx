@@ -42,10 +42,10 @@ export function QuestsScreen() {
   const [isRefreshingList, setIsRefreshingList] = useState(false);
   const [completingQuestId, setCompletingQuestId] = useState<number | null>(null);
 
-  const loadQuests = useCallback(async () => {
+  const loadQuests = useCallback(async (forceRefresh = false) => {
     setIsLoading(true);
     try {
-      const payload = await fetchDailyQuests(1, 40, "daily");
+      const payload = await fetchDailyQuests(1, 40, "daily", { forceRefresh });
       setQuests(payload.items ?? []);
       setGoal(payload.goal ?? null);
     } finally {
@@ -81,10 +81,11 @@ export function QuestsScreen() {
   async function handleComplete(questId: number) {
     try {
       setCompletingQuestId(questId);
+      setQuests((current) => current.map((quest) => (quest.id === questId ? { ...quest, is_completed: true } : quest)));
       const result = await completeQuest(questId);
-      await applyQuestResult(result);
-      await loadQuests();
+      await Promise.all([applyQuestResult(result), loadQuests(true)]);
     } catch (error) {
+      await loadQuests(true).catch(() => undefined);
       await pushToast({
         title: t("screens.quests.errors.failedToComplete"),
         description: error instanceof Error ? error.message : t("screens.quests.quick.tryAgain"),
@@ -100,7 +101,7 @@ export function QuestsScreen() {
     try {
       setIsRefreshingList(true);
       await regenerateTodayQuests();
-      await loadQuests();
+      await loadQuests(true);
       await pushToast({
         title: t("screens.quests.quick.refreshList"),
         description: t("screens.quests.quick.loadingDescription"),
@@ -144,7 +145,7 @@ export function QuestsScreen() {
       setShowCreateModal(false);
       setCustomTitle("");
       setCustomDescription("");
-      await loadQuests();
+        await loadQuests(true);
       await pushToast({
         title: t("screens.quests.quick.createCustomQuest"),
         description: title,

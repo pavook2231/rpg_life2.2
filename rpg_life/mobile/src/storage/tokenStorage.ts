@@ -2,21 +2,35 @@ import * as SecureStore from "expo-secure-store";
 
 const ACCESS_TOKEN_KEY = "rpg_life_access_token";
 const REFRESH_TOKEN_KEY = "rpg_life_refresh_token";
+let accessTokenCache: string | null | undefined;
+let refreshTokenCache: string | null | undefined;
 
 export async function saveTokens(accessToken: string, refreshToken: string) {
+  accessTokenCache = accessToken;
+  refreshTokenCache = refreshToken;
   await SecureStore.setItemAsync(ACCESS_TOKEN_KEY, accessToken);
   await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, refreshToken);
 }
 
 export async function getAccessToken() {
-  return SecureStore.getItemAsync(ACCESS_TOKEN_KEY);
+  if (accessTokenCache !== undefined) {
+    return accessTokenCache;
+  }
+  accessTokenCache = await SecureStore.getItemAsync(ACCESS_TOKEN_KEY);
+  return accessTokenCache;
 }
 
 export async function getRefreshToken() {
-  return SecureStore.getItemAsync(REFRESH_TOKEN_KEY);
+  if (refreshTokenCache !== undefined) {
+    return refreshTokenCache;
+  }
+  refreshTokenCache = await SecureStore.getItemAsync(REFRESH_TOKEN_KEY);
+  return refreshTokenCache;
 }
 
 export async function clearTokens() {
+  accessTokenCache = null;
+  refreshTokenCache = null;
   await SecureStore.deleteItemAsync(ACCESS_TOKEN_KEY);
   await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
 }

@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 
 from app import auth
-from app.api.dependencies import require_admin_user
+from app.api.dependencies import require_admin_user, verify_csrf_token
 from app.core.database import get_db
 from app.models import User
 from app.schemas import (
@@ -72,6 +72,15 @@ async def list_friends(
     current_user: User = Depends(auth.get_current_user),
 ):
     return social_service.list_friends(db, current_user, page, page_size, search, sort_by, sort_order)
+
+
+@router.get("/friends/requests")
+async def list_friend_requests(
+    status: str = Query("pending"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(auth.get_current_user),
+):
+    return social_service.list_friend_requests(db, current_user, status)
 
 
 @router.get("/friends/search")

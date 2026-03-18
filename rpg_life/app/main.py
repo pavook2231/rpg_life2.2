@@ -1,9 +1,11 @@
 import logging
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.exceptions import HTTPException as FastAPIHTTPException
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
@@ -112,7 +114,28 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.add_middleware(GZipMiddleware, minimum_size=900, compresslevel=5)
     app.add_middleware(RateLimitMiddleware, requests_per_minute=180)
+
+    @app.middleware("http")
+    async def add_request_timing(request: Request, call_next):
+        started_at = time.perf_counter()
+        response = await call_next(request)
+        duration_ms = (time.perf_counter() - started_at) * 1000
+        response.headers.setdefault("X-Process-Time-Ms", f"{duration_ms:.1f}")
+
+        if request.url.path.startswith("/api/") and (duration_ms >= 800 or response.status_code >= 500):
+            level = logging.ERROR if response.status_code >= 500 else logging.WARNING
+            logger.log(
+                level,
+                "%s %s -> %s in %.1f ms",
+                request.method,
+                request.url.path,
+                response.status_code,
+                duration_ms,
+            )
+
+        return response
 
     @app.middleware("http")
     async def add_security_headers(request: Request, call_next):

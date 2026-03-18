@@ -51,6 +51,19 @@ export type ChallengeInvitation = {
   responded_at?: string | null;
 };
 
+export type FriendRequestItem = {
+  id: number;
+  status: "pending" | "accepted" | "declined";
+  direction: "incoming" | "outgoing";
+  created_at?: string | null;
+  responded_at?: string | null;
+  user: {
+    id: number;
+    name: string;
+    email: string;
+  };
+};
+
 export function fetchFriends(page = 1, pageSize = 30) {
   return apiRequest<{
     items: FriendItem[];
@@ -108,7 +121,7 @@ export type UserSearchResult = {
   id: number;
   name: string;
   email: string;
-  status: "none" | "pending";
+  status: "none" | "outgoing_pending" | "incoming_pending";
   request_id?: number;
 };
 
@@ -128,6 +141,20 @@ export function sendFriendRequest(receiverId: number) {
   return apiRequest<{ ok: boolean; request: { id: number; status: string; receiver: { id: number; name: string }; created_at: string } }>(`/social/friends/request`, {
     method: "POST",
     body: JSON.stringify({ receiver_id: receiverId }),
+  });
+}
+
+export function fetchFriendRequests(status = "pending") {
+  return apiRequest<{ items: FriendRequestItem[] }>(`/social/friends/requests?status=${encodeURIComponent(status)}`);
+}
+
+export function respondToFriendRequest(requestId: number, action: "accept" | "decline") {
+  return apiRequest<{ ok: boolean; request_id: number; status: string }>(`/social/friends/accept`, {
+    method: "POST",
+    body: JSON.stringify({
+      request_id: requestId,
+      action,
+    }),
   });
 }
 

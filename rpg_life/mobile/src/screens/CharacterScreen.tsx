@@ -174,7 +174,14 @@ export function CharacterScreen() {
         value: `${derivedStats.lootChancePercent}%`,
         description: `Удача усиливает шанс редких предметов и сундуков. Текущий бонус: +${derivedStats.lootChancePercent}%.`,
       },
-    ],
+    ].map((hint) =>
+      hint.key === "strength"
+        ? {
+            ...hint,
+            description: `Сила увеличивает дневной лимит системных квестов. Каждые 10 силы дают ещё 1 квест. Сейчас бонус: +${Math.floor(derivedStats.strength / 10)}.`,
+          }
+        : hint,
+    ),
     [currentHealth, derivedStats, equipment?.equipment_totals, healthState?.is_wounded, healthState?.penalty_quests_remaining, maxHealth, t],
   );
 

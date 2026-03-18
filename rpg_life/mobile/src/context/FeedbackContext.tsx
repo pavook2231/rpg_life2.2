@@ -190,7 +190,7 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
     }
 
     if (next.sound) {
-      await playSound(next.sound);
+      void playSound(next.sound);
     }
 
     await new Promise<void>((resolve) => {

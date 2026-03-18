@@ -1,6 +1,6 @@
 import { apiRequest } from "./client";
 import { apiRootRequest } from "./client";
-import { fetchWithCache, queueIfOffline } from "../lib/offline";
+import { fetchWithTtlCache, queueIfOffline } from "../lib/offline";
 import {
   mapChestRewardToCatalog,
   mapInventoryDetailToCatalog,
@@ -486,8 +486,41 @@ export type RewardsSummaryPayload = {
   } | null;
 };
 
-export function fetchProfile() {
-  return fetchWithCache("profile", () => apiRequest<ProfilePayload>("/profile"));
+export type BootstrapPayload = {
+  profile: ProfilePayload;
+  character_profile: CharacterProfilePayload;
+  rewards_summary: RewardsSummaryPayload;
+};
+
+type CachedRequestOptions = {
+  forceRefresh?: boolean;
+};
+
+const CACHE_TTL = {
+  profile: 15_000,
+  characterProfile: 15_000,
+  dailyQuests: 20_000,
+  inventory: 45_000,
+  equipmentOverview: 30_000,
+  challenges: 30_000,
+  leaderboard: 45_000,
+  rewardsSummary: 20_000,
+  achievements: 5 * 60_000,
+  shop: 30_000,
+} as const;
+
+export function fetchProfile(options: CachedRequestOptions = {}) {
+  return fetchWithTtlCache("profile", () => apiRequest<ProfilePayload>("/profile"), {
+    ttlMs: CACHE_TTL.profile,
+    forceRefresh: options.forceRefresh,
+  });
+}
+
+export function fetchBootstrap(options: CachedRequestOptions = {}) {
+  return fetchWithTtlCache("bootstrap", () => apiRequest<BootstrapPayload>("/bootstrap"), {
+    ttlMs: CACHE_TTL.profile,
+    forceRefresh: options.forceRefresh,
+  });
 }
 
 export function syncTodaySteps(steps: number, dayStartedAt: string, source = "device") {
@@ -501,13 +534,16 @@ export function syncTodaySteps(steps: number, dayStartedAt: string, source = "de
   });
 }
 
-export function fetchCharacterProfile() {
-  return fetchWithCache("character-profile", () => apiRequest<CharacterProfilePayload>("/character/profile"));
+export function fetchCharacterProfile(options: CachedRequestOptions = {}) {
+  return fetchWithTtlCache("character-profile", () => apiRequest<CharacterProfilePayload>("/character/profile"), {
+    ttlMs: CACHE_TTL.characterProfile,
+    forceRefresh: options.forceRefresh,
+  });
 }
 
-export function fetchDailyQuests(page = 1, limit = 20, bucket?: "daily" | "weekly" | "long_term") {
+export function fetchDailyQuests(page = 1, limit = 20, bucket?: "daily" | "weekly" | "long_term", options: CachedRequestOptions = {}) {
   const bucketPart = bucket ? `&bucket=${bucket}` : "";
-  return fetchWithCache(`daily-quests:${page}:${limit}:${bucket ?? "all"}`, () =>
+  return fetchWithTtlCache(`daily-quests:${page}:${limit}:${bucket ?? "all"}`, () =>
     apiRequest<{
       items: QuestItem[];
       goal?: GoalStatePayload;
@@ -518,6 +554,10 @@ export function fetchDailyQuests(page = 1, limit = 20, bucket?: "daily" | "weekl
         total_pages: number;
       };
     }>(`/quests/daily?page=${page}&limit=${limit}${bucketPart}`),
+    {
+      ttlMs: CACHE_TTL.dailyQuests,
+      forceRefresh: options.forceRefresh,
+    },
   );
 }
 
@@ -609,8 +649,8 @@ export function deleteQuest(questId: number) {
   return apiRequest(`/quests/${questId}/delete`, { method: "POST" });
 }
 
-export function fetchInventory(page = 1, limit = 20) {
-  return fetchWithCache(`inventory:${page}:${limit}`, async () => {
+export function fetchInventory(page = 1, limit = 20, options: CachedRequestOptions = {}) {
+  return fetchWithTtlCache(`inventory:${page}:${limit}`, async () => {
     const payload = await apiRequest<{
       items: InventoryItem[];
       pagination: {
@@ -625,6 +665,9 @@ export function fetchInventory(page = 1, limit = 20) {
       ...payload,
       items: (payload.items ?? []).map((item) => mapInventoryEntryToCatalog(item)),
     };
+  }, {
+    ttlMs: CACHE_TTL.inventory,
+    forceRefresh: options.forceRefresh,
   });
 }
 
@@ -664,8 +707,8 @@ export function sellInventoryItem(inventoryId: number) {
   });
 }
 
-export function fetchEquipmentOverview() {
-  return fetchWithCache("equipment-overview", async () => {
+export function fetchEquipmentOverview(options: CachedRequestOptions = {}) {
+  return fetchWithTtlCache("equipment-overview", async () => {
     const payload = await apiRequest<{
       class_info: {
         id: number;
@@ -731,11 +774,14 @@ export function fetchEquipmentOverview() {
       }),
       bag_items: (payload.bag_items ?? []).map((entry) => mapInventoryEntryToCatalog(entry)),
     };
+  }, {
+    ttlMs: CACHE_TTL.equipmentOverview,
+    forceRefresh: options.forceRefresh,
   });
 }
 
-export function fetchChallenges(page = 1, limit = 20) {
-  return fetchWithCache(`challenges:${page}:${limit}`, () => apiRequest<{
+export function fetchChallenges(page = 1, limit = 20, options: CachedRequestOptions = {}) {
+  return fetchWithTtlCache(`challenges:${page}:${limit}`, () => apiRequest<{
     items: ChallengeItem[];
     pagination: {
       page: number;
@@ -743,7 +789,10 @@ export function fetchChallenges(page = 1, limit = 20) {
       total_items: number;
       total_pages: number;
     };
-  }>(`/challenges?page=${page}&limit=${limit}`));
+  }>(`/challenges?page=${page}&limit=${limit}`), {
+    ttlMs: CACHE_TTL.challenges,
+    forceRefresh: options.forceRefresh,
+  });
 }
 
 export function createChallenge(payload: {
@@ -768,8 +817,8 @@ export function joinChallenge(challengeId: number) {
   return apiRequest(`/challenges/${challengeId}/join`, { method: "POST" });
 }
 
-export function fetchLeaderboard(metric = "level", scope = "global", page = 1, limit = 20) {
-  return fetchWithCache(`leaderboard:${metric}:${scope}:${page}:${limit}`, () => apiRequest<{
+export function fetchLeaderboard(metric = "level", scope = "global", page = 1, limit = 20, options: CachedRequestOptions = {}) {
+  return fetchWithTtlCache(`leaderboard:${metric}:${scope}:${page}:${limit}`, () => apiRequest<{
     metric: string;
     items: Array<{
       user_id: number;
@@ -787,11 +836,17 @@ export function fetchLeaderboard(metric = "level", scope = "global", page = 1, l
       total_items: number;
       total_pages: number;
     };
-  }>(`/leaderboard?metric=${metric}&scope=${scope}&page=${page}&limit=${limit}`));
+  }>(`/leaderboard?metric=${metric}&scope=${scope}&page=${page}&limit=${limit}`), {
+    ttlMs: CACHE_TTL.leaderboard,
+    forceRefresh: options.forceRefresh,
+  });
 }
 
-export function fetchRewardsSummary() {
-  return fetchWithCache("rewards-summary", () => apiRequest<RewardsSummaryPayload>("/rewards/summary"));
+export function fetchRewardsSummary(options: CachedRequestOptions = {}) {
+  return fetchWithTtlCache("rewards-summary", () => apiRequest<RewardsSummaryPayload>("/rewards/summary"), {
+    ttlMs: CACHE_TTL.rewardsSummary,
+    forceRefresh: options.forceRefresh,
+  });
 }
 
 export function claimDailyBonus() {
@@ -866,24 +921,30 @@ export function claimSeasonalGoalReward() {
   );
 }
 
-export function fetchAchievements() {
-  return fetchWithCache("achievements", () => apiRequest<{
+export function fetchAchievements(options: CachedRequestOptions = {}) {
+  return fetchWithTtlCache("achievements", () => apiRequest<{
     achievements: AchievementItem[];
     character: {
       level: number;
       streak: number;
     };
     total_completed: number;
-  }>("/achievements"));
+  }>("/achievements"), {
+    ttlMs: CACHE_TTL.achievements,
+    forceRefresh: options.forceRefresh,
+  });
 }
 
-export function fetchShop() {
-  return fetchWithCache("shop", async () => {
+export function fetchShop(options: CachedRequestOptions = {}) {
+  return fetchWithTtlCache("shop", async () => {
     const payload = await apiRequest<ShopPayload>("/shop");
     return {
       ...payload,
       items: (payload.items ?? []).map((item) => mapShopItemToCatalog(item)),
     };
+  }, {
+    ttlMs: CACHE_TTL.shop,
+    forceRefresh: options.forceRefresh,
   });
 }
 
