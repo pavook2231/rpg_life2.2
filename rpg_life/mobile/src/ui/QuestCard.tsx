@@ -13,6 +13,7 @@ type Action = {
   onPress: () => void;
   variant?: "primary" | "secondary" | "success" | "danger" | "ghost";
   disabled?: boolean;
+  loading?: boolean;
 };
 
 type Props = {
@@ -102,6 +103,7 @@ export function QuestCard({
               onPress={primaryAction.onPress}
               variant={primaryAction.variant}
               disabled={primaryAction.disabled}
+              loading={primaryAction.loading}
               style={styles.actionButton}
             />
           ) : null}
@@ -111,6 +113,7 @@ export function QuestCard({
               onPress={secondaryAction.onPress}
               variant={secondaryAction.variant}
               disabled={secondaryAction.disabled}
+              loading={secondaryAction.loading}
               style={styles.actionButton}
             />
           ) : null}

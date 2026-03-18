@@ -14,6 +14,7 @@ import {
 import { fetchGoalTemplates, type GoalTemplatePayload } from "../api/auth";
 import { Screen } from "../components/Screen";
 import { useAuth } from "../context/AuthContext";
+import { useFeedback } from "../context/FeedbackContext";
 import { useTranslation } from "../context/LocalizationContext";
 import { GameIcon, useThemeColors, useThemeMode } from "../ui";
 
@@ -91,6 +92,7 @@ const GOAL_TERMS = [3, 6, 9] as const;
 export function RegisterScreen({ onBackToLogin }: Props) {
   const { signUp } = useAuth();
   const t = useTranslation();
+  const { pushToast } = useFeedback();
   const colors = useThemeColors();
   const themeMode = useThemeMode();
   const styles = useMemo(() => createStyles(colors, themeMode), [colors, themeMode]);
@@ -104,6 +106,7 @@ export function RegisterScreen({ onBackToLogin }: Props) {
   const [goalType, setGoalType] = useState<string>("personal_development");
   const [goalTermMonths, setGoalTermMonths] = useState<number>(6);
   const [goals, setGoals] = useState<GoalCard[]>(fallbackGoals);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const classes = [
     { id: "warrior" as const, icon: "sword-cross", color: "#7f1d1d" },
@@ -154,29 +157,47 @@ export function RegisterScreen({ onBackToLogin }: Props) {
     const currentYear = new Date().getFullYear();
 
     if (!isValidEmail(trimmedEmail)) {
-      Alert.alert(t("screens.register.errors.registrationFailed"), t("screens.register.quick.invalidEmail"));
+      await pushToast({
+        title: t("screens.register.errors.registrationFailed"),
+        description: t("screens.register.quick.invalidEmail"),
+        icon: "email-alert-outline",
+        tone: "warning",
+      });
       return;
     }
 
     if (password.length < 8 || !hasLetter(password)) {
-      Alert.alert(t("screens.register.errors.registrationFailed"), t("screens.register.quick.invalidPassword"));
+      await pushToast({
+        title: t("screens.register.errors.registrationFailed"),
+        description: t("screens.register.quick.invalidPassword"),
+        icon: "lock-alert-outline",
+        tone: "warning",
+      });
       return;
     }
 
     if (trimmedName.length < 2 || /^\d/.test(trimmedName)) {
-      Alert.alert(t("screens.register.errors.registrationFailed"), t("screens.register.quick.invalidName"));
+      await pushToast({
+        title: t("screens.register.errors.registrationFailed"),
+        description: t("screens.register.quick.invalidName"),
+        icon: "account-alert-outline",
+        tone: "warning",
+      });
       return;
     }
 
     if (!Number.isInteger(numericBirthYear) || numericBirthYear < 1950 || numericBirthYear > currentYear - 10) {
-      Alert.alert(
-        t("screens.register.errors.registrationFailed"),
-        t("screens.register.quick.invalidBirthYear", { year: currentYear - 10 }),
-      );
+      await pushToast({
+        title: t("screens.register.errors.registrationFailed"),
+        description: t("screens.register.quick.invalidBirthYear", { year: currentYear - 10 }),
+        icon: "calendar-alert",
+        tone: "warning",
+      });
       return;
     }
 
     try {
+      setIsSubmitting(true);
       await signUp({
         email: trimmedEmail,
         password,
@@ -188,10 +209,14 @@ export function RegisterScreen({ onBackToLogin }: Props) {
         goalTermMonths,
       });
     } catch (error) {
-      Alert.alert(
-        t("screens.register.errors.registrationFailed"),
-        error instanceof Error ? error.message : t("errors.unknownError"),
-      );
+      await pushToast({
+        title: t("screens.register.errors.registrationFailed"),
+        description: error instanceof Error ? error.message : t("errors.unknownError"),
+        icon: "alert-circle",
+        tone: "warning",
+      });
+    } finally {
+      setIsSubmitting(false);
     }
   }
 
@@ -344,8 +369,13 @@ export function RegisterScreen({ onBackToLogin }: Props) {
           </View>
         </View>
 
-        <TouchableOpacity style={styles.primaryButton} onPress={handleRegister} activeOpacity={0.85}>
-          <Text style={styles.primaryText}>{t("screens.register.register")}</Text>
+        <TouchableOpacity
+          style={[styles.primaryButton, isSubmitting ? styles.primaryButtonDisabled : null]}
+          onPress={handleRegister}
+          activeOpacity={0.85}
+          disabled={isSubmitting}
+        >
+          <Text style={styles.primaryText}>{isSubmitting ? t("common.loading") : t("screens.register.register")}</Text>
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.linkButton} onPress={onBackToLogin} activeOpacity={0.85}>
@@ -529,6 +559,9 @@ function createStyles(colors: ReturnType<typeof useThemeColors>, themeMode: Retu
       paddingVertical: 16,
       borderRadius: 16,
       alignItems: "center",
+    },
+    primaryButtonDisabled: {
+      opacity: 0.6,
     },
     primaryText: {
       color: "#451a03",

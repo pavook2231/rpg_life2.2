@@ -8,12 +8,14 @@ import { ENABLE_ACCOUNT_RECOVERY } from "../config/env";
 import { LanguageSwitcher } from "../components/LanguageSwitcher";
 import { useAppPreferences } from "../context/AppPreferencesContext";
 import { useAuth } from "../context/AuthContext";
+import { useFeedback } from "../context/FeedbackContext";
 import { useOffline } from "../context/OfflineContext";
 import { useTranslation } from "../context/LocalizationContext";
 import { Button, Card, radii, useThemeColors, useThemeMode } from "../ui";
 
 export function SettingsScreen() {
   const t = useTranslation();
+  const { pushToast } = useFeedback();
   const { notificationsEnabled, setNotificationsEnabled, themeMode, setThemeMode } = useAppPreferences();
   const colors = useThemeColors();
   const currentThemeMode = useThemeMode();
@@ -23,37 +25,81 @@ export function SettingsScreen() {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [recoveryEmail, setRecoveryEmail] = useState(user?.email ?? "");
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+  const [isRecoveringAccount, setIsRecoveringAccount] = useState(false);
   const trimmedRecoveryEmail = recoveryEmail.trim();
   const canChangePassword = currentPassword.trim().length >= 8 && newPassword.trim().length >= 8;
   const canRecoverAccount = trimmedRecoveryEmail.includes("@");
 
   async function handleChangePassword() {
     if (!canChangePassword) {
-      Alert.alert(t("screens.settings.passwordChangeFailed"), t("screens.settings.quick.passwordValidation"));
+      await pushToast({
+        title: t("screens.settings.passwordChangeFailed"),
+        description: t("screens.settings.quick.passwordValidation"),
+        icon: "shield-alert-outline",
+        tone: "warning",
+      });
       return;
     }
 
     try {
+      setIsChangingPassword(true);
       await changePassword(currentPassword, newPassword);
       setCurrentPassword("");
       setNewPassword("");
-      Alert.alert(t("screens.settings.passwordChangedTitle"), t("screens.settings.passwordChangedDescription"));
+      await pushToast(
+        {
+          title: t("screens.settings.passwordChangedTitle"),
+          description: t("screens.settings.passwordChangedDescription"),
+          icon: "lock-check-outline",
+          tone: "success",
+        },
+        { haptic: "success" },
+      );
     } catch (error) {
-      Alert.alert(t("screens.settings.passwordChangeFailed"), error instanceof Error ? error.message : t("errors.unknownError"));
+      await pushToast({
+        title: t("screens.settings.passwordChangeFailed"),
+        description: error instanceof Error ? error.message : t("errors.unknownError"),
+        icon: "alert-circle",
+        tone: "warning",
+      });
+    } finally {
+      setIsChangingPassword(false);
     }
   }
 
   async function handleRecoverAccount() {
     if (!canRecoverAccount) {
-      Alert.alert(t("screens.settings.recoveryFailed"), t("screens.settings.quick.recoveryValidation"));
+      await pushToast({
+        title: t("screens.settings.recoveryFailed"),
+        description: t("screens.settings.quick.recoveryValidation"),
+        icon: "email-alert-outline",
+        tone: "warning",
+      });
       return;
     }
 
     try {
+      setIsRecoveringAccount(true);
       await recoverAccount(trimmedRecoveryEmail);
-      Alert.alert(t("screens.settings.recoveryTitle"), t("screens.settings.recoveryDescription"));
+      await pushToast(
+        {
+          title: t("screens.settings.recoveryTitle"),
+          description: t("screens.settings.recoveryDescription"),
+          icon: "email-check-outline",
+          tone: "success",
+        },
+        { haptic: "success" },
+      );
     } catch (error) {
-      Alert.alert(t("screens.settings.recoveryFailed"), error instanceof Error ? error.message : t("errors.unknownError"));
+      await pushToast({
+        title: t("screens.settings.recoveryFailed"),
+        description: error instanceof Error ? error.message : t("errors.unknownError"),
+        icon: "alert-circle",
+        tone: "warning",
+      });
+    } finally {
+      setIsRecoveringAccount(false);
     }
   }
 
@@ -113,7 +159,13 @@ export function SettingsScreen() {
             tone="warning"
           />
         ) : null}
-        <Button label={t("screens.settings.changePassword")} icon="lock-reset" onPress={handleChangePassword} />
+        <Button
+          label={isChangingPassword ? t("common.loading") : t("screens.settings.changePassword")}
+          icon="lock-reset"
+          onPress={handleChangePassword}
+          disabled={!canChangePassword}
+          loading={isChangingPassword}
+        />
       </Card>
 
       {ENABLE_ACCOUNT_RECOVERY ? (
@@ -137,7 +189,14 @@ export function SettingsScreen() {
               tone="warning"
             />
           ) : null}
-          <Button label={t("screens.settings.restoreAccount")} icon="email-fast-outline" onPress={handleRecoverAccount} variant="secondary" />
+          <Button
+            label={isRecoveringAccount ? t("common.loading") : t("screens.settings.restoreAccount")}
+            icon="email-fast-outline"
+            onPress={handleRecoverAccount}
+            variant="secondary"
+            disabled={!canRecoverAccount}
+            loading={isRecoveringAccount}
+          />
         </Card>
       ) : (
         <StateBlock

@@ -20,9 +20,12 @@ import { useThemeColors } from "../ui/theme";
 const tabs = ["friends", "leaderboard", "global"] as const;
 const metrics = ["level", "quests", "steps", "challenge_wins"] as const;
 type LeaderboardMetric = (typeof metrics)[number];
+type LeaderboardScope = "leaderboard" | "global";
 const FRIENDS_PAGE_SIZE = 20;
 const SEARCH_PAGE_SIZE = 20;
 const LEADERBOARD_PAGE_SIZE = 20;
+const LEADERBOARD_SEPARATOR = " | ";
+const EMPTY_VALUE = "-";
 
 type LeaderboardItem = {
   user_id: number;
@@ -42,9 +45,22 @@ type LeaderboardItem = {
   goal_target_xp?: number | null;
 };
 
+function translateOrFallback(
+  t: (key: string, params?: Record<string, string | number>) => string,
+  key: string,
+  fallback: string,
+  params?: Record<string, string | number>,
+) {
+  const translated = t(key, params);
+  return translated === key ? fallback : translated;
+}
+
 export function FriendsScreen() {
   const navigation = useNavigation<any>();
   const searchInputRef = useRef<TextInput | null>(null);
+  const friendsRequestRef = useRef(0);
+  const searchRequestRef = useRef(0);
+  const leaderboardRequestRef = useRef(0);
   const [activeTab, setActiveTab] = useState<(typeof tabs)[number]>("friends");
   const [friends, setFriends] = useState<FriendItem[]>([]);
   const [friendsLoading, setFriendsLoading] = useState(false);
@@ -86,11 +102,13 @@ export function FriendsScreen() {
 
   useEffect(() => {
     if (activeTab === "leaderboard" || activeTab === "global") {
-      void loadLeaderboard({ page: 1, append: false });
+      void loadLeaderboard({ page: 1, append: false, scope: activeTab });
     }
   }, [activeTab, leaderboardMetric]);
 
   async function loadFriends({ page, refresh, append }: { page: number; refresh: boolean; append: boolean }) {
+    const requestId = ++friendsRequestRef.current;
+
     if (refresh) {
       setFriendsRefreshing(true);
     } else if (append) {
@@ -101,21 +119,32 @@ export function FriendsScreen() {
     setFriendsError(null);
     try {
       const payload = await fetchFriendsList(page, FRIENDS_PAGE_SIZE);
+      if (requestId !== friendsRequestRef.current) {
+        return;
+      }
       setFriends((prev) => (append ? [...prev, ...payload.items] : payload.items));
       setFriendsPage(payload.pagination.page);
       setFriendsHasMore(payload.pagination.page < payload.pagination.total_pages);
     } catch (error) {
+      if (requestId !== friendsRequestRef.current) {
+        return;
+      }
       setFriendsError(error instanceof Error ? error.message : t("screens.friends.errors.loadFriends"));
     } finally {
+      if (requestId !== friendsRequestRef.current) {
+        return;
+      }
       setFriendsLoading(false);
       setFriendsLoadingMore(false);
       setFriendsRefreshing(false);
     }
   }
 
-  async function loadLeaderboard({ page, append }: { page: number; append: boolean }) {
+  async function loadLeaderboard({ page, append, scope }: { page: number; append: boolean; scope: LeaderboardScope }) {
+    const requestId = ++leaderboardRequestRef.current;
+
     if (append) {
-      if (activeTab === "leaderboard") {
+      if (scope === "leaderboard") {
         setLeaderboardLoadingMore(true);
       } else {
         setGlobalLeaderboardLoadingMore(true);
@@ -125,20 +154,32 @@ export function FriendsScreen() {
     }
     setLeaderboardError(null);
     try {
-      if (activeTab === "leaderboard") {
+      if (scope === "leaderboard") {
         const payload = await fetchFriendsLeaderboard(leaderboardMetric, page, LEADERBOARD_PAGE_SIZE);
+        if (requestId !== leaderboardRequestRef.current) {
+          return;
+        }
         setLeaderboardItems((prev) => (append ? [...prev, ...payload.items] : payload.items));
         setLeaderboardPage(payload.pagination.page);
         setLeaderboardHasMore(payload.pagination.page < payload.pagination.total_pages);
       } else {
         const payload = await fetchLeaderboard(leaderboardMetric, "global", page, LEADERBOARD_PAGE_SIZE);
+        if (requestId !== leaderboardRequestRef.current) {
+          return;
+        }
         setGlobalLeaderboardItems((prev) => (append ? [...prev, ...payload.items] : payload.items));
         setGlobalLeaderboardPage(payload.pagination.page);
         setGlobalLeaderboardHasMore(payload.pagination.page < payload.pagination.total_pages);
       }
     } catch (error) {
+      if (requestId !== leaderboardRequestRef.current) {
+        return;
+      }
       setLeaderboardError(error instanceof Error ? error.message : t("screens.friends.errors.loadLeaderboard"));
     } finally {
+      if (requestId !== leaderboardRequestRef.current) {
+        return;
+      }
       setLeaderboardLoading(false);
       setLeaderboardLoadingMore(false);
       setGlobalLeaderboardLoadingMore(false);
@@ -146,6 +187,8 @@ export function FriendsScreen() {
   }
 
   async function performSearch(query: string, page: number, append: boolean) {
+    const requestId = ++searchRequestRef.current;
+
     if (append) {
       setSearchLoadingMore(true);
     } else {
@@ -155,27 +198,41 @@ export function FriendsScreen() {
     setSearchError(null);
     try {
       const payload = await searchUsers(query, page, SEARCH_PAGE_SIZE);
+      if (requestId !== searchRequestRef.current) {
+        return;
+      }
       setSearchResults((prev) => (append ? [...prev, ...payload.items] : payload.items));
       setSearchActiveQuery(query);
       setSearchPage(payload.pagination.page);
       setSearchHasMore(payload.pagination.page < payload.pagination.total_pages);
     } catch (error) {
+      if (requestId !== searchRequestRef.current) {
+        return;
+      }
       setSearchError(error instanceof Error ? error.message : t("screens.friends.errors.search"));
     } finally {
+      if (requestId !== searchRequestRef.current) {
+        return;
+      }
       setSearchLoading(false);
       setSearchLoadingMore(false);
     }
   }
 
+  function resetSearchState() {
+    searchRequestRef.current += 1;
+    setSearchResults([]);
+    setSearchAttempted(false);
+    setSearchHasMore(false);
+    setSearchPage(1);
+    setSearchActiveQuery("");
+    setSearchError(null);
+  }
+
   async function handleSearch() {
     const query = searchQuery.trim();
     if (!query) {
-      setSearchResults([]);
-      setSearchAttempted(false);
-      setSearchHasMore(false);
-      setSearchPage(1);
-      setSearchActiveQuery("");
-      setSearchError(null);
+      resetSearchState();
       return;
     }
     if (query.length < 2) {
@@ -204,14 +261,14 @@ export function FriendsScreen() {
     if (leaderboardLoading || leaderboardLoadingMore || !leaderboardHasMore) {
       return;
     }
-    await loadLeaderboard({ page: leaderboardPage + 1, append: true });
+    await loadLeaderboard({ page: leaderboardPage + 1, append: true, scope: "leaderboard" });
   }
 
   async function handleLoadMoreGlobalLeaderboard() {
     if (leaderboardLoading || globalLeaderboardLoadingMore || !globalLeaderboardHasMore) {
       return;
     }
-    await loadLeaderboard({ page: globalLeaderboardPage + 1, append: true });
+    await loadLeaderboard({ page: globalLeaderboardPage + 1, append: true, scope: "global" });
   }
 
   async function handleSendRequest(userId: number) {
@@ -241,6 +298,43 @@ export function FriendsScreen() {
   }
 
   const currentLeaderboardItems = activeTab === "leaderboard" ? leaderboardItems : globalLeaderboardItems;
+  const pendingRequestCount = searchResults.filter((user) => user.status === "pending").length;
+  const topLeaderboardEntry = currentLeaderboardItems[0] ?? null;
+  const topLeaderboardLabel = topLeaderboardEntry ? `#${topLeaderboardEntry.rank} ${topLeaderboardEntry.name}` : EMPTY_VALUE;
+  const socialPulse = friends.length === 0
+    ? {
+        title: translateOrFallback(t, "screens.friends.quick.pulseNoFriendsTitle", "Добавь первых союзников"),
+        description: translateOrFallback(
+          t,
+          "screens.friends.quick.pulseNoFriendsDescription",
+          "С друзьями проще держать темп: можно сравнивать прогресс и следить за рейтингом.",
+        ),
+        actionLabel: t("screens.friends.empty.findFriendsAction"),
+        onPress: focusSearchInput,
+      }
+    : pendingRequestCount > 0
+      ? {
+          title: translateOrFallback(t, "screens.friends.quick.pulsePendingTitle", "Есть новые контакты"),
+          description: translateOrFallback(
+            t,
+            "screens.friends.quick.pulsePendingDescription",
+            `У тебя уже ${pendingRequestCount} отправленных заявок. Пока ждёшь ответ, можно заглянуть в лидерборд.`,
+            { count: pendingRequestCount },
+          ),
+          actionLabel: translateOrFallback(t, "screens.friends.quick.openLeaderboard", "Открыть рейтинг"),
+          onPress: () => setActiveTab("leaderboard"),
+        }
+      : {
+          title: translateOrFallback(t, "screens.friends.quick.pulseReadyTitle", "Ты уже в социальной игре"),
+          description: translateOrFallback(
+            t,
+            "screens.friends.quick.pulseReadyDescription",
+            `У тебя ${friends.length} друзей. Открой рейтинг и посмотри, кого можно догнать сегодня.`,
+            { count: friends.length },
+          ),
+          actionLabel: translateOrFallback(t, "screens.friends.quick.openLeaderboard", "Открыть рейтинг"),
+          onPress: () => setActiveTab("leaderboard"),
+        };
 
   return (
     <Screen title={t("screens.friends.title")} subtitle={t("screens.friends.subtitle")} scrollable={false}>
@@ -269,6 +363,30 @@ export function FriendsScreen() {
             />
           }
         >
+          <Card>
+            <Text style={styles.sectionTitle}>{translateOrFallback(t, "screens.friends.quick.pulseTitle", "Социальная сводка")}</Text>
+            <Text style={styles.pulseTitle}>{socialPulse.title}</Text>
+            <Text style={styles.pulseDescription}>{socialPulse.description}</Text>
+            <Pressable style={styles.pulseButton} onPress={socialPulse.onPress}>
+              <Text style={styles.pulseButtonText}>{socialPulse.actionLabel}</Text>
+            </Pressable>
+          </Card>
+
+          <View style={styles.summaryRow}>
+            <View style={styles.summaryChip}>
+              <Text style={styles.summaryLabel}>{t("screens.friends.myFriends")}</Text>
+              <Text style={styles.summaryValue}>{friends.length}</Text>
+            </View>
+            <View style={styles.summaryChip}>
+              <Text style={styles.summaryLabel}>{t("screens.friends.searchResults")}</Text>
+              <Text style={styles.summaryValue}>{searchResults.length}</Text>
+            </View>
+            <View style={styles.summaryChip}>
+              <Text style={styles.summaryLabel}>{t("screens.friends.requestPending")}</Text>
+              <Text style={styles.summaryValue}>{pendingRequestCount}</Text>
+            </View>
+          </View>
+
           <View style={styles.searchContainer}>
             <TextInput
               ref={searchInputRef}
@@ -278,12 +396,7 @@ export function FriendsScreen() {
               onChangeText={(value) => {
                 setSearchQuery(value);
                 if (!value.trim()) {
-                  setSearchResults([]);
-                  setSearchAttempted(false);
-                  setSearchHasMore(false);
-                  setSearchPage(1);
-                  setSearchActiveQuery("");
-                  setSearchError(null);
+                  resetSearchState();
                 }
               }}
               onSubmitEditing={handleSearch}
@@ -317,11 +430,19 @@ export function FriendsScreen() {
                         <Text style={styles.userEmail}>{user.email}</Text>
                       </View>
                       {user.status === "none" ? (
-                        <Pressable style={styles.actionButton} onPress={() => handleSendRequest(user.id)} disabled={isSending}>
+                        <Pressable
+                          style={[styles.actionButton, isSending ? styles.actionButtonDisabled : null]}
+                          onPress={() => handleSendRequest(user.id)}
+                          disabled={isSending}
+                        >
                           <Text style={styles.actionButtonText}>{isSending ? t("common.loading") : t("screens.friends.addFriend")}</Text>
                         </Pressable>
                       ) : null}
-                      {user.status === "pending" ? <Text style={styles.pendingText}>{t("screens.friends.requestPending")}</Text> : null}
+                      {user.status === "pending" ? (
+                        <View style={styles.pendingBadge}>
+                          <Text style={styles.pendingText}>{t("screens.friends.requestPending")}</Text>
+                        </View>
+                      ) : null}
                     </View>
                   </Card>
                 );
@@ -370,10 +491,19 @@ export function FriendsScreen() {
             {friends.map((friend) => (
               <Card key={friend.id}>
                 <View style={styles.friendRow}>
-                  <Text style={styles.friendName}>{friend.name}</Text>
-                  <Text style={styles.friendSince}>
-                    {t("screens.friends.friendsSince")}: {new Date(friend.friends_since).toLocaleDateString()}
-                  </Text>
+                  <View style={styles.friendInfo}>
+                    <Text style={styles.friendName}>{friend.name}</Text>
+                    <Text style={styles.friendStats}>
+                      {t("screens.friends.friendStats", {
+                        level: friend.stats.level ?? 1,
+                        quests: friend.stats.quests_completed ?? 0,
+                        wins: friend.stats.challenge_wins ?? 0,
+                      })}
+                    </Text>
+                    <Text style={styles.friendSince}>
+                      {t("screens.friends.friendsSince")}: {new Date(friend.friends_since).toLocaleDateString()}
+                    </Text>
+                  </View>
                 </View>
               </Card>
             ))}
@@ -388,6 +518,23 @@ export function FriendsScreen() {
 
       {(activeTab === "leaderboard" || activeTab === "global") && (
         <ScrollView style={styles.content}>
+          <View style={styles.summaryRow}>
+            <View style={styles.summaryChip}>
+              <Text style={styles.summaryLabel}>{t("screens.leaderboard.fields.score")}</Text>
+              <Text style={styles.summaryValue}>{getMetricLabel(leaderboardMetric)}</Text>
+            </View>
+            <View style={styles.summaryChip}>
+              <Text style={styles.summaryLabel}>{t("navigation.leaderboard")}</Text>
+              <Text style={styles.summaryValue}>{currentLeaderboardItems.length}</Text>
+            </View>
+            <View style={styles.summaryChip}>
+              <Text style={styles.summaryLabel}>TOP 1</Text>
+              <Text style={styles.summaryValue} numberOfLines={1}>
+                {topLeaderboardLabel}
+              </Text>
+            </View>
+          </View>
+
           {!!leaderboardError ? (
             <StateBlock
               tone="warning"
@@ -395,7 +542,7 @@ export function FriendsScreen() {
               title={t("screens.friends.errorTitle")}
               description={leaderboardError}
               actionLabel={t("common.retry")}
-              onAction={() => loadLeaderboard({ page: 1, append: false })}
+              onAction={() => loadLeaderboard({ page: 1, append: false, scope: activeTab })}
             />
           ) : null}
           <View style={styles.filters}>
@@ -429,12 +576,12 @@ export function FriendsScreen() {
                 #{item.rank} {item.name}
               </Text>
               <Text style={styles.subTitle}>
-                {t("screens.leaderboard.fields.class")}: {item.class_display_name ?? item.class_name ?? "-"}
-                {"  •  "}
+                {t("screens.leaderboard.fields.class")}: {item.class_display_name ?? item.class_name ?? EMPTY_VALUE}
+                {LEADERBOARD_SEPARATOR}
                 {t("screens.leaderboard.fields.level")}: {item.class_level ?? item.level}
               </Text>
               <Text style={styles.meta}>
-                {t("screens.leaderboard.fields.goal")}: {item.goal_type ?? "-"}
+                {t("screens.leaderboard.fields.goal")}: {item.goal_type ?? EMPTY_VALUE}
                 {item.goal_progress_percent != null
                   ? ` (${item.goal_progress_percent}%${item.goal_target_xp ? `, ${item.goal_cycle_xp}/${item.goal_target_xp} XP` : ""})`
                   : ""}
@@ -487,6 +634,33 @@ function createStyles(colors: ReturnType<typeof useThemeColors>) {
     },
     content: {
       flex: 1,
+    },
+    summaryRow: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 8,
+      marginBottom: 16,
+    },
+    summaryChip: {
+      flexGrow: 1,
+      minWidth: 96,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 10,
+      backgroundColor: colors.backgroundRaised,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      gap: 2,
+    },
+    summaryLabel: {
+      fontSize: 11,
+      color: colors.textDim,
+      fontWeight: "700",
+    },
+    summaryValue: {
+      fontSize: 15,
+      color: colors.text,
+      fontWeight: "800",
     },
     searchContainer: {
       flexDirection: "row",
@@ -570,6 +744,9 @@ function createStyles(colors: ReturnType<typeof useThemeColors>) {
       paddingVertical: 8,
       borderRadius: 6,
     },
+    actionButtonDisabled: {
+      opacity: 0.72,
+    },
     actionButtonText: {
       color: colors.text,
       fontSize: 14,
@@ -590,19 +767,34 @@ function createStyles(colors: ReturnType<typeof useThemeColors>) {
       fontWeight: "600",
     },
     pendingText: {
-      fontSize: 14,
-      color: colors.textDim,
-      fontStyle: "italic",
+      fontSize: 12,
+      color: colors.primary,
+      fontWeight: "700",
+    },
+    pendingBadge: {
+      borderWidth: 1,
+      borderColor: colors.primary,
+      backgroundColor: colors.backgroundRaised,
+      borderRadius: 999,
+      paddingHorizontal: 10,
+      paddingVertical: 6,
     },
     friendRow: {
       flexDirection: "row",
-      justifyContent: "space-between",
       alignItems: "center",
+    },
+    friendInfo: {
+      flex: 1,
+      gap: 4,
     },
     friendName: {
       fontSize: 16,
       fontWeight: "bold",
       color: colors.text,
+    },
+    friendStats: {
+      fontSize: 13,
+      color: colors.textMuted,
     },
     friendSince: {
       fontSize: 14,
@@ -612,6 +804,29 @@ function createStyles(colors: ReturnType<typeof useThemeColors>) {
       fontSize: 16,
       fontWeight: "bold",
       color: colors.text,
+    },
+    pulseTitle: {
+      fontSize: 16,
+      fontWeight: "800",
+      color: colors.text,
+      marginBottom: 6,
+    },
+    pulseDescription: {
+      fontSize: 14,
+      color: colors.textMuted,
+      lineHeight: 20,
+      marginBottom: 12,
+    },
+    pulseButton: {
+      alignSelf: "flex-start",
+      backgroundColor: colors.primary,
+      borderRadius: 8,
+      paddingHorizontal: 14,
+      paddingVertical: 10,
+    },
+    pulseButtonText: {
+      color: colors.text,
+      fontWeight: "700",
     },
     subTitle: {
       fontSize: 13,

@@ -7,6 +7,8 @@ import { Screen } from "../components/Screen";
 import { useTranslation } from "../context/LocalizationContext";
 
 const metrics = ["level", "quests", "steps", "challenge_wins"] as const;
+const META_SEPARATOR = " | ";
+const EMPTY_VALUE = "-";
 
 export function LeaderboardScreen() {
   const [metric, setMetric] = useState<(typeof metrics)[number]>("level");
@@ -14,7 +16,7 @@ export function LeaderboardScreen() {
   const t = useTranslation();
 
   useEffect(() => {
-    fetchLeaderboard(metric).then((payload) => setItems(payload.items)).catch(console.error);
+    fetchLeaderboard(metric).then((payload) => setItems(payload.items)).catch(() => undefined);
   }, [metric]);
 
   function getMetricLabel(value: (typeof metrics)[number]) {
@@ -42,12 +44,16 @@ export function LeaderboardScreen() {
             #{item.rank} {item.name}
           </Text>
           <Text style={styles.subTitle}>
-            {t("screens.leaderboard.fields.class")}: {item.class_display_name ?? item.class_name ?? "—"} • {t("screens.leaderboard.fields.level")}: {item.class_level ?? item.level}
+            {t("screens.leaderboard.fields.class")}: {item.class_display_name ?? item.class_name ?? EMPTY_VALUE}
+            {META_SEPARATOR}
+            {t("screens.leaderboard.fields.level")}: {item.class_level ?? item.level}
           </Text>
           <Text style={styles.meta}>
             {t("screens.leaderboard.fields.goal")}:
-            {item.goal_type ? ` ${item.goal_type}` : " —"}
-            {item.goal_progress_percent != null && typeof item.goal_progress_percent === "number" ? ` (${item.goal_progress_percent}%` + (item.goal_target_xp ? `, ${item.goal_cycle_xp}/${item.goal_target_xp} XP` : ``) + `)` : ""}
+            {item.goal_type ? ` ${item.goal_type}` : ` ${EMPTY_VALUE}`}
+            {item.goal_progress_percent != null && typeof item.goal_progress_percent === "number"
+              ? ` (${item.goal_progress_percent}%${item.goal_target_xp ? `, ${item.goal_cycle_xp}/${item.goal_target_xp} XP` : ""})`
+              : ""}
           </Text>
           <Text style={styles.meta}>{t("screens.leaderboard.fields.score")}: {item.score}</Text>
           <Text style={styles.meta}>{t("screens.leaderboard.fields.quests")}: {item.quests_completed}</Text>
@@ -63,38 +69,38 @@ const styles = StyleSheet.create({
   filters: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 8
+    gap: 8,
   },
   filter: {
     borderRadius: 999,
     borderWidth: 1,
     borderColor: "#334155",
     paddingHorizontal: 12,
-    paddingVertical: 8
+    paddingVertical: 8,
   },
   filterActive: {
     backgroundColor: "#22c55e",
-    borderColor: "#22c55e"
+    borderColor: "#22c55e",
   },
   filterText: {
     color: "#cbd5e1",
     fontSize: 12,
-    fontWeight: "600"
+    fontWeight: "600",
   },
   filterTextActive: {
-    color: "#052e16"
+    color: "#052e16",
   },
   title: {
     color: "#f8fafc",
     fontWeight: "700",
-    fontSize: 18
+    fontSize: 18,
   },
   subTitle: {
     color: "#cbd5e1",
     fontSize: 13,
-    marginTop: 4
+    marginTop: 4,
   },
   meta: {
-    color: "#cbd5e1"
-  }
+    color: "#cbd5e1",
+  },
 });

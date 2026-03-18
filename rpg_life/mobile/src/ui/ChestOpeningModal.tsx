@@ -156,7 +156,7 @@ export function ChestOpeningModal({
         <View style={styles.card}>
           <Text style={styles.title}>Открытие сундука</Text>
           <Text style={styles.subtitle}>
-            {reward ? `${reward.chest_name ?? "Сундук"} • ${getRarityLabel(reward.chest_rarity)}` : "Лут-рулетка"}
+            {reward ? `${reward.chest_name ?? "Сундук"} | ${getRarityLabel(reward.chest_rarity)}` : "Лут-рулетка"}
           </Text>
 
           <View style={[styles.viewport, { width: viewportWidth }]}>
@@ -197,7 +197,7 @@ export function ChestOpeningModal({
             <View style={styles.rewardPanel}>
               <Text style={styles.rewardTitle}>{normalizeItemText(reward.item.name)}</Text>
               <Text style={styles.rewardMeta}>
-                {getRarityLabel(reward.rarity ?? reward.item.rarity)} • {reward.luck_bonus_percent ?? 0}% luck bonus
+                {getRarityLabel(reward.rarity ?? reward.item.rarity)} | +{reward.luck_bonus_percent ?? 0}% luck bonus
               </Text>
             </View>
           ) : null}

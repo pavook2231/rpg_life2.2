@@ -91,7 +91,7 @@ export function CharacterHeader({ compact = false, style }: CharacterHeaderProps
             </View>
             <Text style={styles.heroMeta}>
               {classLabel}
-              {profile?.goal ? ` • ${goalPercent}%` : ""}
+              {profile?.goal ? ` | ${goalPercent}%` : ""}
             </Text>
             <View style={[styles.goalBadge, compact ? styles.goalBadgeCompact : null]}>
               <GameIcon name="flag-checkered" size={14} color={colors.primary} />
@@ -116,7 +116,7 @@ export function CharacterHeader({ compact = false, style }: CharacterHeaderProps
         </View>
       </View>
 
-      <XPBar current={xpCurrent} total={xpTotal} label={`${t("screens.home.levelProgress")} • ${heroLevel}`} color={colors.gold} glow={!compact} />
+      <XPBar current={xpCurrent} total={xpTotal} label={`${t("screens.home.levelProgress")} | ${heroLevel}`} color={colors.gold} glow={!compact} />
 
       <View style={[styles.metricRow, compact ? styles.metricRowCompact : null]}>
         {metrics.map((metric) => (

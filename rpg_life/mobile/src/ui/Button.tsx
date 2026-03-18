@@ -13,16 +13,18 @@ type Props = {
   onPress: () => void;
   variant?: Variant;
   disabled?: boolean;
+  loading?: boolean;
   icon?: string;
   style?: StyleProp<ViewStyle>;
 };
 
-export function Button({ label, onPress, variant = "primary", disabled = false, icon, style }: Props) {
+export function Button({ label, onPress, variant = "primary", disabled = false, loading = false, icon, style }: Props) {
   const scale = useSharedValue(1);
   const colors = useThemeColors();
   const themeMode = useThemeMode();
   const styles = useMemo(() => createStyles(colors, themeMode), [colors, themeMode]);
   const variantStyles = useMemo(() => createVariantStyles(colors, themeMode), [colors, themeMode]);
+  const isDisabled = disabled || loading;
 
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [{ scale: scale.value }],
@@ -33,7 +35,7 @@ export function Button({ label, onPress, variant = "primary", disabled = false, 
       <Animated.View style={animatedStyle}>
         <Pressable
           onPress={onPress}
-          disabled={disabled}
+          disabled={isDisabled}
           onPressIn={() => {
             void triggerHaptic("press");
             scale.value = withSpring(0.96, { damping: 14, stiffness: 280 });
@@ -43,12 +45,12 @@ export function Button({ label, onPress, variant = "primary", disabled = false, 
               scale.value = withSpring(1, { damping: 15, stiffness: 240 });
             });
           }}
-          style={[styles.base, variantStyles[variant], disabled ? styles.disabled : null]}
+          style={[styles.base, variantStyles[variant], isDisabled ? styles.disabled : null]}
         >
           <View style={[styles.highlight, variant === "gold" ? styles.goldHighlight : styles.defaultHighlight]} />
           <View style={[styles.bottomShade, variant === "gold" ? styles.goldShade : styles.defaultShade]} />
           <View style={styles.content}>
-            {icon ? <GameIcon name={icon} size={18} color={colors.text} /> : null}
+            {loading ? <GameIcon name="loading" size={18} color={colors.text} /> : icon ? <GameIcon name={icon} size={18} color={colors.text} /> : null}
             <Text style={styles.label}>{label}</Text>
           </View>
         </Pressable>

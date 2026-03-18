@@ -36,12 +36,20 @@ export function OfflineProvider({ children }: { children: ReactNode }) {
       const remainingActions = await getPendingActions();
       setPendingActionsCount(remainingActions.length);
       setIsSyncing(false);
-      pushToast({
-        title: t("offline.syncCompleteTitle"),
-        description: t("offline.syncCompleteDescription", { count: results.filter((item) => item.ok).length }),
-        icon: "sync",
-        tone: "success",
-      });
+      const syncedCount = results.filter((item) => item.ok).length;
+      const failedCount = results.filter((item) => !item.ok).length;
+
+      if (syncedCount > 0) {
+        void pushToast({
+          title: t("offline.syncCompleteTitle"),
+          description:
+            remainingActions.length > 0 || failedCount > 0
+              ? `${t("offline.syncCompleteDescription", { count: syncedCount })} ${t("screens.settings.pendingActions", { count: remainingActions.length })}`
+              : t("offline.syncCompleteDescription", { count: syncedCount }),
+          icon: "sync",
+          tone: remainingActions.length > 0 || failedCount > 0 ? "info" : "success",
+        });
+      }
     }
   }, [isOnline, pushToast, t]);
 

@@ -26,8 +26,8 @@ export function LocalizationProvider({ children }: { children: React.ReactNode }
     try {
       await AsyncStorage.setItem(LANGUAGE_STORAGE_KEY, lang);
       setLanguageState(lang);
-    } catch (error) {
-      console.error("Failed to save language preference:", error);
+    } catch {
+      // Keep the current language in memory even if persistence fails.
     }
   }
 

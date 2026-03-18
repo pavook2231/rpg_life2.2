@@ -29,7 +29,6 @@
       "package": "com.rpglife.mobile",
       "versionCode": 3,
       "permissions": [
-        "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.BODY_SENSORS",
         "com.google.android.gms.permission.ACTIVITY_RECOGNITION"
       ],
@@ -53,7 +52,7 @@
       ]
     },
     "extra": {
-      "apiBaseUrl": "http://192.168.0.174:8000",
+      "apiBaseUrl": "https://rpglife.online/api/v1",
       "eas": {
         "projectId": "161a1a7b-1136-4d34-88e1-3e0e6297c89c"
       }

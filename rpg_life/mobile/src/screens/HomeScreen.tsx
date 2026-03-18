@@ -1,5 +1,5 @@
 import { useNavigation } from "@react-navigation/native";
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import { Alert, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 
 import { claimDailyBonus, claimSeasonalGoalReward, claimWeeklyGoalReward } from "../api/game";
@@ -37,6 +37,16 @@ function InfoItem({ icon, title, description }: InfoItemProps) {
   );
 }
 
+function translateOrFallback(
+  t: (key: string, params?: Record<string, string | number>) => string,
+  key: string,
+  fallback: string,
+  params?: Record<string, string | number>,
+) {
+  const translated = t(key, params);
+  return translated === key ? fallback : translated;
+}
+
 export function HomeScreen() {
   const navigation = useNavigation<any>();
   const { width } = useWindowDimensions();
@@ -49,6 +59,9 @@ export function HomeScreen() {
   const themeMode = useThemeMode();
   const styles = useMemo(() => createStyles(colors, themeMode), [colors, themeMode]);
   const isCompactLayout = width < 430;
+  const [isClaimingDailyBonus, setIsClaimingDailyBonus] = useState(false);
+  const [isClaimingWeeklyReward, setIsClaimingWeeklyReward] = useState(false);
+  const [isClaimingSeasonalReward, setIsClaimingSeasonalReward] = useState(false);
   const dailyBonus = rewards?.daily_bonus ?? null;
   const weeklyGoal = rewards?.weekly_goal ?? null;
   const seasonalGoal = rewards?.seasonal_goal ?? null;
@@ -66,6 +79,69 @@ export function HomeScreen() {
   const systemCap = dailyLimits?.system_cap ?? derivedStats.systemDailyCap;
   const totalCompleted = dailyLimits?.completed_total ?? 0;
   const totalCap = dailyLimits?.total_cap ?? 20;
+  const todayPlan = !goal
+    ? {
+        title: translateOrFallback(t, "screens.home.quick.todayPlanNoGoalTitle", "Сначала выбери цель"),
+        description: translateOrFallback(
+          t,
+          "screens.home.quick.todayPlanNoGoalDescription",
+          "Без цели приложению сложнее подбирать полезные задания и показывать реальный прогресс.",
+        ),
+        actionLabel: t("common.createGoal"),
+        onPress: () => navigation.navigate("GoalSelect"),
+        icon: "flag-checkered",
+      }
+    : dailyBonus?.available
+      ? {
+          title: translateOrFallback(t, "screens.home.quick.todayPlanRewardTitle", "Забери награду дня"),
+          description: translateOrFallback(
+            t,
+            "screens.home.quick.todayPlanRewardDescription",
+            "Ежедневная награда уже доступна. Забери её сейчас, чтобы не откладывать прогресс.",
+          ),
+          actionLabel: t("screens.home.quick.claimReward"),
+          onPress: handleClaimBonus,
+          icon: "gift-open-outline",
+        }
+      : totalCompleted === 0
+        ? {
+            title: translateOrFallback(t, "screens.home.quick.todayPlanFirstQuestTitle", "Начни день с первого квеста"),
+            description: translateOrFallback(
+              t,
+              "screens.home.quick.todayPlanFirstQuestDescription",
+              "Закрой хотя бы одно задание сегодня, чтобы запустить прогресс по цели и серию.",
+            ),
+            actionLabel: t("screens.home.toQuests"),
+            onPress: () => navigation.navigate("Quests"),
+            icon: "notebook-outline",
+          }
+        : systemCompleted < systemCap
+          ? {
+              title: translateOrFallback(t, "screens.home.quick.todayPlanKeepGoingTitle", "Хороший темп, продолжай"),
+              description: translateOrFallback(
+                t,
+                "screens.home.quick.todayPlanKeepGoingDescription",
+                `Сегодня уже закрыто ${systemCompleted}/${systemCap}. Если добьёшь лимит, прогресс по цели пойдёт быстрее.`,
+                {
+                  completed: systemCompleted,
+                  total: systemCap,
+                },
+              ),
+              actionLabel: t("screens.home.toQuests"),
+              onPress: () => navigation.navigate("Quests"),
+              icon: "run-fast",
+            }
+          : {
+              title: translateOrFallback(t, "screens.home.quick.todayPlanSocialTitle", "Сравни прогресс с друзьями"),
+              description: translateOrFallback(
+                t,
+                "screens.home.quick.todayPlanSocialDescription",
+                "Ты уже закрыл план на сегодня. Можно зайти к друзьям и посмотреть, кого получится обогнать.",
+              ),
+              actionLabel: translateOrFallback(t, "screens.home.quick.openFriends", "Открыть друзей"),
+              onPress: () => navigation.navigate("Friends"),
+              icon: "account-multiple-outline",
+            };
 
   const statItems = [
     {
@@ -113,31 +189,44 @@ export function HomeScreen() {
   ];
 
   async function handleClaimBonus() {
-    const result = await claimDailyBonus();
-    if ((result as { queued?: boolean })?.queued) {
-      await pushToast({
-        title: t("offline.queuedActionTitle"),
-        description: t("offline.dailyBonusQueuedDescription"),
-        icon: "clock-outline",
-        tone: "info",
-      });
-      return;
-    }
+    try {
+      setIsClaimingDailyBonus(true);
+      const result = await claimDailyBonus();
+      if ((result as { queued?: boolean })?.queued) {
+        await pushToast({
+          title: t("offline.queuedActionTitle"),
+          description: t("offline.dailyBonusQueuedDescription"),
+          icon: "clock-outline",
+          tone: "info",
+        });
+        return;
+      }
 
-    await pushToast({
-      title: t("screens.home.dailyRewardObtained"),
-      description: t("screens.home.dailyRewardDescription", {
-        xp: dailyBonus?.bonus_xp ?? 0,
-        gold: dailyBonus?.bonus_crystals ?? 0,
-      }),
-      icon: "gift-open-outline",
-      tone: "reward",
-    }, { sound: "item" });
-    await refreshGame();
+      await pushToast({
+        title: t("screens.home.dailyRewardObtained"),
+        description: t("screens.home.dailyRewardDescription", {
+          xp: dailyBonus?.bonus_xp ?? 0,
+          gold: dailyBonus?.bonus_crystals ?? 0,
+        }),
+        icon: "gift-open-outline",
+        tone: "reward",
+      }, { sound: "item" });
+      await refreshGame();
+    } catch (error) {
+      await pushToast({
+        title: t("screens.home.rewardTitle"),
+        description: error instanceof Error ? error.message : t("errors.unknownError"),
+        icon: "alert-circle",
+        tone: "warning",
+      });
+    } finally {
+      setIsClaimingDailyBonus(false);
+    }
   }
 
   async function handleClaimWeeklyReward() {
     try {
+      setIsClaimingWeeklyReward(true);
       const result = await claimWeeklyGoalReward();
       if ((result as { queued?: boolean })?.queued) {
         await pushToast({
@@ -160,12 +249,20 @@ export function HomeScreen() {
       }, { sound: "level", haptic: "level", durationMs: 2500 });
       await refreshGame();
     } catch (error) {
-      Alert.alert(t("screens.home.weeklyRewardTitle"), error instanceof Error ? error.message : t("errors.unknownError"));
+      await pushToast({
+        title: t("screens.home.weeklyRewardTitle"),
+        description: error instanceof Error ? error.message : t("errors.unknownError"),
+        icon: "alert-circle",
+        tone: "warning",
+      });
+    } finally {
+      setIsClaimingWeeklyReward(false);
     }
   }
 
   async function handleClaimSeasonalReward() {
     try {
+      setIsClaimingSeasonalReward(true);
       const result = await claimSeasonalGoalReward();
       if ((result as { queued?: boolean })?.queued) {
         await pushToast({
@@ -194,7 +291,14 @@ export function HomeScreen() {
       }, { sound: "level", haptic: "level", durationMs: 2500 });
       await refreshGame();
     } catch (error) {
-      Alert.alert(t("screens.home.quick.seasonalRewardTitle"), error instanceof Error ? error.message : t("errors.unknownError"));
+      await pushToast({
+        title: t("screens.home.quick.seasonalRewardTitle"),
+        description: error instanceof Error ? error.message : t("errors.unknownError"),
+        icon: "alert-circle",
+        tone: "warning",
+      });
+    } finally {
+      setIsClaimingSeasonalReward(false);
     }
   }
 
@@ -301,6 +405,12 @@ export function HomeScreen() {
         />
       ) : null}
 
+      <Card tone="subtle">
+        <Text style={styles.cardTitle}>{translateOrFallback(t, "screens.home.quick.todayPlanTitle", "Что сделать дальше")}</Text>
+        <InfoItem icon={todayPlan.icon} title={todayPlan.title} description={todayPlan.description} />
+        <Button label={todayPlan.actionLabel} icon={todayPlan.icon} onPress={todayPlan.onPress} variant="secondary" />
+      </Card>
+
       <Card>
         <Text style={styles.cardTitle}>{t("screens.home.statsTitle")}</Text>
         <View style={styles.statsGrid}>
@@ -351,7 +461,13 @@ export function HomeScreen() {
         <Card tone="success">
           <Text style={styles.cardTitle}>{t("screens.home.rewardTitle")}</Text>
           <Text style={styles.bonusText}>{dailyBonus.message}</Text>
-          <Button label={t("screens.home.quick.claimReward")} icon="gift-open-outline" onPress={handleClaimBonus} variant="success" />
+          <Button
+            label={isClaimingDailyBonus ? t("common.loading") : t("screens.home.quick.claimReward")}
+            icon="gift-open-outline"
+            onPress={handleClaimBonus}
+            variant="success"
+            loading={isClaimingDailyBonus}
+          />
         </Card>
       ) : null}
 
@@ -360,7 +476,7 @@ export function HomeScreen() {
           <Text style={styles.cardTitle}>{t("screens.home.weeklyRewardTitle")}</Text>
           <Text style={styles.bonusText}>{weeklyGoal.title}</Text>
           <Text style={styles.rewardMeta}>
-            {weeklyGoal.progress}/{weeklyGoal.target} • {weeklyGoal.progress_percent}% • {weeklyGoal.state_message}
+            {weeklyGoal.progress}/{weeklyGoal.target} | {weeklyGoal.progress_percent}% | {weeklyGoal.state_message}
           </Text>
           <Text style={styles.rewardMeta}>
             {t("screens.home.quick.weeklyRewardSummary", {
@@ -369,7 +485,12 @@ export function HomeScreen() {
             })}
           </Text>
           {weeklyGoal.claimable ? (
-            <Button label={t("screens.home.claimWeekly")} icon="calendar-check" onPress={handleClaimWeeklyReward} />
+            <Button
+              label={isClaimingWeeklyReward ? t("common.loading") : t("screens.home.claimWeekly")}
+              icon="calendar-check"
+              onPress={handleClaimWeeklyReward}
+              loading={isClaimingWeeklyReward}
+            />
           ) : null}
         </Card>
       ) : null}
@@ -379,7 +500,7 @@ export function HomeScreen() {
           <Text style={styles.cardTitle}>{t("screens.home.quick.seasonalRewardTitle")}</Text>
           <Text style={styles.bonusText}>{seasonalGoal.title}</Text>
           <Text style={styles.rewardMeta}>
-            {seasonalGoal.progress}/{seasonalGoal.target} • {seasonalGoal.progress_percent}% • {seasonalGoal.state_message}
+            {seasonalGoal.progress}/{seasonalGoal.target} | {seasonalGoal.progress_percent}% | {seasonalGoal.state_message}
           </Text>
           <Text style={styles.rewardMeta}>
             {seasonalGoal.reward_preview.chest_name
@@ -400,6 +521,7 @@ export function HomeScreen() {
                 icon="trophy-variant"
                 onPress={handleClaimSeasonalReward}
                 style={styles.primaryAction}
+                loading={isClaimingSeasonalReward}
               />
             ) : null}
             <Button

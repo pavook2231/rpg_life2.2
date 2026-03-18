@@ -10,7 +10,6 @@ export const LANGUAGE_STORAGE_KEY = "@rpg_life/language";
 
 const DEFAULT_LANGUAGE: Language = "ru";
 const translations = { ru, en } as const;
-
 function resolveTranslation(language: Language, key: string): string | null {
   const segments = key.split(".");
   let value: unknown = translations[language];

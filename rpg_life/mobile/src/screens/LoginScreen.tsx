@@ -15,6 +15,7 @@ import {
 import { useAuth } from "../context/AuthContext";
 import { useTranslation } from "../context/LocalizationContext";
 import { clearApiBaseUrl, getStoredApiBaseUrl, saveApiBaseUrl } from "../storage/appConfigStorage";
+import { useFeedback } from "../context/FeedbackContext";
 import { useThemeColors, useThemeMode } from "../ui";
 
 WebBrowser.maybeCompleteAuthSession();
@@ -30,6 +31,7 @@ function isValidEmail(value: string) {
 export function LoginScreen({ onShowRegister }: Props) {
   const { signIn, signInWithProvider, socialProviders, reloadSocialProviders, authFlowNotice, clearAuthFlowNotice } = useAuth();
   const t = useTranslation();
+  const { pushToast } = useFeedback();
   const colors = useThemeColors();
   const themeMode = useThemeMode();
   const styles = useMemo(() => createStyles(colors, themeMode), [colors, themeMode]);
@@ -38,7 +40,9 @@ export function LoginScreen({ onShowRegister }: Props) {
   const [apiBaseUrl, setApiBaseUrl] = useState(DEFAULT_API_BASE_URL);
   const [isSavingApi, setIsSavingApi] = useState(false);
   const [isCheckingApi, setIsCheckingApi] = useState(false);
+  const [isSigningIn, setIsSigningIn] = useState(false);
   const [isSocialLoading, setIsSocialLoading] = useState(false);
+  const [activeSocialProviderId, setActiveSocialProviderId] = useState<"google" | "telegram" | null>(null);
   const [showApiTools, setShowApiTools] = useState(false);
   const providerList = Array.isArray(socialProviders) ? socialProviders : [];
   const googleProvider = providerList.find((entry) => entry.id === "google");
@@ -77,9 +81,9 @@ export function LoginScreen({ onShowRegister }: Props) {
           setApiBaseUrl(DEFAULT_API_BASE_URL);
         }
       })
-      .catch(console.error);
+      .catch(() => undefined);
 
-    reloadSocialProviders().catch(console.error);
+    reloadSocialProviders().catch(() => undefined);
   }, [reloadSocialProviders]);
 
   useEffect(() => {
@@ -102,21 +106,36 @@ export function LoginScreen({ onShowRegister }: Props) {
 
     if (googleResponse.type !== "success") {
       if (googleResponse.type === "error") {
-        Alert.alert(t("screens.login.quick.googleTitle"), googleResponse.error?.message || t("errors.unknownError"));
+        void pushToast({
+          title: t("screens.login.quick.googleTitle"),
+          description: googleResponse.error?.message || t("errors.unknownError"),
+          icon: "alert-circle",
+          tone: "warning",
+        });
       }
       return;
     }
 
     const idToken = googleResponse.params?.id_token;
     if (!idToken) {
-      Alert.alert(t("screens.login.quick.googleTitle"), t("screens.login.quick.googleMissingIdToken"));
+      void pushToast({
+        title: t("screens.login.quick.googleTitle"),
+        description: t("screens.login.quick.googleMissingIdToken"),
+        icon: "alert-circle",
+        tone: "warning",
+      });
       setIsSocialLoading(false);
       return;
     }
 
     signInWithProvider("google", { id_token: idToken })
       .catch((error) => {
-        Alert.alert(t("screens.login.quick.socialLoginTitle"), error instanceof Error ? error.message : t("errors.unknownError"));
+        void pushToast({
+          title: t("screens.login.quick.socialLoginTitle"),
+          description: error instanceof Error ? error.message : t("errors.unknownError"),
+          icon: "alert-circle",
+          tone: "warning",
+        });
       })
       .finally(() => {
         setIsSocialLoading(false);
@@ -126,18 +145,36 @@ export function LoginScreen({ onShowRegister }: Props) {
   async function handleLogin() {
     const trimmedEmail = email.trim();
     if (!isValidEmail(trimmedEmail)) {
-      Alert.alert(t("screens.login.errors.loginFailed"), t("screens.login.quick.invalidEmail"));
+      await pushToast({
+        title: t("screens.login.errors.loginFailed"),
+        description: t("screens.login.quick.invalidEmail"),
+        icon: "email-alert-outline",
+        tone: "warning",
+      });
       return;
     }
     if (password.length < 8) {
-      Alert.alert(t("screens.login.errors.loginFailed"), t("screens.login.quick.passwordTooShort"));
+      await pushToast({
+        title: t("screens.login.errors.loginFailed"),
+        description: t("screens.login.quick.passwordTooShort"),
+        icon: "lock-alert-outline",
+        tone: "warning",
+      });
       return;
     }
 
     try {
+      setIsSigningIn(true);
       await signIn(trimmedEmail, password);
     } catch (error) {
-      Alert.alert(t("screens.login.errors.loginFailed"), error instanceof Error ? error.message : t("errors.unknownError"));
+      await pushToast({
+        title: t("screens.login.errors.loginFailed"),
+        description: error instanceof Error ? error.message : t("errors.unknownError"),
+        icon: "alert-circle",
+        tone: "warning",
+      });
+    } finally {
+      setIsSigningIn(false);
     }
   }
 
@@ -147,9 +184,22 @@ export function LoginScreen({ onShowRegister }: Props) {
       const normalized = normalizeApiBaseUrl(apiBaseUrl);
       await saveApiBaseUrl(normalized);
       setApiBaseUrl(normalized);
-      Alert.alert(t("screens.login.apiSaved"), t("screens.login.apiWillBeUsed", { url: normalized }));
+      await pushToast(
+        {
+          title: t("screens.login.apiSaved"),
+          description: t("screens.login.apiWillBeUsed", { url: normalized }),
+          icon: "cloud-check-outline",
+          tone: "success",
+        },
+        { haptic: "success" },
+      );
     } catch (error) {
-      Alert.alert(t("common.error"), error instanceof Error ? error.message : t("errors.unknownError"));
+      await pushToast({
+        title: t("common.error"),
+        description: error instanceof Error ? error.message : t("errors.unknownError"),
+        icon: "alert-circle",
+        tone: "warning",
+      });
     } finally {
       setIsSavingApi(false);
     }
@@ -158,7 +208,15 @@ export function LoginScreen({ onShowRegister }: Props) {
   async function handleResetApiUrl() {
     await clearApiBaseUrl();
     setApiBaseUrl(DEFAULT_API_BASE_URL);
-    Alert.alert(t("screens.login.apiReset"), t("screens.login.apiResetMessage"));
+    await pushToast(
+      {
+        title: t("screens.login.apiReset"),
+        description: t("screens.login.apiResetMessage"),
+        icon: "restore",
+        tone: "info",
+      },
+      { haptic: "success" },
+    );
   }
 
   async function handleCheckApi() {
@@ -168,12 +226,22 @@ export function LoginScreen({ onShowRegister }: Props) {
       await saveApiBaseUrl(normalized);
       setApiBaseUrl(normalized);
       const result = await probeApiConnection();
-      Alert.alert(
-        t("screens.login.connectionWorks"),
-        `${result.service}\n${t("screens.login.connectionStatus", { status: result.status })}`,
+      await pushToast(
+        {
+          title: t("screens.login.connectionWorks"),
+          description: `${result.service} | ${t("screens.login.connectionStatus", { status: result.status })}`,
+          icon: "cloud-check-outline",
+          tone: "success",
+        },
+        { haptic: "success" },
       );
     } catch (error) {
-      Alert.alert(t("screens.login.connectionFailed"), error instanceof Error ? error.message : t("errors.unknownError"));
+      await pushToast({
+        title: t("screens.login.connectionFailed"),
+        description: error instanceof Error ? error.message : t("errors.unknownError"),
+        icon: "cloud-alert-outline",
+        tone: "warning",
+      });
     } finally {
       setIsCheckingApi(false);
     }
@@ -183,26 +251,44 @@ export function LoginScreen({ onShowRegister }: Props) {
     const provider = providerList.find((entry) => entry.id === providerId);
 
     try {
+      setActiveSocialProviderId(providerId);
       if (providerId === "google") {
         if (!googleClientId) {
-          Alert.alert(t("screens.login.quick.googleTitle"), t("screens.login.quick.googleClientMissing"));
+          await pushToast({
+            title: t("screens.login.quick.googleTitle"),
+            description: t("screens.login.quick.googleClientMissing"),
+            icon: "alert-circle",
+            tone: "warning",
+          });
           return;
         }
 
         if (!googleRequest) {
-          Alert.alert(t("screens.login.quick.googleTitle"), t("screens.login.quick.googleNotReady"));
+          await pushToast({
+            title: t("screens.login.quick.googleTitle"),
+            description: t("screens.login.quick.googleNotReady"),
+            icon: "alert-circle",
+            tone: "warning",
+          });
           return;
         }
 
         setIsSocialLoading(true);
         const result = await promptGoogleAuth().catch((error) => {
           setIsSocialLoading(false);
+          setActiveSocialProviderId(null);
           throw error;
         });
         if (result.type !== "success") {
           setIsSocialLoading(false);
+          setActiveSocialProviderId(null);
           if (result.type !== "dismiss" && result.type !== "cancel") {
-            Alert.alert(t("screens.login.quick.googleTitle"), t("screens.login.quick.googleFailed"));
+            await pushToast({
+              title: t("screens.login.quick.googleTitle"),
+              description: t("screens.login.quick.googleFailed"),
+              icon: "alert-circle",
+              tone: "warning",
+            });
           }
         }
         return;
@@ -212,7 +298,15 @@ export function LoginScreen({ onShowRegister }: Props) {
         const botUsername = provider?.mobile_client_id;
         if (botUsername) {
           await Linking.openURL(`https://t.me/${botUsername}?start=rpglife_login`);
-          Alert.alert(t("screens.login.quick.telegramTitle"), t("screens.login.quick.telegramOpened"));
+          await pushToast(
+            {
+              title: t("screens.login.quick.telegramTitle"),
+              description: t("screens.login.quick.telegramOpened"),
+              icon: "send-circle-outline",
+              tone: "info",
+            },
+            { haptic: "success" },
+          );
           return;
         }
       }
@@ -220,11 +314,17 @@ export function LoginScreen({ onShowRegister }: Props) {
       setIsSocialLoading(true);
       await signInWithProvider(providerId);
     } catch (error) {
-      Alert.alert(t("screens.login.quick.socialLoginTitle"), error instanceof Error ? error.message : t("errors.unknownError"));
+      await pushToast({
+        title: t("screens.login.quick.socialLoginTitle"),
+        description: error instanceof Error ? error.message : t("errors.unknownError"),
+        icon: "alert-circle",
+        tone: "warning",
+      });
     } finally {
       if (providerId !== "google") {
         setIsSocialLoading(false);
       }
+      setActiveSocialProviderId(null);
     }
   }
 
@@ -259,8 +359,8 @@ export function LoginScreen({ onShowRegister }: Props) {
             onChangeText={setPassword}
             secureTextEntry
           />
-          <TouchableOpacity style={styles.primaryButton} onPress={handleLogin} activeOpacity={0.85}>
-            <Text style={styles.primaryText}>{t("screens.login.login")}</Text>
+          <TouchableOpacity style={[styles.primaryButton, isSigningIn ? styles.buttonDisabled : null]} onPress={handleLogin} activeOpacity={0.85} disabled={isSigningIn}>
+            <Text style={styles.primaryText}>{isSigningIn ? t("common.loading") : t("screens.login.login")}</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.linkButton} onPress={onShowRegister} activeOpacity={0.85}>
             <Text style={styles.link}>{t("screens.login.noAccount")}</Text>
@@ -298,7 +398,11 @@ export function LoginScreen({ onShowRegister }: Props) {
                     <Text style={styles.socialButtonMeta}>{metaText}</Text>
                   </View>
                   <Text style={[styles.socialStatus, isReady ? styles.socialStatusReady : styles.socialStatusPending]}>
-                    {isReady ? t("screens.login.quick.ready") : t("screens.login.quick.comingSoon")}
+                    {activeSocialProviderId === provider.id && isSocialLoading
+                      ? t("common.loading")
+                      : isReady
+                        ? t("screens.login.quick.ready")
+                        : t("screens.login.quick.comingSoon")}
                   </Text>
                 </TouchableOpacity>
               );
@@ -460,6 +564,9 @@ function createStyles(colors: ReturnType<typeof useThemeColors>, themeMode: Retu
       paddingVertical: 14,
       borderRadius: 14,
       alignItems: "center",
+    },
+    buttonDisabled: {
+      opacity: 0.6,
     },
     primaryText: {
       color: "#052e16",

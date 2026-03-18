@@ -10,6 +10,7 @@ import {
   type QuestItem,
 } from "../api/game";
 import { Screen } from "../components/Screen";
+import { useFeedback } from "../context/FeedbackContext";
 import { useTranslation } from "../context/LocalizationContext";
 import { useGame } from "../context/GameContext";
 import { getTodaySteps, watchTodaySteps } from "../lib/pedometer";
@@ -27,6 +28,7 @@ function questKindLabel(quest: QuestItem, t: (key: string, params?: Record<strin
 export function QuestsScreen() {
   const t = useTranslation();
   const { hero, applyQuestResult } = useGame();
+  const { pushToast } = useFeedback();
   const colors = useThemeColors();
   const themeMode = useThemeMode();
   const styles = useMemo(() => createStyles(colors, themeMode), [colors, themeMode]);
@@ -40,6 +42,8 @@ export function QuestsScreen() {
   const [customTitle, setCustomTitle] = useState("");
   const [customDescription, setCustomDescription] = useState("");
   const [isCreating, setIsCreating] = useState(false);
+  const [isRefreshingList, setIsRefreshingList] = useState(false);
+  const [completingQuestId, setCompletingQuestId] = useState<number | null>(null);
 
   const loadQuests = useCallback(async () => {
     setIsLoading(true);
@@ -61,16 +65,11 @@ export function QuestsScreen() {
     let stopWatch: (() => void) | null = null;
 
     async function startStepTracking() {
-      console.log("QuestsScreen: Starting step tracking...");
       const initial = await getTodaySteps();
-      console.log("QuestsScreen: Initial steps result:", initial);
 
       if (initial === null) {
-        console.log("QuestsScreen: No steps available, will retry with sensors");
-        // Try to force sensor initialization
         setTimeout(async () => {
           const retrySteps = await getTodaySteps();
-          console.log("QuestsScreen: Retry steps result:", retrySteps);
           if (retrySteps !== null) {
             setTodaySteps(retrySteps);
           }
@@ -84,11 +83,10 @@ export function QuestsScreen() {
           ? "HealthKit"
           : Platform.OS === "android"
             ? "Google Fit"
-            : "Датчики";
+            : t("screens.quests.quick.stepsSourceFallback");
       setStepsSource(source);
 
       stopWatch = await watchTodaySteps((steps) => {
-        console.log("QuestsScreen: Watch updated steps:", steps);
         if (!cancelled) {
           setTodaySteps(steps);
         }
@@ -125,26 +123,42 @@ export function QuestsScreen() {
 
   async function handleComplete(questId: number) {
     try {
+      setCompletingQuestId(questId);
       const result = await completeQuest(questId);
       await applyQuestResult(result);
       await loadQuests();
     } catch (error) {
-      Alert.alert(
-        t("screens.quests.errors.failedToComplete"),
-        error instanceof Error ? error.message : t("screens.quests.quick.tryAgain"),
-      );
+      await pushToast({
+        title: t("screens.quests.errors.failedToComplete"),
+        description: error instanceof Error ? error.message : t("screens.quests.quick.tryAgain"),
+        icon: "alert-circle",
+        tone: "warning",
+      });
+    } finally {
+      setCompletingQuestId(null);
     }
   }
 
   async function handleRefresh() {
     try {
+      setIsRefreshingList(true);
       await regenerateTodayQuests();
       await loadQuests();
+      await pushToast({
+        title: t("screens.quests.quick.refreshList"),
+        description: t("screens.quests.quick.loadingDescription"),
+        icon: "refresh",
+        tone: "success",
+      });
     } catch (error) {
-      Alert.alert(
-        t("screens.quests.quick.refreshFailed"),
-        error instanceof Error ? error.message : t("screens.quests.quick.tryAgain"),
-      );
+      await pushToast({
+        title: t("screens.quests.quick.refreshFailed"),
+        description: error instanceof Error ? error.message : t("screens.quests.quick.tryAgain"),
+        icon: "alert-circle",
+        tone: "warning",
+      });
+    } finally {
+      setIsRefreshingList(false);
     }
   }
 
@@ -153,7 +167,12 @@ export function QuestsScreen() {
     const description = customDescription.trim();
 
     if (!title || !description) {
-      Alert.alert(t("screens.quests.quick.fillAllFields"), t("screens.quests.quick.fillAllFieldsDescription"));
+      await pushToast({
+        title: t("screens.quests.quick.fillAllFields"),
+        description: t("screens.quests.quick.fillAllFieldsDescription"),
+        icon: "text-box-outline",
+        tone: "warning",
+      });
       return;
     }
 
@@ -169,11 +188,19 @@ export function QuestsScreen() {
       setCustomTitle("");
       setCustomDescription("");
       await loadQuests();
+      await pushToast({
+        title: t("screens.quests.quick.createCustomQuest"),
+        description: title,
+        icon: "notebook-edit-outline",
+        tone: "success",
+      });
     } catch (error) {
-      Alert.alert(
-        t("screens.quests.errors.failedToCreate"),
-        error instanceof Error ? error.message : t("screens.quests.quick.tryAgain"),
-      );
+      await pushToast({
+        title: t("screens.quests.errors.failedToCreate"),
+        description: error instanceof Error ? error.message : t("screens.quests.quick.tryAgain"),
+        icon: "alert-circle",
+        tone: "warning",
+      });
     } finally {
       setIsCreating(false);
     }
@@ -209,10 +236,11 @@ export function QuestsScreen() {
         </View>
         <View style={styles.actionRow}>
           <Button
-            label={t("screens.quests.quick.refreshList")}
+            label={isRefreshingList ? t("common.loading") : t("screens.quests.quick.refreshList")}
             icon="refresh"
             onPress={handleRefresh}
             style={styles.refreshButton}
+            loading={isRefreshingList}
           />
           <Button
             label={t("screens.quests.quick.createQuest")}
@@ -258,7 +286,7 @@ export function QuestsScreen() {
               rewardGold={quest.crystal_reward}
               progressLabel={
                 stepCheckFailed
-                  ? `${progressLabel} • ${t("screens.quests.quick.needSteps")}: ${targetSteps}`
+                  ? `${progressLabel} | ${t("screens.quests.quick.needSteps")}: ${targetSteps}`
                   : progressLabel
               }
               completed={quest.is_completed}
@@ -269,6 +297,7 @@ export function QuestsScreen() {
                       onPress: () => handleComplete(quest.id),
                       variant: "success",
                       disabled: quest.can_complete === false || stepCheckFailed,
+                      loading: completingQuestId === quest.id,
                     }
                   : undefined
               }
@@ -315,6 +344,7 @@ export function QuestsScreen() {
                 icon="plus"
                 onPress={handleCreateCustomQuest}
                 disabled={isCreating}
+                loading={isCreating}
               />
             </View>
           </View>

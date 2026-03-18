@@ -15,7 +15,7 @@ export function ChallengesScreen() {
   const styles = useMemo(() => createStyles(colors), [colors]);
 
   useEffect(() => {
-    fetchChallenges().then((payload) => setItems(payload.items)).catch(console.error);
+    fetchChallenges().then((payload) => setItems(payload.items)).catch(() => undefined);
   }, []);
 
   function translateStatus(value?: string | null) {

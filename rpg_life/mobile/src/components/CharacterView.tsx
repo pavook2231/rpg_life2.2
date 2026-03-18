@@ -109,13 +109,8 @@ function resolveEquipmentAsset(slot: EquipmentSlot, itemId?: string): LayeredEqu
     return null;
   }
 
-  const asset = CHARACTER_EQUIPMENT_ASSETS[slot]?.[itemId] ?? null;
-
-  if (__DEV__ && !asset) {
-    console.warn(`[CharacterView] Missing asset for slot "${slot}" and item "${itemId}".`);
-  }
-
-  return asset;
+  // Missing layered art should fail quietly so beta builds don't spam device logs.
+  return CHARACTER_EQUIPMENT_ASSETS[slot]?.[itemId] ?? null;
 }
 
 function buildLayers(equipment: Equipment, characterClass?: string): CharacterLayer[] {

@@ -16,6 +16,7 @@ export const REQUIRE_HTTPS = extra.requireHttps ?? false;
 export const ENABLE_ACCOUNT_RECOVERY = extra.enableAccountRecovery ?? false;
 export const GOOGLE_AUTH_CLIENT_ID = extra.googleAuthClientId ?? "";
 export const SOCIAL_AUTH_REDIRECT_SCHEME = extra.socialAuthRedirectScheme ?? "rpglife";
+const PUBLIC_BETA_API_BASE_URL = "https://rpglife.online/api/v1";
 
 function isPrivateHost(host: string) {
   return (
@@ -64,7 +65,9 @@ function getRuntimeDevApiBaseUrl() {
   return `http://${host}:8000/api/v1`;
 }
 
-export const DEFAULT_API_BASE_URL = getRuntimeDevApiBaseUrl() ?? extra.apiBaseUrl ?? "http://192.168.0.174:8000";
+const configuredApiBaseUrl = typeof extra.apiBaseUrl === "string" && extra.apiBaseUrl.trim() ? extra.apiBaseUrl : null;
+
+export const DEFAULT_API_BASE_URL = getRuntimeDevApiBaseUrl() ?? configuredApiBaseUrl ?? PUBLIC_BETA_API_BASE_URL;
 
 export function isDeprecatedLocalApiBaseUrl(value: string | null | undefined) {
   if (!value) {

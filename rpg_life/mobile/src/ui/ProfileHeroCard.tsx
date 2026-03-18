@@ -45,7 +45,7 @@ export function ProfileHeroCard({
   const themeMode = useThemeMode();
   const styles = useMemo(() => createStyles(colors, themeMode), [colors, themeMode]);
   const t = useTranslation();
-  const safeName = normalizeDisplayText(name || "Герой");
+  const safeName = normalizeDisplayText(name || t("screens.home.heroName"));
   const classLabel = getClassLabel(heroClass ?? "warrior", t);
   const hasHealth = typeof healthCurrent === "number" && typeof healthMax === "number" && healthMax > 0;
   const safeHealthCurrent = hasHealth ? Math.max(0, Math.round(healthCurrent ?? 0)) : 0;

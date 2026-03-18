@@ -15,6 +15,7 @@ type Action = {
   variant?: "primary" | "secondary" | "success" | "danger" | "ghost" | "gold";
   icon?: string;
   disabled?: boolean;
+  loading?: boolean;
 };
 
 type MetaRow = {
@@ -207,6 +208,7 @@ export function FullscreenItemDetails({
                 variant={action.variant}
                 icon={action.icon}
                 disabled={action.disabled}
+                loading={action.loading}
                 style={styles.footerButton}
               />
             ))}

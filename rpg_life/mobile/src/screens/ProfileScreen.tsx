@@ -6,6 +6,7 @@ import { fetchGoalTemplates, updateProfile, type GoalTemplatePayload } from "../
 import { Screen } from "../components/Screen";
 import { LanguageSwitcher } from "../components/LanguageSwitcher";
 import { useAuth } from "../context/AuthContext";
+import { useFeedback } from "../context/FeedbackContext";
 import { useGame } from "../context/GameContext";
 import { useLocalization, useTranslation } from "../context/LocalizationContext";
 import { getClassLabel, getRarityColor, normalizeDisplayText } from "../lib/gameUi";
@@ -120,6 +121,7 @@ export function ProfileScreen() {
   const fallbackGoals = useMemo(() => getFallbackGoals(t), [t]);
   const { profile, hero, achievements, refreshGame } = useGame();
   const { signOut } = useAuth();
+  const { pushToast } = useFeedback();
   const colors = useThemeColors();
   const themeMode = useThemeMode();
   const styles = useMemo(() => createStyles(colors, themeMode), [colors, themeMode]);
@@ -130,6 +132,8 @@ export function ProfileScreen() {
   const [goalType, setGoalType] = useState("personal_development");
   const [goalTermMonths, setGoalTermMonths] = useState(6);
   const [goalTemplates, setGoalTemplates] = useState<GoalTemplatePayload["goals"]>(fallbackGoals);
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
+  const [isApplyingGoalCycle, setIsApplyingGoalCycle] = useState(false);
 
   useEffect(() => {
     setName(profile?.user?.name ?? "");
@@ -163,21 +167,37 @@ export function ProfileScreen() {
     const currentYear = new Date().getFullYear();
 
     if (!isValidProfileName(trimmedName)) {
-      Alert.alert(t("screens.profile.errors.failedToSave"), t("screens.profile.quick.invalidAccountName"));
+      await pushToast({
+        title: t("screens.profile.errors.failedToSave"),
+        description: t("screens.profile.quick.invalidAccountName"),
+        icon: "account-alert-outline",
+        tone: "warning",
+      });
       return;
     }
 
     if (!isValidProfileName(trimmedCharacterName)) {
-      Alert.alert(t("screens.profile.errors.failedToSave"), t("screens.profile.quick.invalidCharacterName"));
+      await pushToast({
+        title: t("screens.profile.errors.failedToSave"),
+        description: t("screens.profile.quick.invalidCharacterName"),
+        icon: "account-alert-outline",
+        tone: "warning",
+      });
       return;
     }
 
     if (!Number.isInteger(numericBirthYear) || numericBirthYear < 1950 || numericBirthYear > currentYear - 10) {
-      Alert.alert(t("screens.profile.errors.failedToSave"), t("screens.profile.quick.invalidBirthYear", { year: currentYear - 10 }));
+      await pushToast({
+        title: t("screens.profile.errors.failedToSave"),
+        description: t("screens.profile.quick.invalidBirthYear", { year: currentYear - 10 }),
+        icon: "calendar-alert",
+        tone: "warning",
+      });
       return;
     }
 
     try {
+      setIsSavingProfile(true);
       await updateProfile({
         name: trimmedName,
         character_name: trimmedCharacterName,
@@ -188,23 +208,54 @@ export function ProfileScreen() {
         start_new_goal_cycle: false,
       });
       await refreshGame();
-      Alert.alert(t("screens.profile.errors.profileUpdated"), t("screens.profile.errors.changesSaved"));
+      await pushToast(
+        {
+          title: t("screens.profile.errors.profileUpdated"),
+          description: t("screens.profile.errors.changesSaved"),
+          icon: "content-save-check-outline",
+          tone: "success",
+        },
+        { haptic: "success" },
+      );
     } catch (error) {
-      Alert.alert(t("screens.profile.errors.failedToSave"), error instanceof Error ? error.message : t("common.error"));
+      await pushToast({
+        title: t("screens.profile.errors.failedToSave"),
+        description: error instanceof Error ? error.message : t("common.error"),
+        icon: "alert-circle",
+        tone: "warning",
+      });
+    } finally {
+      setIsSavingProfile(false);
     }
   }
 
   async function handleApplyGoalCycle() {
     try {
+      setIsApplyingGoalCycle(true);
       await updateProfile({
         goal_type: goalType,
         goal_term_months: goalTermMonths,
         start_new_goal_cycle: true,
       });
       await refreshGame();
-      Alert.alert(t("screens.profile.quick.goalUpdatedTitle"), t("screens.profile.quick.goalUpdatedDescription"));
+      await pushToast(
+        {
+          title: t("screens.profile.quick.goalUpdatedTitle"),
+          description: t("screens.profile.quick.goalUpdatedDescription"),
+          icon: "flag-checkered",
+          tone: "success",
+        },
+        { haptic: "success" },
+      );
     } catch (error) {
-      Alert.alert(t("screens.profile.quick.goalUpdateFailed"), error instanceof Error ? error.message : t("common.error"));
+      await pushToast({
+        title: t("screens.profile.quick.goalUpdateFailed"),
+        description: error instanceof Error ? error.message : t("common.error"),
+        icon: "alert-circle",
+        tone: "warning",
+      });
+    } finally {
+      setIsApplyingGoalCycle(false);
     }
   }
 
@@ -233,7 +284,7 @@ export function ProfileScreen() {
         isWounded={hero?.health?.is_wounded ?? profile?.health?.is_wounded ?? false}
         penaltyQuestsRemaining={hero?.health?.penalty_quests_remaining ?? profile?.health?.penalty_quests_remaining ?? 0}
         rewardPenaltyPercent={hero?.health?.reward_penalty_percent ?? profile?.health?.reward_penalty_percent ?? 0}
-        subtitle={`${displayClass} • ${displayEmail}`}
+        subtitle={`${displayClass} | ${displayEmail}`}
       />
 
       <Card>
@@ -265,7 +316,12 @@ export function ProfileScreen() {
           keyboardType="numeric"
         />
 
-        <Button label={t("screens.profile.save")} icon="content-save-outline" onPress={handleSave} />
+        <Button
+          label={isSavingProfile ? t("common.loading") : t("screens.profile.save")}
+          icon="content-save-outline"
+          onPress={handleSave}
+          loading={isSavingProfile}
+        />
       </Card>
 
       <Card>
@@ -306,7 +362,12 @@ export function ProfileScreen() {
           ))}
         </View>
 
-        <Button label={t("screens.profile.quick.applyGoalCycle")} icon="flag-checkered" onPress={handleApplyGoalCycle} />
+        <Button
+          label={isApplyingGoalCycle ? t("common.loading") : t("screens.profile.quick.applyGoalCycle")}
+          icon="flag-checkered"
+          onPress={handleApplyGoalCycle}
+          loading={isApplyingGoalCycle}
+        />
       </Card>
 
       <Card>
@@ -392,7 +453,7 @@ export function ProfileScreen() {
         title={normalizeDisplayText(selectedAchievement?.title ?? "")}
         subtitle={
           selectedAchievement
-            ? `${getAchievementStatusLabel(t, selectedAchievement.status)} • +${selectedAchievement.xp_reward ?? 0} XP • +${selectedAchievement.crystal_reward ?? 0} ${t("common.gold")}`
+            ? `${getAchievementStatusLabel(t, selectedAchievement.status)} | +${selectedAchievement.xp_reward ?? 0} XP | +${selectedAchievement.crystal_reward ?? 0} ${t("common.gold")}`
             : undefined
         }
         description={normalizeDisplayText(selectedAchievement?.description ?? "")}

@@ -10,10 +10,13 @@ import { AchievementsScreen } from "../screens/AchievementsScreen";
 import { CharacterScreen } from "../screens/CharacterScreen";
 import { CoopQuestsScreen } from "../screens/CoopQuestsScreen";
 import { FriendsScreen } from "../screens/FriendsScreen";
+import { GoalSelectScreen } from "../screens/GoalSelectScreen";
 import { HelpScreen } from "../screens/HelpScreen";
 import { HomeScreen } from "../screens/HomeScreen";
 import { LeaderboardScreen } from "../screens/LeaderboardScreen";
 import { LoadingScreen } from "../screens/LoadingScreen";
+import { LoginScreen } from "../screens/LoginScreen";
+import { ProfileScreen } from "../screens/ProfileScreen";
 import { QuestsScreen } from "../screens/QuestsScreen";
 import { RegisterScreen } from "../screens/RegisterScreen";
 import { SettingsScreen } from "../screens/SettingsScreen";
@@ -170,7 +173,7 @@ function MainTabs() {
       />
       <Tabs.Screen
         name="Profile"
-        component={CharacterScreen}
+        component={ProfileScreen}
         listeners={buildTabListeners("Profile")}
         options={{
           title: t("navigation.profile"),
@@ -234,7 +237,13 @@ function TabIcon({ name, focused, trigger }: { name: string; focused: boolean; t
 }
 
 function AuthSwitcher() {
-  return <RegisterScreen onBackToLogin={() => {}} />;
+  const [mode, setMode] = useState<"login" | "register">("login");
+
+  if (mode === "register") {
+    return <RegisterScreen onBackToLogin={() => setMode("login")} />;
+  }
+
+  return <LoginScreen onShowRegister={() => setMode("register")} />;
 }
 
 export function AppNavigator() {
@@ -258,7 +267,7 @@ export function AppNavigator() {
         <>
           <Stack.Screen name="MainTabs" component={MainTabs} options={{ headerShown: false }} />
           <Stack.Screen name="GoalProgress" component={QuestsScreen} options={{ title: "Прогресс цели" }} />
-          <Stack.Screen name="GoalSelect" component={CharacterScreen} options={{ title: "Выбор цели" }} />
+          <Stack.Screen name="GoalSelect" component={GoalSelectScreen} options={{ title: "Выбор цели" }} />
           <Stack.Screen name="QuestBoard" component={QuestsScreen} options={{ title: "Доска заданий" }} />
           <Stack.Screen name="RewardScreen" component={AchievementsScreen} options={{ title: "Награды" }} />
           <Stack.Screen name="SkillTree" component={CharacterScreen} options={{ title: "Навыки" }} />
