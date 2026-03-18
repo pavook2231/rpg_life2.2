@@ -1,7 +1,7 @@
 ﻿from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 from fastapi.responses import HTMLResponse, RedirectResponse
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit, urlunsplit
 import base64
 import html
 import hashlib
@@ -75,6 +75,21 @@ def _verify_bridge_cookie(raw_value: str | None) -> dict | None:
     return payload if isinstance(payload, dict) else None
 
 
+def _external_url_for(request: Request, route_name: str) -> str:
+    internal_url = urlsplit(str(request.url_for(route_name)))
+    forwarded_proto = request.headers.get("x-forwarded-proto", "").split(",", 1)[0].strip()
+    forwarded_host = request.headers.get("x-forwarded-host", "").split(",", 1)[0].strip()
+    forwarded_port = request.headers.get("x-forwarded-port", "").split(",", 1)[0].strip()
+
+    scheme = forwarded_proto or internal_url.scheme
+    host = forwarded_host or request.headers.get("host", "").strip() or internal_url.netloc
+
+    if forwarded_port and host and ":" not in host and forwarded_port not in {"80", "443"}:
+        host = f"{host}:{forwarded_port}"
+
+    return urlunsplit((scheme, host, internal_url.path, internal_url.query, internal_url.fragment))
+
+
 @router.get("/auth/telegram/bridge", summary="Telegram auth bridge", include_in_schema=False)
 async def auth_telegram_bridge(request: Request):
     query_string = request.url.query
@@ -91,7 +106,7 @@ async def auth_telegram_bridge(request: Request):
 
 @router.get("/auth/telegram/login", summary="Telegram login page", include_in_schema=False)
 async def auth_telegram_login_page(request: Request):
-    bridge_url = str(request.url_for("auth_telegram_bridge"))
+    bridge_url = _external_url_for(request, "auth_telegram_bridge")
     app_link = f"{SOCIAL_AUTH_REDIRECT_SCHEME}://auth/telegram"
 
     if not TELEGRAM_AUTH_ENABLED:
@@ -354,7 +369,7 @@ async def auth_vk_login_page(request: Request):
             status_code=503,
         )
 
-    callback_url = str(request.url_for("auth_vk_callback"))
+    callback_url = _external_url_for(request, "auth_vk_callback")
     browser_flow = auth_service.create_vk_browser_login(callback_url)
     authorize_url = browser_flow["authorize_url"]
     response = HTMLResponse(
@@ -454,7 +469,7 @@ async def auth_vk_callback(
         response.delete_cookie(VK_OAUTH_COOKIE_NAME, path="/")
         return response
 
-    callback_url = str(request.url_for("auth_vk_callback"))
+    callback_url = _external_url_for(request, "auth_vk_callback")
     try:
         ticket = auth_service.complete_vk_browser_login(
             db,

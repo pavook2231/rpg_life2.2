@@ -8,7 +8,7 @@ from app.api import mobile_routes
 from app.api.mobile_routes import router
 
 
-def _request(path: str) -> Request:
+def _request(path: str, headers: list[tuple[bytes, bytes]] | None = None) -> Request:
     app = FastAPI()
     app.include_router(router)
     return Request(
@@ -16,7 +16,7 @@ def _request(path: str) -> Request:
             "type": "http",
             "method": "GET",
             "path": path,
-            "headers": [],
+            "headers": headers or [],
             "app": app,
             "router": app.router,
             "scheme": "https",
@@ -128,3 +128,16 @@ def test_vk_callback_redirects_to_error_when_cookie_is_missing() -> None:
 
     assert response.status_code == 302
     assert response.headers["location"] == "rpglife://auth/vk?error=vk_auth_cookie_missing"
+
+
+def test_external_url_for_prefers_forwarded_proto_and_host() -> None:
+    request = _request(
+        "/api/v1/auth/vk/login",
+        headers=[
+            (b"x-forwarded-proto", b"https"),
+            (b"x-forwarded-host", b"rpglife.online"),
+            (b"host", b"backend:8000"),
+        ],
+    )
+
+    assert mobile_routes._external_url_for(request, "auth_vk_callback") == "https://rpglife.online/api/v1/auth/vk/callback"
