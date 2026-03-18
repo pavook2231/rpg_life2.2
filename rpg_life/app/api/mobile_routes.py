@@ -2,10 +2,26 @@
 from sqlalchemy.orm import Session
 from fastapi.responses import HTMLResponse, RedirectResponse
 from urllib.parse import quote
+import base64
+import hashlib
+import hmac
+import json
+import time
 
 from app import auth
 from app.api.dependencies import enforce_rate_limit
-from app.core.config import SOCIAL_AUTH_REDIRECT_SCHEME, TELEGRAM_AUTH_ENABLED, TELEGRAM_BOT_USERNAME
+from app.core.config import (
+    COOKIE_SAMESITE,
+    COOKIE_SECURE,
+    SECRET_KEY,
+    SOCIAL_AUTH_REDIRECT_SCHEME,
+    TELEGRAM_AUTH_ENABLED,
+    TELEGRAM_BOT_USERNAME,
+    TELEGRAM_BOT_USERNAME_RAW,
+    VK_AUTH_APP_ID,
+    VK_AUTH_ENABLED,
+    VK_AUTH_MAX_AGE_SECONDS,
+)
 from app.core.database import get_db
 from app.core.responses import success_response
 from app.models import User
@@ -30,6 +46,32 @@ from app.schemas import (
 from app.services import auth_service, character_service, mobile_service, multiplayer_service, notification_service, quest_service
 
 router = APIRouter(prefix="/api/v1", tags=["РњРѕР±РёР»СЊРЅРѕРµ API"])
+VK_OAUTH_COOKIE_NAME = "vk_oauth_flow"
+
+
+def _sign_bridge_cookie(payload: dict) -> str:
+    encoded_payload = base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode("utf-8")).decode("utf-8").rstrip("=")
+    signature = hmac.new(SECRET_KEY.encode("utf-8"), encoded_payload.encode("utf-8"), hashlib.sha256).hexdigest()
+    return f"{encoded_payload}.{signature}"
+
+
+def _verify_bridge_cookie(raw_value: str | None) -> dict | None:
+    if not raw_value or "." not in raw_value:
+        return None
+
+    encoded_payload, received_signature = raw_value.rsplit(".", 1)
+    expected_signature = hmac.new(SECRET_KEY.encode("utf-8"), encoded_payload.encode("utf-8"), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(received_signature, expected_signature):
+        return None
+
+    padding = "=" * (-len(encoded_payload) % 4)
+    try:
+        decoded_payload = base64.urlsafe_b64decode(f"{encoded_payload}{padding}")
+        payload = json.loads(decoded_payload.decode("utf-8"))
+    except Exception:
+        return None
+
+    return payload if isinstance(payload, dict) else None
 
 
 @router.get("/auth/telegram/bridge", summary="Telegram auth bridge", include_in_schema=False)
@@ -83,6 +125,38 @@ async def auth_telegram_login_page(request: Request):
         )
 
     if not TELEGRAM_BOT_USERNAME:
+        if TELEGRAM_BOT_USERNAME_RAW:
+            return HTMLResponse(
+                """
+                <!doctype html>
+                <html lang="ru">
+                  <head>
+                    <meta charset="utf-8" />
+                    <meta name="viewport" content="width=device-width, initial-scale=1" />
+                    <title>Telegram Sign-in</title>
+                    <style>
+                      body { margin: 0; font-family: Arial, sans-serif; background: #0f172a; color: #e5e7eb; }
+                      .shell { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+                      .card { width: 100%; max-width: 520px; background: rgba(15, 23, 42, 0.92); border: 1px solid rgba(148, 163, 184, 0.25); border-radius: 24px; padding: 28px; }
+                      h1 { margin: 0 0 12px; font-size: 28px; }
+                      p { margin: 0 0 12px; line-height: 1.5; color: #cbd5e1; }
+                      code { background: rgba(15, 23, 42, 0.8); padding: 2px 6px; border-radius: 6px; color: #f8fafc; }
+                    </style>
+                  </head>
+                  <body>
+                    <main class="shell">
+                      <section class="card">
+                        <h1>Telegram bot username has invalid format</h1>
+                        <p><code>TELEGRAM_BOT_USERNAME</code> should point to a Telegram bot username such as <code>rpglife_auth_bot</code>.</p>
+                        <p>You can also use <code>@rpglife_auth_bot</code> or <code>https://t.me/rpglife_auth_bot</code>; the backend will normalize those values after restart.</p>
+                      </section>
+                    </main>
+                  </body>
+                </html>
+                """,
+                status_code=503,
+            )
+
         return HTMLResponse(
             """
             <!doctype html>
@@ -215,6 +289,151 @@ async def auth_telegram_login_page(request: Request):
     return HTMLResponse(html)
 
 
+@router.get("/auth/vk/login", summary="VK ID login redirect", include_in_schema=False)
+async def auth_vk_login_page(request: Request):
+    if not VK_AUTH_ENABLED:
+        return HTMLResponse(
+            """
+            <!doctype html>
+            <html lang="ru">
+              <head>
+                <meta charset="utf-8" />
+                <meta name="viewport" content="width=device-width, initial-scale=1" />
+                <title>VK ID Sign-in</title>
+                <style>
+                  body { margin: 0; font-family: Arial, sans-serif; background: #0f172a; color: #e5e7eb; }
+                  .shell { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+                  .card { width: 100%; max-width: 520px; background: rgba(15, 23, 42, 0.92); border: 1px solid rgba(148, 163, 184, 0.25); border-radius: 24px; padding: 28px; }
+                  h1 { margin: 0 0 12px; font-size: 28px; }
+                  p { margin: 0; line-height: 1.5; color: #cbd5e1; }
+                  code { background: rgba(15, 23, 42, 0.8); padding: 2px 6px; border-radius: 6px; color: #f8fafc; }
+                </style>
+              </head>
+              <body>
+                <main class="shell">
+                  <section class="card">
+                    <h1>VK ID sign-in is disabled</h1>
+                    <p>Enable <code>VK_AUTH_ENABLED=true</code> and set <code>VK_AUTH_APP_ID</code> on the server.</p>
+                  </section>
+                </main>
+              </body>
+            </html>
+            """,
+            status_code=503,
+        )
+
+    if not VK_AUTH_APP_ID:
+        return HTMLResponse(
+            """
+            <!doctype html>
+            <html lang="ru">
+              <head>
+                <meta charset="utf-8" />
+                <meta name="viewport" content="width=device-width, initial-scale=1" />
+                <title>VK ID Sign-in</title>
+                <style>
+                  body { margin: 0; font-family: Arial, sans-serif; background: #0f172a; color: #e5e7eb; }
+                  .shell { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+                  .card { width: 100%; max-width: 520px; background: rgba(15, 23, 42, 0.92); border: 1px solid rgba(148, 163, 184, 0.25); border-radius: 24px; padding: 28px; }
+                  h1 { margin: 0 0 12px; font-size: 28px; }
+                  p { margin: 0; line-height: 1.5; color: #cbd5e1; }
+                  code { background: rgba(15, 23, 42, 0.8); padding: 2px 6px; border-radius: 6px; color: #f8fafc; }
+                </style>
+              </head>
+              <body>
+                <main class="shell">
+                  <section class="card">
+                    <h1>VK ID app id is missing</h1>
+                    <p>Add <code>VK_AUTH_APP_ID</code> to the server environment and restart the backend.</p>
+                  </section>
+                </main>
+              </body>
+            </html>
+            """,
+            status_code=503,
+        )
+
+    callback_url = str(request.url_for("auth_vk_callback"))
+    browser_flow = auth_service.create_vk_browser_login(callback_url)
+    response = RedirectResponse(url=browser_flow["authorize_url"], status_code=302)
+    response.set_cookie(
+        key=VK_OAUTH_COOKIE_NAME,
+        value=_sign_bridge_cookie(
+            {
+                "state": browser_flow["state"],
+                "code_verifier": browser_flow["code_verifier"],
+                "created_at": int(time.time()),
+            }
+        ),
+        max_age=VK_AUTH_MAX_AGE_SECONDS,
+        httponly=True,
+        secure=COOKIE_SECURE,
+        samesite=COOKIE_SAMESITE,
+        path="/",
+    )
+    return response
+
+
+@router.get("/auth/vk/callback", summary="VK ID callback", include_in_schema=False)
+async def auth_vk_callback(
+    request: Request,
+    code: str | None = Query(None),
+    state: str | None = Query(None),
+    device_id: str | None = Query(None),
+    error: str | None = Query(None),
+    error_description: str | None = Query(None),
+    db: Session = Depends(get_db),
+):
+    target_base = f"{SOCIAL_AUTH_REDIRECT_SCHEME}://auth/vk"
+    signed_cookie = request.cookies.get(VK_OAUTH_COOKIE_NAME)
+    flow_cookie = _verify_bridge_cookie(signed_cookie)
+
+    if error:
+        response = RedirectResponse(url=f"{target_base}?error={quote(error_description or error, safe='')}", status_code=302)
+        response.delete_cookie(VK_OAUTH_COOKIE_NAME, path="/")
+        return response
+
+    if not flow_cookie:
+        response = RedirectResponse(url=f"{target_base}?error=vk_auth_cookie_missing", status_code=302)
+        response.delete_cookie(VK_OAUTH_COOKIE_NAME, path="/")
+        return response
+
+    if int(time.time()) - int(flow_cookie.get("created_at") or 0) > VK_AUTH_MAX_AGE_SECONDS:
+        response = RedirectResponse(url=f"{target_base}?error=vk_auth_session_expired", status_code=302)
+        response.delete_cookie(VK_OAUTH_COOKIE_NAME, path="/")
+        return response
+
+    expected_state = str(flow_cookie.get("state") or "").strip()
+    code_verifier = str(flow_cookie.get("code_verifier") or "").strip()
+    if not code or not device_id or not state or not code_verifier:
+        response = RedirectResponse(url=f"{target_base}?error=vk_auth_payload_missing", status_code=302)
+        response.delete_cookie(VK_OAUTH_COOKIE_NAME, path="/")
+        return response
+
+    if state != expected_state:
+        response = RedirectResponse(url=f"{target_base}?error=vk_auth_state_mismatch", status_code=302)
+        response.delete_cookie(VK_OAUTH_COOKIE_NAME, path="/")
+        return response
+
+    callback_url = str(request.url_for("auth_vk_callback"))
+    try:
+        ticket = auth_service.complete_vk_browser_login(
+            db,
+            code=code,
+            device_id=device_id,
+            state=state,
+            code_verifier=code_verifier,
+            redirect_uri=callback_url,
+        )
+        response = RedirectResponse(url=f"{target_base}?ticket={quote(ticket, safe='')}", status_code=302)
+    except Exception as error_obj:
+        message = getattr(error_obj, "detail", "vk_auth_failed")
+        response = RedirectResponse(url=f"{target_base}?error={quote(str(message), safe='')}", status_code=302)
+
+    response.delete_cookie(VK_OAUTH_COOKIE_NAME, path="/")
+    return response
+
+
 @router.get("", summary="РљРѕСЂРµРЅСЊ API")
 async def api_root():
     return success_response({"service": "RPG Life API", "status": "ok"}, "API РґРѕСЃС‚СѓРїРЅРѕ")
@@ -266,6 +485,7 @@ async def auth_social(request: Request, payload: SocialAuthExchangeSchema, db: S
             access_token=payload.access_token,
             authorization_code=payload.authorization_code,
             init_data=payload.init_data,
+            bridge_ticket=payload.bridge_ticket,
         ),
         "Social auth completed",
     )

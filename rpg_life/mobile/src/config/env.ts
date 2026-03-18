@@ -8,6 +8,9 @@ const extra = (Constants.expoConfig?.extra ?? {}) as {
   requireHttps?: boolean;
   enableAccountRecovery?: boolean;
   googleAuthClientId?: string;
+  googleAuthAndroidClientId?: string;
+  googleAuthIosClientId?: string;
+  googleAuthWebClientId?: string;
   socialAuthRedirectScheme?: string;
 };
 
@@ -15,6 +18,9 @@ export const ALLOW_CUSTOM_API_OVERRIDE = extra.allowCustomApiOverride ?? true;
 export const REQUIRE_HTTPS = extra.requireHttps ?? false;
 export const ENABLE_ACCOUNT_RECOVERY = extra.enableAccountRecovery ?? false;
 export const GOOGLE_AUTH_CLIENT_ID = extra.googleAuthClientId ?? "";
+export const GOOGLE_AUTH_ANDROID_CLIENT_ID = extra.googleAuthAndroidClientId ?? "";
+export const GOOGLE_AUTH_IOS_CLIENT_ID = extra.googleAuthIosClientId ?? "";
+export const GOOGLE_AUTH_WEB_CLIENT_ID = extra.googleAuthWebClientId ?? GOOGLE_AUTH_CLIENT_ID;
 export const SOCIAL_AUTH_REDIRECT_SCHEME = extra.socialAuthRedirectScheme ?? "rpglife";
 const PUBLIC_BETA_API_BASE_URL = "https://rpglife.online/api/v1";
 

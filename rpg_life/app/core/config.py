@@ -1,6 +1,8 @@
 import os
+import re
 from datetime import timedelta
 from pathlib import Path
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 
@@ -18,6 +20,38 @@ def _env_csv(name: str, default: list[str]) -> list[str]:
     if raw_value is None:
         return default
     return [item.strip() for item in raw_value.split(",") if item.strip()]
+
+
+_TELEGRAM_BOT_USERNAME_RE = re.compile(r"^[A-Za-z0-9_]{5,32}$")
+
+
+def normalize_telegram_bot_username(raw_value: str | None) -> str:
+    value = (raw_value or "").strip()
+    if not value:
+        return ""
+
+    parsed = urlparse(value)
+    if parsed.scheme:
+        host = (parsed.netloc or "").lower()
+        if host not in {"t.me", "www.t.me", "telegram.me", "www.telegram.me"}:
+            return ""
+        value = parsed.path.strip("/")
+    else:
+        lowered_value = value.lower()
+        for prefix in ("t.me/", "www.t.me/", "telegram.me/", "www.telegram.me/"):
+            if lowered_value.startswith(prefix):
+                value = value[len(prefix):]
+                break
+
+    value = value.strip().lstrip("@").strip("/")
+    if "/" in value:
+        value = value.split("/", 1)[0]
+
+    if not _TELEGRAM_BOT_USERNAME_RE.fullmatch(value):
+        return ""
+    if not value.lower().endswith("bot"):
+        return ""
+    return value
 
 
 APP_ENV = os.getenv("APP_ENV", "development").strip().lower()
@@ -83,7 +117,29 @@ SOCIAL_AUTH_REDIRECT_SCHEME = os.getenv("SOCIAL_AUTH_REDIRECT_SCHEME", "rpglife"
 
 GOOGLE_AUTH_ENABLED = _env_bool("GOOGLE_AUTH_ENABLED", False)
 GOOGLE_AUTH_MOBILE_CLIENT_ID = os.getenv("GOOGLE_AUTH_MOBILE_CLIENT_ID", "").strip()
+GOOGLE_AUTH_ANDROID_CLIENT_ID = os.getenv("GOOGLE_AUTH_ANDROID_CLIENT_ID", "").strip()
+GOOGLE_AUTH_IOS_CLIENT_ID = os.getenv("GOOGLE_AUTH_IOS_CLIENT_ID", "").strip()
+GOOGLE_AUTH_WEB_CLIENT_ID = os.getenv("GOOGLE_AUTH_WEB_CLIENT_ID", "").strip()
 GOOGLE_AUTH_CLIENT_SECRET = os.getenv("GOOGLE_AUTH_CLIENT_SECRET", "").strip()
+GOOGLE_AUTH_ACCEPTED_CLIENT_IDS = tuple(
+    dict.fromkeys(
+        client_id
+        for client_id in (
+            GOOGLE_AUTH_MOBILE_CLIENT_ID,
+            GOOGLE_AUTH_ANDROID_CLIENT_ID,
+            GOOGLE_AUTH_IOS_CLIENT_ID,
+            GOOGLE_AUTH_WEB_CLIENT_ID,
+        )
+        if client_id
+    )
+)
+
+VK_AUTH_ENABLED = _env_bool("VK_AUTH_ENABLED", False)
+VK_AUTH_APP_ID = os.getenv("VK_AUTH_APP_ID", "").strip()
+VK_AUTH_SCOPE = os.getenv("VK_AUTH_SCOPE", "email").strip() or "email"
+VK_AUTH_DOMAIN = os.getenv("VK_AUTH_DOMAIN", "id.vk.com").strip().rstrip("/")
+VK_AUTH_MAX_AGE_SECONDS = int(os.getenv("VK_AUTH_MAX_AGE_SECONDS", "900"))
+SOCIAL_BRIDGE_TICKET_MAX_AGE_SECONDS = int(os.getenv("SOCIAL_BRIDGE_TICKET_MAX_AGE_SECONDS", "300"))
 
 YANDEX_AUTH_ENABLED = _env_bool("YANDEX_AUTH_ENABLED", False)
 YANDEX_AUTH_MOBILE_CLIENT_ID = os.getenv("YANDEX_AUTH_MOBILE_CLIENT_ID", "").strip()
@@ -91,7 +147,8 @@ YANDEX_AUTH_CLIENT_SECRET = os.getenv("YANDEX_AUTH_CLIENT_SECRET", "").strip()
 
 TELEGRAM_AUTH_ENABLED = _env_bool("TELEGRAM_AUTH_ENABLED", False)
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-TELEGRAM_BOT_USERNAME = os.getenv("TELEGRAM_BOT_USERNAME", "").strip()
+TELEGRAM_BOT_USERNAME_RAW = os.getenv("TELEGRAM_BOT_USERNAME", "").strip()
+TELEGRAM_BOT_USERNAME = normalize_telegram_bot_username(TELEGRAM_BOT_USERNAME_RAW)
 TELEGRAM_AUTH_MAX_AGE_SECONDS = int(os.getenv("TELEGRAM_AUTH_MAX_AGE_SECONDS", "900"))
 
 XP_BASE = 500

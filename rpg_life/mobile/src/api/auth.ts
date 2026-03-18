@@ -15,7 +15,7 @@ export type AuthPayload = {
 };
 
 export type SocialAuthProvider = {
-  id: "google" | "telegram";
+  id: "google" | "telegram" | "vk";
   label: string;
   kind: "oauth" | "telegram";
   enabled: boolean;
@@ -105,6 +105,7 @@ export function socialLogin(payload: {
   access_token?: string;
   authorization_code?: string;
   init_data?: string;
+  bridge_ticket?: string;
 }) {
   return apiRequest<AuthPayload>("/auth/social", {
     authenticated: false,

@@ -1,12 +1,14 @@
 import json
+import base64
 import hashlib
 import hmac
 from datetime import datetime, timezone
 from secrets import token_urlsafe
+from threading import Lock
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qsl
 from urllib.parse import urlencode
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse
@@ -16,13 +18,23 @@ from app import auth, crud
 from app.core.config import (
     ACCESS_TOKEN_EXPIRE_DELTA,
     ENABLE_ACCOUNT_RECOVERY,
+    GOOGLE_AUTH_ACCEPTED_CLIENT_IDS,
     GOOGLE_AUTH_CLIENT_SECRET,
+    GOOGLE_AUTH_ANDROID_CLIENT_ID,
     GOOGLE_AUTH_ENABLED,
+    GOOGLE_AUTH_IOS_CLIENT_ID,
     GOOGLE_AUTH_MOBILE_CLIENT_ID,
+    GOOGLE_AUTH_WEB_CLIENT_ID,
+    SOCIAL_BRIDGE_TICKET_MAX_AGE_SECONDS,
     TELEGRAM_AUTH_MAX_AGE_SECONDS,
     TELEGRAM_AUTH_ENABLED,
     TELEGRAM_BOT_TOKEN,
     TELEGRAM_BOT_USERNAME,
+    VK_AUTH_APP_ID,
+    VK_AUTH_DOMAIN,
+    VK_AUTH_ENABLED,
+    VK_AUTH_MAX_AGE_SECONDS,
+    VK_AUTH_SCOPE,
     YANDEX_AUTH_CLIENT_SECRET,
     YANDEX_AUTH_ENABLED,
     YANDEX_AUTH_MOBILE_CLIENT_ID,
@@ -32,6 +44,10 @@ from app.core.security import get_password_hash, verify_password
 from app.models import RefreshTokenSession, User, UserSocialAccount
 from app.schemas import UserCreate
 import app.services.goal_service as goal_service
+
+
+_SOCIAL_BRIDGE_TICKETS: dict[str, tuple[float, dict]] = {}
+_SOCIAL_BRIDGE_TICKETS_LOCK = Lock()
 
 
 def _ensure_user_quest_content(db: Session, user_id: int) -> None:
@@ -83,6 +99,36 @@ def _normalize_email_for_social(provider: str, provider_user_id: str, email: str
     if email:
         return email.strip().lower()
     return f"{provider}_{provider_user_id}@social.rpglife.local"
+
+
+def _purge_expired_social_bridge_tickets(now_ts: float | None = None) -> None:
+    current_ts = now_ts or datetime.now(timezone.utc).timestamp()
+    expired_keys = [ticket for ticket, (expires_at, _) in _SOCIAL_BRIDGE_TICKETS.items() if expires_at <= current_ts]
+    for ticket in expired_keys:
+        _SOCIAL_BRIDGE_TICKETS.pop(ticket, None)
+
+
+def issue_social_bridge_ticket(payload: dict) -> str:
+    ticket = token_urlsafe(24)
+    expires_at = datetime.now(timezone.utc).timestamp() + SOCIAL_BRIDGE_TICKET_MAX_AGE_SECONDS
+    with _SOCIAL_BRIDGE_TICKETS_LOCK:
+        _purge_expired_social_bridge_tickets()
+        _SOCIAL_BRIDGE_TICKETS[ticket] = (expires_at, payload)
+    return ticket
+
+
+def consume_social_bridge_ticket(ticket: str) -> dict | None:
+    with _SOCIAL_BRIDGE_TICKETS_LOCK:
+        _purge_expired_social_bridge_tickets()
+        entry = _SOCIAL_BRIDGE_TICKETS.pop(ticket, None)
+
+    if not entry:
+        return None
+
+    expires_at, payload = entry
+    if expires_at <= datetime.now(timezone.utc).timestamp():
+        return None
+    return payload
 
 
 def _resolve_or_create_social_user(
@@ -158,7 +204,7 @@ def _verify_google_id_token(id_token: str) -> dict:
         raise HTTPException(status_code=503, detail="Could not reach Google token verification service") from error
 
     audience = payload.get("aud")
-    if GOOGLE_AUTH_MOBILE_CLIENT_ID and audience != GOOGLE_AUTH_MOBILE_CLIENT_ID:
+    if GOOGLE_AUTH_ACCEPTED_CLIENT_IDS and audience not in GOOGLE_AUTH_ACCEPTED_CLIENT_IDS:
         raise HTTPException(status_code=401, detail="Google token audience mismatch")
 
     issuer = payload.get("iss")
@@ -181,6 +227,187 @@ def _verify_google_id_token(id_token: str) -> dict:
         raise HTTPException(status_code=401, detail="Google token has no subject")
 
     return payload
+
+
+def _base64url_encode(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).decode("utf-8").rstrip("=")
+
+
+def _generate_vk_code_verifier() -> str:
+    return token_urlsafe(64)
+
+
+def _generate_vk_code_challenge(code_verifier: str) -> str:
+    return _base64url_encode(hashlib.sha256(code_verifier.encode("utf-8")).digest())
+
+
+def _vk_post_form(path: str, *, query_params: dict[str, str | int | None], form_params: dict[str, str | int | None]) -> dict:
+    encoded_query = urlencode({key: value for key, value in query_params.items() if value is not None})
+    request = Request(
+        url=f"https://{VK_AUTH_DOMAIN}/{path}?{encoded_query}",
+        data=urlencode({key: value for key, value in form_params.items() if value is not None}).encode("utf-8"),
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+
+    try:
+        with urlopen(request, timeout=10) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except HTTPError as error:
+        detail = error.reason
+        try:
+            error_payload = json.loads(error.read().decode("utf-8"))
+            detail = error_payload.get("error_description") or error_payload.get("error") or detail
+        except Exception:
+            pass
+        raise HTTPException(status_code=401, detail=f"VK ID request rejected: {detail}") from error
+    except URLError as error:
+        raise HTTPException(status_code=503, detail="Could not reach VK ID service") from error
+
+    if isinstance(payload, dict) and payload.get("error"):
+        detail = payload.get("error_description") or payload.get("error")
+        raise HTTPException(status_code=401, detail=f"VK ID request rejected: {detail}")
+
+    return payload
+
+
+def create_vk_browser_login(redirect_uri: str) -> dict:
+    if not VK_AUTH_APP_ID:
+        raise HTTPException(status_code=503, detail="VK ID sign-in is not configured yet")
+
+    state = token_urlsafe(24)
+    code_verifier = _generate_vk_code_verifier()
+    authorize_url = "https://{domain}/authorize?{query}".format(
+        domain=VK_AUTH_DOMAIN,
+        query=urlencode(
+            {
+                "response_type": "code",
+                "client_id": VK_AUTH_APP_ID,
+                "scope": VK_AUTH_SCOPE,
+                "state": state,
+                "code_challenge": _generate_vk_code_challenge(code_verifier),
+                "code_challenge_method": "S256",
+                "redirect_uri": redirect_uri,
+                "sdk_type": "vkid",
+                "app_id": VK_AUTH_APP_ID,
+            }
+        ),
+    )
+    return {
+        "state": state,
+        "code_verifier": code_verifier,
+        "authorize_url": authorize_url,
+    }
+
+
+def _exchange_vk_authorization_code(code: str, device_id: str, *, state: str, code_verifier: str, redirect_uri: str) -> dict:
+    payload = _vk_post_form(
+        "oauth2/auth",
+        query_params={
+            "grant_type": "authorization_code",
+            "redirect_uri": redirect_uri,
+            "client_id": VK_AUTH_APP_ID,
+            "code_verifier": code_verifier,
+            "state": state,
+            "device_id": device_id,
+        },
+        form_params={"code": code},
+    )
+
+    returned_state = str(payload.get("state") or "").strip()
+    if returned_state and returned_state != state:
+        raise HTTPException(status_code=401, detail="VK ID state mismatch")
+
+    expires_in = payload.get("expires_in")
+    if expires_in:
+        try:
+            if int(expires_in) <= 0:
+                raise HTTPException(status_code=401, detail="VK ID access token is invalid")
+        except ValueError as error:
+            raise HTTPException(status_code=401, detail="VK ID token expiry is invalid") from error
+
+    return payload
+
+
+def _fetch_vk_user_info(access_token: str) -> dict:
+    payload = _vk_post_form(
+        "oauth2/user_info",
+        query_params={"client_id": VK_AUTH_APP_ID},
+        form_params={"access_token": access_token},
+    )
+    if not isinstance(payload, dict) or not isinstance(payload.get("user"), dict):
+        raise HTTPException(status_code=401, detail="VK ID user payload is invalid")
+    return payload
+
+
+def _normalize_vk_user_payload(access_token: str) -> dict:
+    payload = _fetch_vk_user_info(access_token)
+    user_payload = payload["user"]
+    vk_user_id = user_payload.get("user_id")
+    if not vk_user_id:
+        raise HTTPException(status_code=401, detail="VK ID user payload has no user id")
+
+    first_name = str(user_payload.get("first_name") or "").strip()
+    last_name = str(user_payload.get("last_name") or "").strip()
+    email = str(user_payload.get("email") or "").strip().lower() or None
+    avatar_url = (
+        str(user_payload.get("avatar") or "").strip()
+        or str(user_payload.get("avatar_200") or "").strip()
+        or str(user_payload.get("avatar_100") or "").strip()
+        or str(user_payload.get("avatar_50") or "").strip()
+        or None
+    )
+    username = str(user_payload.get("screen_name") or user_payload.get("domain") or "").strip() or None
+    display_name = " ".join(part for part in [first_name, last_name] if part).strip() or username or email or f"VK {vk_user_id}"
+
+    return {
+        "vk_user_id": str(vk_user_id),
+        "email": email,
+        "username": username,
+        "display_name": display_name,
+        "avatar_url": avatar_url,
+    }
+
+
+def complete_vk_browser_login(
+    db: Session,
+    *,
+    code: str,
+    device_id: str,
+    state: str,
+    code_verifier: str,
+    redirect_uri: str,
+) -> str:
+    if not VK_AUTH_APP_ID:
+        raise HTTPException(status_code=503, detail="VK ID sign-in is not configured yet")
+
+    age_limit = VK_AUTH_MAX_AGE_SECONDS
+    if age_limit <= 0:
+        raise HTTPException(status_code=503, detail="VK ID sign-in lifetime is misconfigured")
+
+    token_payload = _exchange_vk_authorization_code(
+        code,
+        device_id,
+        state=state,
+        code_verifier=code_verifier,
+        redirect_uri=redirect_uri,
+    )
+    access_token = str(token_payload.get("access_token") or "").strip()
+    if not access_token:
+        raise HTTPException(status_code=401, detail="VK ID response has no access_token")
+
+    verified = _normalize_vk_user_payload(access_token)
+    user = _resolve_or_create_social_user(
+        db,
+        provider="vk",
+        provider_user_id=verified["vk_user_id"],
+        email=verified["email"],
+        display_name=verified["display_name"],
+        username=verified["username"],
+        avatar_url=verified["avatar_url"],
+    )
+    _ensure_user_quest_content(db, user.id)
+    return issue_social_bridge_ticket(_build_auth_payload_for_user(db, user))
 
 
 def _verify_telegram_init_data(init_data: str) -> dict:
@@ -423,8 +650,8 @@ def get_social_auth_providers() -> list[dict]:
             "label": "Google",
             "kind": "oauth",
             "enabled": GOOGLE_AUTH_ENABLED,
-            "configured": bool(GOOGLE_AUTH_MOBILE_CLIENT_ID),
-            "mobile_client_id": GOOGLE_AUTH_MOBILE_CLIENT_ID or None,
+            "configured": bool(GOOGLE_AUTH_ACCEPTED_CLIENT_IDS),
+            "mobile_client_id": GOOGLE_AUTH_ANDROID_CLIENT_ID or GOOGLE_AUTH_MOBILE_CLIENT_ID or GOOGLE_AUTH_IOS_CLIENT_ID or GOOGLE_AUTH_WEB_CLIENT_ID or None,
         },
         {
             "id": "telegram",
@@ -433,6 +660,14 @@ def get_social_auth_providers() -> list[dict]:
             "enabled": TELEGRAM_AUTH_ENABLED,
             "configured": bool(TELEGRAM_BOT_TOKEN and TELEGRAM_BOT_USERNAME),
             "mobile_client_id": TELEGRAM_BOT_USERNAME or None,
+        },
+        {
+            "id": "vk",
+            "label": "VK ID",
+            "kind": "oauth",
+            "enabled": VK_AUTH_ENABLED,
+            "configured": bool(VK_AUTH_APP_ID),
+            "mobile_client_id": VK_AUTH_APP_ID or None,
         },
     ]
 
@@ -444,10 +679,9 @@ def authenticate_social_mobile(
     access_token: str | None = None,
     authorization_code: str | None = None,
     init_data: str | None = None,
+    bridge_ticket: str | None = None,
 ) -> dict:
-    _ = access_token
     _ = authorization_code
-    _ = init_data
 
     provider_config = next((entry for entry in get_social_auth_providers() if entry["id"] == provider), None)
     if not provider_config:
@@ -484,6 +718,29 @@ def authenticate_social_mobile(
             provider="telegram",
             provider_user_id=verified["telegram_user_id"],
             email=None,
+            display_name=verified["display_name"],
+            username=verified["username"],
+            avatar_url=verified["avatar_url"],
+        )
+        _ensure_user_quest_content(db, user.id)
+        return _build_auth_payload_for_user(db, user)
+
+    if provider == "vk":
+        if bridge_ticket:
+            bridged_payload = consume_social_bridge_ticket(bridge_ticket)
+            if not bridged_payload:
+                raise HTTPException(status_code=400, detail="VK ID sign-in session has expired or was already used")
+            return bridged_payload
+
+        if not access_token:
+            raise HTTPException(status_code=400, detail="VK ID sign-in requires bridge_ticket or access_token")
+
+        verified = _normalize_vk_user_payload(access_token)
+        user = _resolve_or_create_social_user(
+            db,
+            provider="vk",
+            provider_user_id=verified["vk_user_id"],
+            email=verified["email"],
             display_name=verified["display_name"],
             username=verified["username"],
             avatar_url=verified["avatar_url"],

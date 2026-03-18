@@ -37,6 +37,7 @@ type AuthContextValue = {
       access_token?: string;
       authorization_code?: string;
       init_data?: string;
+      bridge_ticket?: string;
     },
   ) => Promise<void>;
   reloadSocialProviders: () => Promise<void>;
@@ -52,7 +53,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [socialProviders, setSocialProviders] = useState<SocialAuthProvider[]>([]);
   const [authFlowNotice, setAuthFlowNotice] = useState<string | null>(null);
 
-  async function completeTelegramSignInFromUrl(url: string) {
+  async function completeSocialSignInFromUrl(url: string) {
     if (!url.toLowerCase().startsWith("rpglife://")) {
       return;
     }
@@ -65,30 +66,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     const route = `${parsed.hostname}${parsed.pathname}`.replace(/^\/+/, "").toLowerCase();
-    if (route !== "auth/telegram") {
+    const provider = route === "auth/telegram" ? "telegram" : route === "auth/vk" ? "vk" : null;
+    if (!provider) {
       return;
     }
 
-    const initData = parsed.searchParams.get("init_data");
     const errorMessage = parsed.searchParams.get("error");
 
     if (errorMessage) {
-      setAuthFlowNotice(`Telegram: ${errorMessage}`);
-      return;
-    }
-
-    if (!initData) {
-      setAuthFlowNotice("Telegram: не получили данные авторизации.");
+      setAuthFlowNotice(`${provider === "telegram" ? "Telegram" : "VK ID"}: ${errorMessage}`);
       return;
     }
 
     try {
-      const authPayload = await socialLogin({ provider: "telegram", init_data: initData });
+      const authPayload =
+        provider === "telegram"
+          ? await socialLogin({ provider, init_data: parsed.searchParams.get("init_data") || undefined })
+          : await socialLogin({ provider, bridge_ticket: parsed.searchParams.get("ticket") || undefined });
       await saveTokens(authPayload.tokens.access_token, authPayload.tokens.refresh_token);
       setUser(authPayload.user);
-      setAuthFlowNotice("Telegram вход выполнен.");
+      setAuthFlowNotice(provider === "telegram" ? "Telegram вход выполнен." : "VK ID вход выполнен.");
     } catch (error) {
-      setAuthFlowNotice(error instanceof Error ? error.message : "Не удалось завершить Telegram вход.");
+      setAuthFlowNotice(error instanceof Error ? error.message : provider === "telegram" ? "Не удалось завершить Telegram вход." : "Не удалось завершить VK ID вход.");
     }
   }
 
@@ -122,13 +121,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     Linking.getInitialURL()
       .then((url) => {
         if (url) {
-          return completeTelegramSignInFromUrl(url);
+          return completeSocialSignInFromUrl(url);
         }
       })
       .catch(() => undefined);
 
     const subscription = Linking.addEventListener("url", ({ url }) => {
-      void completeTelegramSignInFromUrl(url);
+      void completeSocialSignInFromUrl(url);
     });
 
     return () => {

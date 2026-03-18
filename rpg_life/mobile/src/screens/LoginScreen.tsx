@@ -1,15 +1,16 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Alert, KeyboardAvoidingView, Linking, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
-import * as AuthSession from "expo-auth-session";
 import * as Google from "expo-auth-session/providers/google";
 import * as WebBrowser from "expo-web-browser";
 
 import { probeApiConnection } from "../api/auth";
 import { Screen } from "../components/Screen";
 import {
+  GOOGLE_AUTH_ANDROID_CLIENT_ID,
   DEFAULT_API_BASE_URL,
   GOOGLE_AUTH_CLIENT_ID,
-  SOCIAL_AUTH_REDIRECT_SCHEME,
+  GOOGLE_AUTH_IOS_CLIENT_ID,
+  GOOGLE_AUTH_WEB_CLIENT_ID,
   isDeprecatedLocalApiBaseUrl,
   normalizeApiBaseUrl,
 } from "../config/env";
@@ -43,21 +44,25 @@ export function LoginScreen({ onShowRegister }: Props) {
   const [isCheckingApi, setIsCheckingApi] = useState(false);
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [isSocialLoading, setIsSocialLoading] = useState(false);
-  const [activeSocialProviderId, setActiveSocialProviderId] = useState<"google" | "telegram" | null>(null);
+  const [activeSocialProviderId, setActiveSocialProviderId] = useState<"google" | "telegram" | "vk" | null>(null);
   const [showApiTools, setShowApiTools] = useState(false);
   const providerList = Array.isArray(socialProviders) ? socialProviders : [];
   const googleProvider = providerList.find((entry) => entry.id === "google");
-  const googleClientId = googleProvider?.mobile_client_id || GOOGLE_AUTH_CLIENT_ID;
-  const googleRedirectUri = AuthSession.makeRedirectUri({
-    scheme: SOCIAL_AUTH_REDIRECT_SCHEME,
-    path: "auth/google",
-  });
+  const googleFallbackClientId = googleProvider?.mobile_client_id || GOOGLE_AUTH_CLIENT_ID;
+  const googleAndroidClientId = GOOGLE_AUTH_ANDROID_CLIENT_ID || googleFallbackClientId;
+  const googleIosClientId = GOOGLE_AUTH_IOS_CLIENT_ID || googleFallbackClientId;
+  const googleWebClientId = GOOGLE_AUTH_WEB_CLIENT_ID || GOOGLE_AUTH_CLIENT_ID || googleFallbackClientId;
+  const googleClientId =
+    Platform.OS === "android"
+      ? googleAndroidClientId
+      : Platform.OS === "ios"
+        ? googleIosClientId
+        : googleWebClientId;
   const [googleRequest, googleResponse, promptGoogleAuth] = Google.useIdTokenAuthRequest(
     {
-      androidClientId: googleClientId || undefined,
-      iosClientId: googleClientId || undefined,
-      webClientId: googleClientId || undefined,
-      redirectUri: googleRedirectUri,
+      androidClientId: googleAndroidClientId || undefined,
+      iosClientId: googleIosClientId || undefined,
+      webClientId: googleWebClientId || undefined,
       scopes: ["openid", "profile", "email"],
       selectAccount: true,
     },
@@ -242,7 +247,7 @@ export function LoginScreen({ onShowRegister }: Props) {
     }
   }
 
-  async function handleSocialLogin(providerId: "google" | "telegram") {
+  async function handleSocialLogin(providerId: "google" | "telegram" | "vk") {
     const provider = providerList.find((entry) => entry.id === providerId);
 
     try {
@@ -299,6 +304,24 @@ export function LoginScreen({ onShowRegister }: Props) {
               title: t("screens.login.quick.telegramTitle"),
               description: t("screens.login.quick.telegramOpened"),
               icon: "send-circle-outline",
+              tone: "info",
+            },
+            { haptic: "success" },
+          );
+          return;
+        }
+      }
+
+      if (providerId === "vk") {
+        const vkAppId = provider?.mobile_client_id;
+        if (vkAppId) {
+          const vkLoginUrl = `${normalizeApiBaseUrl(apiBaseUrl)}/auth/vk/login`;
+          await Linking.openURL(vkLoginUrl);
+          await pushToast(
+            {
+              title: t("screens.login.quick.vkTitle"),
+              description: t("screens.login.quick.vkOpened"),
+              icon: "open-outline",
               tone: "info",
             },
             { haptic: "success" },
