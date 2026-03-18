@@ -141,3 +141,17 @@ def test_external_url_for_prefers_forwarded_proto_and_host() -> None:
     )
 
     assert mobile_routes._external_url_for(request, "auth_vk_callback") == "https://rpglife.online/api/v1/auth/vk/callback"
+
+
+def test_external_url_for_prefers_public_base_url(monkeypatch) -> None:
+    request = _request(
+        "/api/v1/auth/vk/login",
+        headers=[
+            (b"x-forwarded-proto", b"http"),
+            (b"x-forwarded-host", b"backend.local"),
+            (b"host", b"backend:8000"),
+        ],
+    )
+    monkeypatch.setattr(mobile_routes, "PUBLIC_BASE_URL", "https://rpglife.online")
+
+    assert mobile_routes._external_url_for(request, "auth_vk_callback") == "https://rpglife.online/api/v1/auth/vk/callback"

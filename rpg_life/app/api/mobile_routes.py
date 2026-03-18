@@ -14,6 +14,7 @@ from app.api.dependencies import enforce_rate_limit
 from app.core.config import (
     COOKIE_SAMESITE,
     COOKIE_SECURE,
+    PUBLIC_BASE_URL,
     SECRET_KEY,
     SOCIAL_AUTH_REDIRECT_SCHEME,
     TELEGRAM_AUTH_ENABLED,
@@ -77,6 +78,10 @@ def _verify_bridge_cookie(raw_value: str | None) -> dict | None:
 
 def _external_url_for(request: Request, route_name: str) -> str:
     internal_url = urlsplit(str(request.url_for(route_name)))
+    if PUBLIC_BASE_URL:
+        public_base = urlsplit(PUBLIC_BASE_URL)
+        return urlunsplit((public_base.scheme or internal_url.scheme, public_base.netloc or internal_url.netloc, internal_url.path, internal_url.query, internal_url.fragment))
+
     forwarded_proto = request.headers.get("x-forwarded-proto", "").split(",", 1)[0].strip()
     forwarded_host = request.headers.get("x-forwarded-host", "").split(",", 1)[0].strip()
     forwarded_port = request.headers.get("x-forwarded-port", "").split(",", 1)[0].strip()
