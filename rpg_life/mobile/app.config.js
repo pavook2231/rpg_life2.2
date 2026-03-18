@@ -20,7 +20,7 @@ module.exports = () => {
   const enableAccountRecovery = envFlag("EXPO_PUBLIC_ENABLE_ACCOUNT_RECOVERY", false);
   const googleAuthClientId =
     process.env.EXPO_PUBLIC_GOOGLE_AUTH_CLIENT_ID ||
-    "723557656382-3k94tuoejci6bovt2i9hn0qd728cl4so.apps.googleusercontent.com";
+    "723557656382-ol45mkmikajrkjs1amidtkkmf08q8ftq.apps.googleusercontent.com";
   const socialAuthRedirectScheme = process.env.EXPO_PUBLIC_SOCIAL_AUTH_REDIRECT_SCHEME || "rpglife";
 
   return {

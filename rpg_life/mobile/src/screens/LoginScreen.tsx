@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Alert, KeyboardAvoidingView, Linking, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import * as AuthSession from "expo-auth-session";
+import * as Google from "expo-auth-session/providers/google";
 import * as WebBrowser from "expo-web-browser";
 
 import { probeApiConnection } from "../api/auth";
@@ -51,20 +52,14 @@ export function LoginScreen({ onShowRegister }: Props) {
     scheme: SOCIAL_AUTH_REDIRECT_SCHEME,
     path: "auth/google",
   });
-  const [googleRequest, googleResponse, promptGoogleAuth] = AuthSession.useAuthRequest(
+  const [googleRequest, googleResponse, promptGoogleAuth] = Google.useIdTokenAuthRequest(
     {
-      clientId: googleClientId || "missing-google-client-id",
+      androidClientId: googleClientId || undefined,
+      iosClientId: googleClientId || undefined,
+      webClientId: googleClientId || undefined,
       redirectUri: googleRedirectUri,
-      responseType: AuthSession.ResponseType.IdToken,
       scopes: ["openid", "profile", "email"],
-      extraParams: {
-        nonce: String(Date.now()),
-      },
-    },
-    {
-      authorizationEndpoint: "https://accounts.google.com/o/oauth2/v2/auth",
-      tokenEndpoint: "https://oauth2.googleapis.com/token",
-      revocationEndpoint: "https://oauth2.googleapis.com/revoke",
+      selectAccount: true,
     },
   );
 
@@ -116,7 +111,7 @@ export function LoginScreen({ onShowRegister }: Props) {
       return;
     }
 
-    const idToken = googleResponse.params?.id_token;
+    const idToken = googleResponse.params?.id_token || googleResponse.authentication?.idToken;
     if (!idToken) {
       void pushToast({
         title: t("screens.login.quick.googleTitle"),
