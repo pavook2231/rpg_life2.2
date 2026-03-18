@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Alert, Modal, Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Alert, Modal, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 
 import {
   completeQuest,
@@ -13,7 +13,6 @@ import { Screen } from "../components/Screen";
 import { useFeedback } from "../context/FeedbackContext";
 import { useTranslation } from "../context/LocalizationContext";
 import { useGame } from "../context/GameContext";
-import { getTodaySteps, watchTodaySteps } from "../lib/pedometer";
 import { Button, Card, ProfileHeroCard, QuestCard, radii, useThemeColors, useThemeMode } from "../ui";
 
 type StatusTab = "active" | "completed";
@@ -27,7 +26,7 @@ function questKindLabel(quest: QuestItem, t: (key: string, params?: Record<strin
 
 export function QuestsScreen() {
   const t = useTranslation();
-  const { hero, applyQuestResult } = useGame();
+  const { hero, applyQuestResult, todaySteps, stepSourceLabel } = useGame();
   const { pushToast } = useFeedback();
   const colors = useThemeColors();
   const themeMode = useThemeMode();
@@ -36,8 +35,6 @@ export function QuestsScreen() {
   const [quests, setQuests] = useState<QuestItem[]>([]);
   const [goal, setGoal] = useState<GoalStatePayload | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [todaySteps, setTodaySteps] = useState<number | null>(null);
-  const [stepsSource, setStepsSource] = useState<string | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [customTitle, setCustomTitle] = useState("");
   const [customDescription, setCustomDescription] = useState("");
@@ -59,46 +56,6 @@ export function QuestsScreen() {
   useEffect(() => {
     loadQuests().catch(() => undefined);
   }, [loadQuests]);
-
-  useEffect(() => {
-    let cancelled = false;
-    let stopWatch: (() => void) | null = null;
-
-    async function startStepTracking() {
-      const initial = await getTodaySteps();
-
-      if (initial === null) {
-        setTimeout(async () => {
-          const retrySteps = await getTodaySteps();
-          if (retrySteps !== null) {
-            setTodaySteps(retrySteps);
-          }
-        }, 2000);
-      } else {
-        setTodaySteps(initial);
-      }
-
-      const source =
-        Platform.OS === "ios"
-          ? "HealthKit"
-          : Platform.OS === "android"
-            ? "Google Fit"
-            : t("screens.quests.quick.stepsSourceFallback");
-      setStepsSource(source);
-
-      stopWatch = await watchTodaySteps((steps) => {
-        if (!cancelled) {
-          setTodaySteps(steps);
-        }
-      });
-    }
-
-    startStepTracking().catch(() => undefined);
-    return () => {
-      cancelled = true;
-      stopWatch?.();
-    };
-  }, [t]);
 
   const filteredQuests = useMemo(
     () => quests.filter((quest) => (status === "active" ? !quest.is_completed : quest.is_completed)),
@@ -231,7 +188,7 @@ export function QuestsScreen() {
         <View style={styles.metaRow}>
           <Text style={styles.stepsMeta}>
             {t("screens.quests.quick.todaySteps")}: {todaySteps ?? t("screens.quests.quick.notAvailable")}
-            {stepsSource && todaySteps ? ` (${stepsSource})` : ""}
+            {stepSourceLabel && todaySteps != null ? ` (${stepSourceLabel})` : ""}
           </Text>
         </View>
         <View style={styles.actionRow}>

@@ -13,6 +13,7 @@ type Props = {
   scrollable?: boolean;
   showHeader?: boolean;
   contentTopOffset?: number;
+  contentBottomInset?: number;
 };
 
 // Replace `null` with `require("../../assets/backgrounds/app-bg.png")`
@@ -26,6 +27,7 @@ export function Screen({
   scrollable = true,
   showHeader = true,
   contentTopOffset = 0,
+  contentBottomInset = 92,
 }: Props) {
   const scrollRef = useRef<ScrollView | null>(null);
   const scrollToTopRef = useRef({
@@ -42,7 +44,7 @@ export function Screen({
     styles.content,
     {
       paddingTop: spacing.sm,
-      paddingBottom: insets.bottom + spacing.xl,
+      paddingBottom: insets.bottom + spacing.xl + contentBottomInset,
     },
   ];
 

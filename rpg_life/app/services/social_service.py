@@ -57,7 +57,8 @@ def _cached_user_stats_map(db: Session, user_ids: list[int]) -> dict[int, dict]:
         try:
             cached = redis_client.get(cache_key)
             if cached:
-                return json.loads(cached)
+                payload = json.loads(cached)
+                return {int(user_id): stats for user_id, stats in payload.items()}
         except Exception:
             logger.warning("Failed to get stats from cache")
     

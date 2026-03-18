@@ -369,6 +369,43 @@ def _build_adaptive_daily_pool(
     return []
 
 
+def _build_fallback_goal_daily_pool(
+    progress: UserClassProgress | None,
+    *,
+    target_count: int,
+    used_titles: set[str],
+) -> list[dict]:
+    class_name = getattr(progress, "class_name", None)
+    if not class_name:
+        return []
+
+    fallback_pool = crud._build_daily_quest_pool(class_name)
+    if not fallback_pool:
+        return []
+
+    fallback_templates: list[dict] = []
+    for template in fallback_pool:
+        title = str(template.get("title") or "").strip()
+        title_key = _normalize_title(title)
+        if not title or not title_key or title_key in used_titles:
+            continue
+        fallback_templates.append(
+            {
+                "template_key": f"fallback:{class_name}:{title_key}",
+                "title": title,
+                "description": str(template.get("description") or "").strip(),
+                "difficulty": str(template.get("difficulty") or "easy"),
+                "objective_type": template.get("objective_type"),
+                "target_value": template.get("target_value"),
+                "icon": template.get("icon"),
+                "is_universal": bool(template.get("is_universal", False)),
+            }
+        )
+        if len(fallback_templates) >= target_count:
+            break
+    return fallback_templates
+
+
 def _archive_visible_goal_quests(db: Session, user: User) -> None:
     rows = _visible_goal_quests_query(db, user).all()
     for quest in rows:
@@ -593,6 +630,19 @@ def generate_goal_quests_for_user(
         blocked_titles=used_titles,
     )
 
+    if len(pool) < target_count:
+        fallback_templates = _build_fallback_goal_daily_pool(
+            progress,
+            target_count=target_count - len(pool),
+            used_titles=used_titles
+            | {
+                _normalize_title(template.get("title"))
+                for template in pool
+                if _normalize_title(template.get("title"))
+            },
+        )
+        pool.extend(fallback_templates)
+
     created: list[Quest] = []
     for template in pool:
         title_key = _normalize_title(template.get("title"))
@@ -658,7 +708,17 @@ def get_user_goal_quests(
     generate_goal_quests_for_user(db, user, source="ai", force_regenerate=False)
     user = ensure_user_goal_defaults(db, user)
 
-    query = _visible_goal_quests_query(db, user)
+    query = db.query(Quest).filter(
+        Quest.user_id == user.id,
+        Quest.is_custom == False,
+        Quest.quest_type == "daily",
+        Quest.created_at >= _daily_window_start(),
+        or_(
+            Quest.is_completed == True,
+            Quest.is_archived == False,
+            Quest.is_archived == None,
+        ),
+    )
     total = query.count()
     rows = (
         query.order_by(Quest.is_completed.asc(), Quest.created_at.asc())

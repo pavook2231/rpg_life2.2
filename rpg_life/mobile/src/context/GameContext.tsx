@@ -1,5 +1,5 @@
-import React, { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { Platform } from "react-native";
+import React, { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { InteractionManager, Platform } from "react-native";
 
 import {
   type DailyLimitsPayload,
@@ -66,16 +66,18 @@ type GameContextValue = {
   inventory: InventoryItem[];
   achievements: AchievementItem[];
   rewards: RewardsSummary | null;
+  todaySteps: number | null;
+  stepSourceLabel: string | null;
   isRefreshing: boolean;
-  refreshGame: () => Promise<void>;
+  refreshGame: (forceRefresh?: boolean) => Promise<void>;
   applyQuestResult: (result: QuestCompletionResult) => Promise<void>;
 };
 
 const GameContext = createContext<GameContextValue | undefined>(undefined);
 const INVENTORY_PAGE_SIZE = 100;
 
-async function fetchAllInventory(): Promise<InventoryItem[]> {
-  const firstPage = await fetchInventory(1, INVENTORY_PAGE_SIZE);
+async function fetchAllInventory(forceRefresh = false): Promise<InventoryItem[]> {
+  const firstPage = await fetchInventory(1, INVENTORY_PAGE_SIZE, { forceRefresh });
   const items = [...(firstPage.items ?? [])];
   const totalPages = Math.max(firstPage.pagination?.total_pages ?? 1, 1);
 
@@ -84,7 +86,7 @@ async function fetchAllInventory(): Promise<InventoryItem[]> {
   }
 
   const remainingPages = await Promise.all(
-    Array.from({ length: totalPages - 1 }, (_, index) => fetchInventory(index + 2, INVENTORY_PAGE_SIZE)),
+    Array.from({ length: totalPages - 1 }, (_, index) => fetchInventory(index + 2, INVENTORY_PAGE_SIZE, { forceRefresh })),
   );
 
   for (const page of remainingPages) {
@@ -110,40 +112,53 @@ export function GameProvider({ children }: { children: ReactNode }) {
   const [achievements, setAchievements] = useState<AchievementItem[]>([]);
   const [rewards, setRewards] = useState<RewardsSummary | null>(null);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
+  const [todaySteps, setTodaySteps] = useState<number | null>(null);
+  const [stepSourceLabel, setStepSourceLabel] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const { pushToast } = useFeedback();
   const { isOnline } = useOffline();
+  const wasOnlineRef = useRef(isOnline);
+  const backgroundLoadVersionRef = useRef(0);
   const t = useTranslation();
 
-  const refreshGame = useCallback(async () => {
+  const loadCoreGame = useCallback(async (forceRefresh = false) => {
     setIsRefreshing(true);
     try {
-      const [
-        profilePayload,
-        heroPayload,
-        equipmentPayload,
-        achievementsPayload,
-        rewardsPayload,
-        inventoryItems,
-      ] = await Promise.all([
-        fetchProfile(),
-        fetchCharacterProfile(),
-        fetchEquipmentOverview(),
-        fetchAchievements(),
-        fetchRewardsSummary(),
-        fetchAllInventory(),
+      const [profilePayload, heroPayload, rewardsPayload] = await Promise.all([
+        fetchProfile({ forceRefresh }),
+        fetchCharacterProfile({ forceRefresh }),
+        fetchRewardsSummary({ forceRefresh }),
       ]);
 
       setProfile(profilePayload);
       setHero(heroPayload.character ?? null);
-      setEquipment(equipmentPayload);
-      setAchievements(achievementsPayload.achievements ?? []);
       setRewards(rewardsPayload ?? null);
-      setInventory(inventoryItems);
     } finally {
       setIsRefreshing(false);
     }
   }, []);
+
+  const loadExtendedGame = useCallback(async (forceRefresh = false) => {
+    const loadVersion = ++backgroundLoadVersionRef.current;
+    const [equipmentPayload, achievementsPayload, inventoryItems] = await Promise.all([
+      fetchEquipmentOverview({ forceRefresh }),
+      fetchAchievements({ forceRefresh }),
+      fetchAllInventory(forceRefresh),
+    ]);
+
+    if (backgroundLoadVersionRef.current !== loadVersion) {
+      return;
+    }
+
+    setEquipment(equipmentPayload);
+    setAchievements(achievementsPayload.achievements ?? []);
+    setInventory(inventoryItems);
+  }, []);
+
+  const refreshGame = useCallback(async (forceRefresh = true) => {
+    await loadCoreGame(forceRefresh);
+    await loadExtendedGame(forceRefresh);
+  }, [loadCoreGame, loadExtendedGame]);
 
   useEffect(() => {
     if (!user) {
@@ -153,14 +168,26 @@ export function GameProvider({ children }: { children: ReactNode }) {
       setAchievements([]);
       setRewards(null);
       setInventory([]);
+      setTodaySteps(null);
+      setStepSourceLabel(null);
+      backgroundLoadVersionRef.current += 1;
       return;
     }
-    refreshGame().catch(() => undefined);
-  }, [refreshGame, user]);
+    loadCoreGame(false)
+      .then(() => {
+        InteractionManager.runAfterInteractions(() => {
+          void loadExtendedGame(false);
+        });
+      })
+      .catch(() => undefined);
+  }, [loadCoreGame, loadExtendedGame, user]);
 
   useEffect(() => {
-    if (user && isOnline) {
-      refreshGame().catch(() => undefined);
+    const cameBackOnline = !wasOnlineRef.current && isOnline;
+    wasOnlineRef.current = isOnline;
+
+    if (user && cameBackOnline) {
+      refreshGame(true).catch(() => undefined);
     }
   }, [isOnline, refreshGame, user]);
 
@@ -199,13 +226,19 @@ export function GameProvider({ children }: { children: ReactNode }) {
     }
 
     async function startStepSync() {
+      const sourceLabel =
+        Platform.OS === "ios" ? "HealthKit" : Platform.OS === "android" ? "Google Fit" : t("screens.quests.quick.stepsSourceFallback");
+      setStepSourceLabel(sourceLabel);
+
       const initialSteps = await getTodaySteps();
       if (!cancelled && initialSteps != null) {
+        setTodaySteps(initialSteps);
         await syncDeviceStepsIfNeeded(initialSteps);
       }
 
       stopWatch = await watchTodaySteps((steps) => {
         if (!cancelled) {
+          setTodaySteps(steps);
           void syncDeviceStepsIfNeeded(steps);
         }
       });
@@ -227,7 +260,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
         icon: "cloud-upload-outline",
         tone: "info",
       });
-      await refreshGame();
+      await refreshGame(true);
       return;
     }
 
@@ -323,7 +356,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
       }, { sound: "level", haptic: "level", durationMs: 2500 });
     }
 
-    await refreshGame();
+    await refreshGame(true);
   }, [hero?.health?.is_wounded, pushToast, refreshGame, t]);
 
   const value = useMemo(
@@ -334,11 +367,13 @@ export function GameProvider({ children }: { children: ReactNode }) {
       inventory,
       achievements,
       rewards,
+      todaySteps,
+      stepSourceLabel,
       isRefreshing,
       refreshGame,
       applyQuestResult,
     }),
-    [achievements, applyQuestResult, equipment, hero, inventory, isRefreshing, profile, refreshGame, rewards],
+    [achievements, applyQuestResult, equipment, hero, inventory, isRefreshing, profile, refreshGame, rewards, stepSourceLabel, todaySteps],
   );
 
   return <GameContext.Provider value={value}>{children}</GameContext.Provider>;

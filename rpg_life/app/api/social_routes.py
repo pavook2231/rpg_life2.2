@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 
 from app import auth
-from app.api.dependencies import require_admin_user, verify_csrf_token
+from app.api.dependencies import require_admin_user
 from app.core.database import get_db
 from app.models import User
 from app.schemas import (
@@ -46,22 +46,18 @@ async def api_join_challenge(
 @router.post("/friends/request")
 async def send_friend_request(
     payload: FriendRequestCreateSchema,
-    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(auth.get_current_user),
 ):
-    await verify_csrf_token(request)
     return social_service.send_friend_request(db, current_user, payload.receiver_id)
 
 
 @router.post("/friends/accept")
 async def respond_friend_request(
     payload: FriendRequestRespondSchema,
-    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(auth.get_current_user),
 ):
-    await verify_csrf_token(request)
     return social_service.respond_friend_request(db, current_user, payload.request_id, payload.action)
 
 
@@ -92,22 +88,18 @@ async def search_users(
 @router.post("/challenge/create")
 async def create_pvp_challenge(
     payload: BetaChallengeCreateSchema,
-    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(auth.get_current_user),
 ):
-    await verify_csrf_token(request)
     return beta_service.create_challenge(db, current_user, payload)
 
 
 @router.post("/challenge/accept")
 async def respond_pvp_challenge(
     payload: ChallengeDecisionSchema,
-    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(auth.get_current_user),
 ):
-    await verify_csrf_token(request)
     return social_service.respond_pvp_challenge(db, current_user, payload.challenge_id, payload.action)
 
 
@@ -159,11 +151,9 @@ async def get_friends_leaderboard(
 @router.post("/coop-quests/create")
 async def create_coop_quest(
     payload: CoopQuestCreateSchema,
-    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(auth.get_current_user),
 ):
-    await verify_csrf_token(request)
     return social_service.create_coop_quest(db, current_user, payload)
 
 
@@ -208,11 +198,9 @@ async def list_events(
 @router.post("/challenges/invitations")
 async def send_challenge_invitation(
     payload: ChallengeInvitationCreateSchema,
-    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(auth.get_current_user),
 ):
-    await verify_csrf_token(request)
     invitation = social_service.send_challenge_invitation(
         db,
         current_user,
@@ -231,11 +219,9 @@ async def send_challenge_invitation(
 @router.post("/challenges/invitations/respond")
 async def respond_challenge_invitation(
     payload: ChallengeInvitationRespondSchema,
-    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(auth.get_current_user),
 ):
-    await verify_csrf_token(request)
     result = social_service.respond_challenge_invitation(db, current_user, payload.invitation_id, payload.action)
     return result
 

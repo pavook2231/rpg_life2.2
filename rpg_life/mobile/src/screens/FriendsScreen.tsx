@@ -93,6 +93,7 @@ export function FriendsScreen() {
   const t = useTranslation();
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
+  const [leaderboardRefreshing, setLeaderboardRefreshing] = useState(false);
 
   useEffect(() => {
     if (activeTab === "friends") {
@@ -183,6 +184,15 @@ export function FriendsScreen() {
       setLeaderboardLoading(false);
       setLeaderboardLoadingMore(false);
       setGlobalLeaderboardLoadingMore(false);
+    }
+  }
+
+  async function handleRefreshLeaderboard(scope: LeaderboardScope) {
+    try {
+      setLeaderboardRefreshing(true);
+      await loadLeaderboard({ page: 1, append: false, scope });
+    } finally {
+      setLeaderboardRefreshing(false);
     }
   }
 
@@ -355,6 +365,8 @@ export function FriendsScreen() {
       {activeTab === "friends" && (
         <ScrollView
           style={styles.content}
+          contentContainerStyle={styles.contentBody}
+          keyboardShouldPersistTaps="handled"
           refreshControl={
             <RefreshControl
               refreshing={friendsRefreshing}
@@ -517,7 +529,18 @@ export function FriendsScreen() {
       )}
 
       {(activeTab === "leaderboard" || activeTab === "global") && (
-        <ScrollView style={styles.content}>
+        <ScrollView
+          style={styles.content}
+          contentContainerStyle={styles.contentBody}
+          keyboardShouldPersistTaps="handled"
+          refreshControl={
+            <RefreshControl
+              refreshing={leaderboardRefreshing}
+              onRefresh={() => handleRefreshLeaderboard(activeTab)}
+              tintColor={colors.primary}
+            />
+          }
+        >
           <View style={styles.summaryRow}>
             <View style={styles.summaryChip}>
               <Text style={styles.summaryLabel}>{t("screens.leaderboard.fields.score")}</Text>
@@ -634,6 +657,9 @@ function createStyles(colors: ReturnType<typeof useThemeColors>) {
     },
     content: {
       flex: 1,
+    },
+    contentBody: {
+      paddingBottom: 28,
     },
     summaryRow: {
       flexDirection: "row",

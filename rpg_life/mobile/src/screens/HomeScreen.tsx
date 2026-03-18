@@ -1,6 +1,6 @@
 import { useNavigation } from "@react-navigation/native";
 import React, { useMemo, useState } from "react";
-import { Alert, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { Modal, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 
 import { claimDailyBonus, claimSeasonalGoalReward, claimWeeklyGoalReward } from "../api/game";
 import { Screen } from "../components/Screen";
@@ -11,6 +11,7 @@ import { useLocalization, useTranslation } from "../context/LocalizationContext"
 import { useOffline } from "../context/OfflineContext";
 import { buildDerivedStats } from "../lib/gameRules";
 import { getNextHealthDecayLabel } from "../lib/healthUi";
+import { getLastDailyBonusPromptDay, saveLastDailyBonusPromptDay } from "../storage/dailyBonusPromptStorage";
 import { Button, Card, GameIcon, LoadingAnimation, ProfileHeroCard, radii, useThemeColors, useThemeMode } from "../ui";
 
 type InfoItemProps = {
@@ -18,6 +19,14 @@ type InfoItemProps = {
   title: string;
   description: string;
 };
+
+function getLocalDayKey() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = `${now.getMonth() + 1}`.padStart(2, "0");
+  const day = `${now.getDate()}`.padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
 
 function InfoItem({ icon, title, description }: InfoItemProps) {
   const colors = useThemeColors();
@@ -52,7 +61,7 @@ export function HomeScreen() {
   const { width } = useWindowDimensions();
   const t = useTranslation();
   const { language } = useLocalization();
-  const { hero, profile, equipment, rewards, refreshGame, isRefreshing } = useGame();
+  const { hero, profile, equipment, rewards, refreshGame, isRefreshing, todaySteps, stepSourceLabel } = useGame();
   const { pushToast } = useFeedback();
   const { isOnline, pendingActionsCount } = useOffline();
   const colors = useThemeColors();
@@ -62,6 +71,7 @@ export function HomeScreen() {
   const [isClaimingDailyBonus, setIsClaimingDailyBonus] = useState(false);
   const [isClaimingWeeklyReward, setIsClaimingWeeklyReward] = useState(false);
   const [isClaimingSeasonalReward, setIsClaimingSeasonalReward] = useState(false);
+  const [showDailyBonusModal, setShowDailyBonusModal] = useState(false);
   const dailyBonus = rewards?.daily_bonus ?? null;
   const weeklyGoal = rewards?.weekly_goal ?? null;
   const seasonalGoal = rewards?.seasonal_goal ?? null;
@@ -143,6 +153,24 @@ export function HomeScreen() {
               icon: "account-multiple-outline",
             };
 
+  React.useEffect(() => {
+    const shouldPrompt = dailyBonus?.can_claim && dailyBonus?.available;
+    if (!shouldPrompt) {
+      setShowDailyBonusModal(false);
+      return;
+    }
+
+    const todayKey = getLocalDayKey();
+    getLastDailyBonusPromptDay()
+      .then((lastPromptDay) => {
+        if (lastPromptDay !== todayKey) {
+          setShowDailyBonusModal(true);
+          return saveLastDailyBonusPromptDay(todayKey);
+        }
+      })
+      .catch(() => undefined);
+  }, [dailyBonus?.available, dailyBonus?.can_claim]);
+
   const statItems = [
     {
       key: "strength",
@@ -211,6 +239,8 @@ export function HomeScreen() {
         icon: "gift-open-outline",
         tone: "reward",
       }, { sound: "item" });
+      setShowDailyBonusModal(false);
+      await saveLastDailyBonusPromptDay(getLocalDayKey());
       await refreshGame();
     } catch (error) {
       await pushToast({
@@ -312,6 +342,40 @@ export function HomeScreen() {
 
   return (
     <Screen title={t("screens.home.title")} subtitle={t("screens.home.quick.subtitle")}>
+      <Modal visible={showDailyBonusModal} transparent animationType="fade" onRequestClose={() => setShowDailyBonusModal(false)}>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <View style={styles.dailyRewardIconWrap}>
+              <GameIcon name="gift-open-outline" size={32} color={colors.primary} />
+            </View>
+            <Text style={styles.modalTitle}>{t("screens.home.rewardTitle")}</Text>
+            <Text style={styles.modalDescription}>{dailyBonus?.message ?? t("screens.home.dailyRewardDescription", { xp: 0, gold: 0 })}</Text>
+            <Text style={styles.modalRewardMeta}>
+              {t("screens.home.dailyRewardDescription", {
+                xp: dailyBonus?.bonus_xp ?? 0,
+                gold: dailyBonus?.bonus_crystals ?? 0,
+              })}
+            </Text>
+            <View style={styles.modalActions}>
+              <Button
+                label={t("common.cancel")}
+                variant="secondary"
+                onPress={() => setShowDailyBonusModal(false)}
+                style={styles.modalActionButton}
+              />
+              <Button
+                label={isClaimingDailyBonus ? t("common.loading") : t("screens.home.quick.claimReward")}
+                icon="gift-open-outline"
+                onPress={handleClaimBonus}
+                variant="gold"
+                loading={isClaimingDailyBonus}
+                style={styles.modalActionButton}
+              />
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       {!isOnline || pendingActionsCount > 0 ? (
         <StateBlock
           tone="info"
@@ -345,6 +409,42 @@ export function HomeScreen() {
             </Text>
           </View>
         </View>
+      </Card>
+
+      <Card tone="subtle">
+        <View style={styles.stepsCardHeader}>
+          <View style={styles.stepsTitleWrap}>
+            <Text style={styles.cardTitle}>{translateOrFallback(t, "screens.home.quick.stepsCardTitle", "Шагомер")}</Text>
+            <Text style={styles.stepsCardMeta}>
+              {stepSourceLabel ?? translateOrFallback(t, "screens.quests.quick.stepsSourceFallback", "Шаги с устройства")}
+            </Text>
+          </View>
+          <View style={styles.stepsValueWrap}>
+            <Text style={styles.stepsValue}>{todaySteps ?? 0}</Text>
+            <Text style={styles.stepsValueLabel}>
+              {translateOrFallback(t, "screens.home.quick.todayStepsLabel", language === "ru" ? "сегодня" : "today")}
+            </Text>
+          </View>
+        </View>
+        <Text style={styles.stepsDescription}>
+          {todaySteps != null
+            ? translateOrFallback(
+                t,
+                "screens.home.quick.stepsCardDescription",
+                "Шаги отслеживаются в реальном времени и влияют на задания, прогресс и социальные рейтинги.",
+              )
+            : translateOrFallback(
+                t,
+                "screens.home.quick.stepsCardUnavailable",
+                "Шаги пока недоступны. Проверь разрешения активности и доступ к источнику шагов на устройстве.",
+              )}
+        </Text>
+        <Button
+          label={t("screens.home.toQuests")}
+          icon="run-fast"
+          variant="secondary"
+          onPress={() => navigation.navigate("Quests")}
+        />
       </Card>
 
       <ProfileHeroCard
@@ -457,20 +557,6 @@ export function HomeScreen() {
         />
       </Card>
 
-      {dailyBonus?.available ? (
-        <Card tone="success">
-          <Text style={styles.cardTitle}>{t("screens.home.rewardTitle")}</Text>
-          <Text style={styles.bonusText}>{dailyBonus.message}</Text>
-          <Button
-            label={isClaimingDailyBonus ? t("common.loading") : t("screens.home.quick.claimReward")}
-            icon="gift-open-outline"
-            onPress={handleClaimBonus}
-            variant="success"
-            loading={isClaimingDailyBonus}
-          />
-        </Card>
-      ) : null}
-
       {weeklyGoal ? (
         <Card tone={weeklyGoal.claimable ? "accent" : "subtle"}>
           <Text style={styles.cardTitle}>{t("screens.home.weeklyRewardTitle")}</Text>
@@ -542,6 +628,61 @@ function createStyles(colors: ReturnType<typeof useThemeColors>, themeMode: Retu
   return StyleSheet.create({
     overviewCard: {
       backgroundColor: themeMode === "light" ? "rgba(255,250,240,0.84)" : "rgba(11,17,31,0.62)",
+    },
+    modalBackdrop: {
+      flex: 1,
+      backgroundColor: themeMode === "light" ? "rgba(17,24,39,0.34)" : "rgba(2,6,16,0.76)",
+      alignItems: "center",
+      justifyContent: "center",
+      paddingHorizontal: 20,
+    },
+    modalCard: {
+      width: "100%",
+      maxWidth: 460,
+      borderRadius: radii.lg,
+      borderWidth: 1,
+      borderColor: themeMode === "light" ? "rgba(183,121,31,0.34)" : "rgba(245,158,11,0.22)",
+      backgroundColor: colors.card,
+      padding: 20,
+      gap: 12,
+      alignItems: "center",
+    },
+    dailyRewardIconWrap: {
+      width: 72,
+      height: 72,
+      borderRadius: 36,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: themeMode === "light" ? "rgba(183,121,31,0.14)" : "rgba(245,158,11,0.14)",
+      borderWidth: 1,
+      borderColor: themeMode === "light" ? "rgba(183,121,31,0.24)" : "rgba(245,158,11,0.22)",
+    },
+    modalTitle: {
+      color: colors.text,
+      fontSize: 22,
+      fontWeight: "900",
+      textAlign: "center",
+    },
+    modalDescription: {
+      color: colors.text,
+      fontSize: 14,
+      lineHeight: 20,
+      textAlign: "center",
+    },
+    modalRewardMeta: {
+      color: colors.textMuted,
+      fontSize: 13,
+      lineHeight: 18,
+      textAlign: "center",
+    },
+    modalActions: {
+      flexDirection: "row",
+      gap: 10,
+      width: "100%",
+      marginTop: 4,
+    },
+    modalActionButton: {
+      flex: 1,
     },
     eyebrow: {
       color: colors.primary,
@@ -628,6 +769,43 @@ function createStyles(colors: ReturnType<typeof useThemeColors>, themeMode: Retu
     },
     quickActionsRowCompact: {
       flexWrap: "wrap",
+    },
+    stepsCardHeader: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "flex-start",
+      gap: 12,
+    },
+    stepsTitleWrap: {
+      flex: 1,
+      gap: 4,
+    },
+    stepsCardMeta: {
+      color: colors.textMuted,
+      fontSize: 12,
+      lineHeight: 18,
+    },
+    stepsValueWrap: {
+      minWidth: 96,
+      alignItems: "flex-end",
+      gap: 2,
+    },
+    stepsValue: {
+      color: colors.text,
+      fontSize: 28,
+      fontWeight: "900",
+      lineHeight: 30,
+    },
+    stepsValueLabel: {
+      color: colors.textMuted,
+      fontSize: 11,
+      fontWeight: "700",
+      textTransform: "uppercase",
+    },
+    stepsDescription: {
+      color: colors.textMuted,
+      fontSize: 13,
+      lineHeight: 19,
     },
     primaryAction: {
       flex: 1.15,

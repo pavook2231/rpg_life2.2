@@ -190,6 +190,16 @@ export async function watchTodaySteps(onUpdate: (steps: number) => void): Promis
 
   await updateSteps();
 
-  const interval = setInterval(updateSteps, 5 * 60 * 1000);
-  return () => clearInterval(interval);
+  const pedometer = resolvePedometer();
+  const watchSubscription = pedometer?.watchStepCount
+    ? pedometer.watchStepCount(() => {
+        void updateSteps();
+      })
+    : null;
+
+  const interval = setInterval(updateSteps, 15 * 1000);
+  return () => {
+    watchSubscription?.remove();
+    clearInterval(interval);
+  };
 }

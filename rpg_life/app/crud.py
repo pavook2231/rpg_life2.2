@@ -130,7 +130,8 @@ CORE_DAILY_QUESTS = [
 ]
 
 RECENT_QUEST_LOOKBACK_DAYS = 3
-DAILY_DIFFICULTY_TARGETS = {"easy": 3, "medium": 3, "hard": 1}
+DAILY_DIFFICULTY_TARGETS = {"easy": 4, "medium": 4, "hard": 2}
+DAILY_QUEST_TARGET_COUNT = 10
 RARE_MISSION_COOLDOWN_HOURS = 48
 RARE_MISSION_DURATION_HOURS = 36
 
@@ -249,16 +250,16 @@ def _pick_daily_quests(pool: list[dict], excluded_titles: set[str]) -> list[dict
             selected.append(quest_template)
             selected_titles.add(title_key)
 
-    if len(selected) < 7:
+    if len(selected) < DAILY_QUEST_TARGET_COUNT:
         fallback = [item for item in pool if item.get("title", "").strip().lower() not in selected_titles]
         random.shuffle(fallback)
         for quest_template in fallback:
             selected.append(quest_template)
             selected_titles.add(quest_template["title"].strip().lower())
-            if len(selected) >= 7:
+            if len(selected) >= DAILY_QUEST_TARGET_COUNT:
                 break
 
-    return selected[:7]
+    return selected[:DAILY_QUEST_TARGET_COUNT]
 
 
 def _serialize_reward_item(item) -> dict:
@@ -444,6 +445,11 @@ def complete_quest(db: Session, user_id: int, quest_id: int):
     logger.info("Квест выполнен: quest_id=%s total_completed=%s", quest_id, total)
 
     new_achs = check_achievements(db, user_id, progress)
+    bonus_level_ups = _apply_level_ups(progress)
+    if bonus_level_ups:
+        level_ups.extend(bonus_level_ups)
+        db.commit()
+        db.refresh(progress)
     daily_chest = _grant_daily_chest_if_earned(db, user_id, progress.id, progress.level)
 
     next_xp = calculate_next_level_xp(progress.level)
@@ -566,30 +572,33 @@ def calculate_next_level_xp(level: int) -> int:
     return safe_level * 120
 
 
-def add_xp_and_stats(db: Session, progress: UserClassProgress, amount: int, quest_rarity: str = "common"):
-    final_xp = int(amount)
-    progress.current_xp += final_xp
-
+def _apply_level_ups(progress: UserClassProgress) -> list[int]:
     level_ups = []
-    
-    # вњ… Р’РђР–РќРћ: РџРѕРєР° XP РґРѕСЃС‚Р°С‚РѕС‡РЅРѕ РґР»СЏ РїРѕРІС‹С€РµРЅРёСЏ СѓСЂРѕРІРЅСЏ - РїРѕРІС‹С€Р°РµРј
+
     while True:
         next_level_xp = calculate_next_level_xp(progress.level)
         if progress.current_xp < next_level_xp:
             break
-            
+
         progress.current_xp -= next_level_xp
         progress.level += 1
         level_ups.append(progress.level)
-        
-        # РџСЂРѕРєР°С‡РєР° СЃС‚Р°С‚РѕРІ РїСЂРё РїРѕРІС‹С€РµРЅРёРё СѓСЂРѕРІРЅСЏ
+
         growth = CLASS_GROWTH.get(progress.class_name, {})
         for stat, growth_rate in growth.items():
             current_val = getattr(progress, stat)
             setattr(progress, stat, current_val + growth_rate)
-        
+
         logger.debug("Повышение уровня: новый_уровень=%s остаток_xp=%s", progress.level, progress.current_xp)
 
+    return level_ups
+
+
+def add_xp_and_stats(db: Session, progress: UserClassProgress, amount: int, quest_rarity: str = "common"):
+    final_xp = int(amount)
+    progress.current_xp += final_xp
+
+    level_ups = _apply_level_ups(progress)
     db.commit()
     db.refresh(progress)
     return progress, level_ups, final_xp
@@ -643,7 +652,7 @@ def generate_daily_quests(db: Session, user_id: int, class_name: str):
     class_prog_id = progress.id
     recent_titles = _recent_daily_titles(db, user_id, class_prog_id)
     selected_quests = _pick_daily_quests(pool, recent_titles)
-    if len(selected_quests) < 7:
+    if len(selected_quests) < DAILY_QUEST_TARGET_COUNT:
         selected_quests = _pick_daily_quests(pool, set())
 
     rarity_multiplier = {
@@ -992,22 +1001,9 @@ def claim_daily_bonus(db: Session, user_id: int):
     if progress:
         progress.current_xp += bonus_xp
         progress.crystals += bonus_crystals
-        
-        # РџСЂРѕРІРµСЂСЏРµРј РїРѕРІС‹С€РµРЅРёРµ СѓСЂРѕРІРЅСЏ
-        next_xp = calculate_next_level_xp(progress.level)
-        while progress.current_xp >= next_xp:
-            progress.current_xp -= next_xp
-            progress.level += 1
-            level_ups.append(progress.level)
-            
-            # РџСЂРѕРєР°С‡РєР° СЃС‚Р°С‚РѕРІ РїСЂРё РїРѕРІС‹С€РµРЅРёРё СѓСЂРѕРІРЅСЏ
-            growth = CLASS_GROWTH.get(progress.class_name, {})
-            for stat, growth_rate in growth.items():
-                current_val = getattr(progress, stat)
-                setattr(progress, stat, current_val + growth_rate)
-            
-            next_xp = calculate_next_level_xp(progress.level)
-            logger.info("Повышение уровня от ежедневного бонуса: user_id=%s новый_уровень=%s", user_id, progress.level)
+        level_ups = _apply_level_ups(progress)
+        for new_level in level_ups:
+            logger.info("Повышение уровня от ежедневного бонуса: user_id=%s новый_уровень=%s", user_id, new_level)
 
     db.commit()
     logger.info(
