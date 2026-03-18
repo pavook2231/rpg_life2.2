@@ -24,6 +24,7 @@
         <category android:name="android.intent.category.BROWSABLE"/>
         <data android:scheme="exp+rpg-life"/>
         <data android:scheme="rpglife"/>
+        <data android:scheme="com.rpglife.mobile"/>
       </intent-filter>
     </activity>
   </application>

@@ -1,9 +1,10 @@
-import React, { createContext, ReactNode, useContext, useEffect, useMemo, useState } from "react";
+import React, { createContext, ReactNode, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Linking } from "react-native";
 
 import { getSocialAuthProviders, login, register, socialLogin, type SocialAuthProvider } from "../api/auth";
-import { unregisterStoredPushDevice } from "../api/notifications";
 import { fetchProfile } from "../api/game";
+import { unregisterStoredPushDevice } from "../api/notifications";
+import { SOCIAL_AUTH_REDIRECT_SCHEME } from "../config/env";
 import { clearTokens, getAccessToken, getRefreshToken, saveTokens } from "../storage/tokenStorage";
 
 type AuthUser = {
@@ -41,41 +42,75 @@ type AuthContextValue = {
     },
   ) => Promise<void>;
   reloadSocialProviders: () => Promise<void>;
+  completeSocialRedirectUrl: (url: string) => Promise<boolean>;
   clearAuthFlowNotice: () => void;
   signOut: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
+function getProviderFromRoute(route: string): SocialAuthProvider["id"] | null {
+  switch (route) {
+    case "auth/google":
+      return "google";
+    case "auth/telegram":
+      return "telegram";
+    case "auth/vk":
+      return "vk";
+    default:
+      return null;
+  }
+}
+
+function getProviderLabel(provider: SocialAuthProvider["id"]): string {
+  switch (provider) {
+    case "google":
+      return "Google";
+    case "telegram":
+      return "Telegram";
+    case "vk":
+      return "VK ID";
+  }
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [socialProviders, setSocialProviders] = useState<SocialAuthProvider[]>([]);
   const [authFlowNotice, setAuthFlowNotice] = useState<string | null>(null);
+  const lastHandledSocialUrlRef = useRef<string | null>(null);
 
-  async function completeSocialSignInFromUrl(url: string) {
-    if (!url.toLowerCase().startsWith("rpglife://")) {
-      return;
+  async function completeSocialSignInFromUrl(url: string): Promise<boolean> {
+    if (!url.toLowerCase().startsWith(`${SOCIAL_AUTH_REDIRECT_SCHEME.toLowerCase()}://`)) {
+      return false;
+    }
+
+    const shouldDeduplicate = url.includes("ticket=") || url.includes("init_data=");
+    if (shouldDeduplicate && lastHandledSocialUrlRef.current === url) {
+      return true;
     }
 
     let parsed: URL;
     try {
       parsed = new URL(url);
     } catch {
-      return;
+      return false;
     }
 
     const route = `${parsed.hostname}${parsed.pathname}`.replace(/^\/+/, "").toLowerCase();
-    const provider = route === "auth/telegram" ? "telegram" : route === "auth/vk" ? "vk" : null;
+    const provider = getProviderFromRoute(route);
     if (!provider) {
-      return;
+      return false;
+    }
+
+    if (shouldDeduplicate) {
+      lastHandledSocialUrlRef.current = url;
     }
 
     const errorMessage = parsed.searchParams.get("error");
-
     if (errorMessage) {
-      setAuthFlowNotice(`${provider === "telegram" ? "Telegram" : "VK ID"}: ${errorMessage}`);
-      return;
+      setAuthFlowNotice(`${getProviderLabel(provider)}: ${errorMessage}`);
+      return true;
     }
 
     try {
@@ -85,10 +120,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           : await socialLogin({ provider, bridge_ticket: parsed.searchParams.get("ticket") || undefined });
       await saveTokens(authPayload.tokens.access_token, authPayload.tokens.refresh_token);
       setUser(authPayload.user);
-      setAuthFlowNotice(provider === "telegram" ? "Telegram вход выполнен." : "VK ID вход выполнен.");
+
+      if (provider === "telegram") {
+        setAuthFlowNotice("Telegram sign-in completed.");
+      } else if (provider === "vk") {
+        setAuthFlowNotice("VK ID sign-in completed.");
+      } else {
+        setAuthFlowNotice("Google sign-in completed.");
+      }
     } catch (error) {
-      setAuthFlowNotice(error instanceof Error ? error.message : provider === "telegram" ? "Не удалось завершить Telegram вход." : "Не удалось завершить VK ID вход.");
+      if (error instanceof Error) {
+        setAuthFlowNotice(error.message);
+      } else if (provider === "telegram") {
+        setAuthFlowNotice("Could not finish Telegram sign-in.");
+      } else if (provider === "vk") {
+        setAuthFlowNotice("Could not finish VK ID sign-in.");
+      } else {
+        setAuthFlowNotice("Could not finish Google sign-in.");
+      }
     }
+
+    return true;
   }
 
   useEffect(() => {
@@ -103,7 +155,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setUser({
             id: profile.user.id,
             email: profile.user.email,
-            name: profile.user.name
+            name: profile.user.name,
           });
         }
       } catch {
@@ -114,7 +166,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    bootstrap();
+    void bootstrap();
   }, []);
 
   useEffect(() => {
@@ -123,6 +175,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (url) {
           return completeSocialSignInFromUrl(url);
         }
+        return undefined;
       })
       .catch(() => undefined);
 
@@ -169,6 +222,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const payload = await getSocialAuthProviders();
         setSocialProviders(payload.providers);
       },
+      completeSocialRedirectUrl: completeSocialSignInFromUrl,
       clearAuthFlowNotice: () => {
         setAuthFlowNotice(null);
       },
@@ -180,9 +234,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
         await clearTokens();
         setUser(null);
-      }
+      },
     }),
-    [authFlowNotice, socialProviders, user, isLoading]
+    [authFlowNotice, isLoading, socialProviders, user]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -21,6 +21,7 @@ export type SocialAuthProvider = {
   enabled: boolean;
   configured: boolean;
   mobile_client_id?: string | null;
+  browser_login_path?: string | null;
 };
 
 export type GoalTemplatePayload = {

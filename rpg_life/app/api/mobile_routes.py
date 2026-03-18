@@ -14,6 +14,10 @@ from app.api.dependencies import enforce_rate_limit
 from app.core.config import (
     COOKIE_SAMESITE,
     COOKIE_SECURE,
+    GOOGLE_AUTH_CLIENT_SECRET,
+    GOOGLE_AUTH_ENABLED,
+    GOOGLE_AUTH_MAX_AGE_SECONDS,
+    GOOGLE_AUTH_WEB_CLIENT_ID,
     PUBLIC_BASE_URL,
     SECRET_KEY,
     SOCIAL_AUTH_REDIRECT_SCHEME,
@@ -48,6 +52,7 @@ from app.schemas import (
 from app.services import auth_service, character_service, mobile_service, multiplayer_service, notification_service, quest_service
 
 router = APIRouter(prefix="/api/v1", tags=["РњРѕР±РёР»СЊРЅРѕРµ API"])
+GOOGLE_OAUTH_COOKIE_NAME = "google_oauth_flow"
 VK_OAUTH_COOKIE_NAME = "vk_oauth_flow"
 
 
@@ -107,6 +112,123 @@ async def auth_telegram_bridge(request: Request):
         return RedirectResponse(url=f"{target_base}?error=telegram_auth_hash_missing", status_code=302)
 
     return RedirectResponse(url=f"{target_base}?init_data={quote(query_string, safe='')}", status_code=302)
+
+
+@router.get("/auth/google/login", summary="Google login redirect", include_in_schema=False)
+async def auth_google_login_page(request: Request):
+    if not GOOGLE_AUTH_ENABLED:
+        return HTMLResponse(
+            """
+            <!doctype html>
+            <html lang="ru">
+              <head>
+                <meta charset="utf-8" />
+                <meta name="viewport" content="width=device-width, initial-scale=1" />
+                <title>Google Sign-in</title>
+                <style>
+                  body { margin: 0; font-family: Arial, sans-serif; background: #0f172a; color: #e5e7eb; }
+                  .shell { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+                  .card { width: 100%; max-width: 520px; background: rgba(15, 23, 42, 0.92); border: 1px solid rgba(148, 163, 184, 0.25); border-radius: 24px; padding: 28px; }
+                  h1 { margin: 0 0 12px; font-size: 28px; }
+                  p { margin: 0; line-height: 1.5; color: #cbd5e1; }
+                  code { background: rgba(15, 23, 42, 0.8); padding: 2px 6px; border-radius: 6px; color: #f8fafc; }
+                </style>
+              </head>
+              <body>
+                <main class="shell">
+                  <section class="card">
+                    <h1>Google sign-in is disabled</h1>
+                    <p>Enable <code>GOOGLE_AUTH_ENABLED=true</code> on the server.</p>
+                  </section>
+                </main>
+              </body>
+            </html>
+            """,
+            status_code=503,
+        )
+
+    if not GOOGLE_AUTH_WEB_CLIENT_ID or not GOOGLE_AUTH_CLIENT_SECRET:
+        return HTMLResponse(
+            """
+            <!doctype html>
+            <html lang="ru">
+              <head>
+                <meta charset="utf-8" />
+                <meta name="viewport" content="width=device-width, initial-scale=1" />
+                <title>Google Sign-in</title>
+                <style>
+                  body { margin: 0; font-family: Arial, sans-serif; background: #0f172a; color: #e5e7eb; }
+                  .shell { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+                  .card { width: 100%; max-width: 520px; background: rgba(15, 23, 42, 0.92); border: 1px solid rgba(148, 163, 184, 0.25); border-radius: 24px; padding: 28px; }
+                  h1 { margin: 0 0 12px; font-size: 28px; }
+                  p { margin: 0; line-height: 1.5; color: #cbd5e1; }
+                  code { background: rgba(15, 23, 42, 0.8); padding: 2px 6px; border-radius: 6px; color: #f8fafc; }
+                </style>
+              </head>
+              <body>
+                <main class="shell">
+                  <section class="card">
+                    <h1>Google web client is missing</h1>
+                    <p>Set both <code>GOOGLE_AUTH_WEB_CLIENT_ID</code> and <code>GOOGLE_AUTH_CLIENT_SECRET</code> on the server, then restart the backend.</p>
+                  </section>
+                </main>
+              </body>
+            </html>
+            """,
+            status_code=503,
+        )
+
+    callback_url = _external_url_for(request, "auth_google_callback")
+    browser_flow = auth_service.create_google_browser_login(callback_url)
+    authorize_url = browser_flow["authorize_url"]
+    response = HTMLResponse(
+        f"""
+        <!doctype html>
+        <html lang="ru">
+          <head>
+            <meta charset="utf-8" />
+            <meta name="viewport" content="width=device-width, initial-scale=1" />
+            <title>Google Sign-in</title>
+            <style>
+              body {{ margin: 0; font-family: Arial, sans-serif; background: #0f172a; color: #e5e7eb; }}
+              .shell {{ min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }}
+              .card {{ width: 100%; max-width: 560px; background: rgba(15, 23, 42, 0.92); border: 1px solid rgba(148, 163, 184, 0.25); border-radius: 24px; padding: 28px; box-shadow: 0 30px 80px rgba(2, 6, 23, 0.5); }}
+              h1 {{ margin: 0 0 12px; font-size: 30px; }}
+              p {{ margin: 0 0 14px; line-height: 1.6; color: #cbd5e1; }}
+              .button {{ display: inline-flex; align-items: center; justify-content: center; margin-top: 12px; padding: 14px 18px; border-radius: 14px; background: #2563eb; color: #eff6ff; text-decoration: none; font-weight: 700; }}
+              .hint {{ margin-top: 18px; font-size: 14px; color: #94a3b8; }}
+            </style>
+          </head>
+          <body>
+            <main class="shell">
+              <section class="card">
+                <h1>Переходим в Google</h1>
+                <p>Сейчас откроем Google Sign-In, а после подтверждения автоматически вернём тебя в приложение.</p>
+                <p>Если переход не начался сам, нажми кнопку ниже.</p>
+                <a class="button" href="{html.escape(authorize_url, quote=True)}" rel="noreferrer">Продолжить через Google</a>
+                <p class="hint">Эта страница помогает браузеру сначала сохранить служебную cookie-сессию входа, а уже потом уйти в Google.</p>
+              </section>
+            </main>
+            <script>
+              window.setTimeout(function () {{
+                window.location.replace({json.dumps(authorize_url)});
+              }}, 150);
+            </script>
+          </body>
+        </html>
+        """,
+        status_code=200,
+    )
+    response.set_cookie(
+        key=GOOGLE_OAUTH_COOKIE_NAME,
+        value=_sign_bridge_cookie({"state": browser_flow["state"], "created_at": int(time.time())}),
+        max_age=GOOGLE_AUTH_MAX_AGE_SECONDS,
+        httponly=True,
+        secure=COOKIE_SECURE,
+        samesite=COOKIE_SAMESITE,
+        path="/",
+    )
+    return response
 
 
 @router.get("/auth/telegram/login", summary="Telegram login page", include_in_schema=False)
@@ -308,6 +430,57 @@ async def auth_telegram_login_page(request: Request):
     </html>
     """
     return HTMLResponse(html)
+
+
+@router.get("/auth/google/callback", summary="Google callback", include_in_schema=False)
+async def auth_google_callback(
+    request: Request,
+    code: str | None = Query(None),
+    state: str | None = Query(None),
+    error: str | None = Query(None),
+    error_description: str | None = Query(None),
+    db: Session = Depends(get_db),
+):
+    target_base = f"{SOCIAL_AUTH_REDIRECT_SCHEME}://auth/google"
+    signed_cookie = request.cookies.get(GOOGLE_OAUTH_COOKIE_NAME)
+    flow_cookie = _verify_bridge_cookie(signed_cookie)
+
+    if error:
+        response = RedirectResponse(url=f"{target_base}?error={quote(error_description or error, safe='')}", status_code=302)
+        response.delete_cookie(GOOGLE_OAUTH_COOKIE_NAME, path="/")
+        return response
+
+    if not flow_cookie:
+        response = RedirectResponse(url=f"{target_base}?error=google_auth_cookie_missing", status_code=302)
+        response.delete_cookie(GOOGLE_OAUTH_COOKIE_NAME, path="/")
+        return response
+
+    if int(time.time()) - int(flow_cookie.get("created_at") or 0) > GOOGLE_AUTH_MAX_AGE_SECONDS:
+        response = RedirectResponse(url=f"{target_base}?error=google_auth_session_expired", status_code=302)
+        response.delete_cookie(GOOGLE_OAUTH_COOKIE_NAME, path="/")
+        return response
+
+    expected_state = str(flow_cookie.get("state") or "").strip()
+    if not code or not state:
+        response = RedirectResponse(url=f"{target_base}?error=google_auth_payload_missing", status_code=302)
+        response.delete_cookie(GOOGLE_OAUTH_COOKIE_NAME, path="/")
+        return response
+
+    if state != expected_state:
+        response = RedirectResponse(url=f"{target_base}?error=google_auth_state_mismatch", status_code=302)
+        response.delete_cookie(GOOGLE_OAUTH_COOKIE_NAME, path="/")
+        return response
+
+    callback_url = _external_url_for(request, "auth_google_callback")
+    try:
+        ticket = auth_service.complete_google_browser_login(db, code=code, redirect_uri=callback_url)
+        response = RedirectResponse(url=f"{target_base}?ticket={quote(ticket, safe='')}", status_code=302)
+    except Exception as error_obj:
+        message = getattr(error_obj, "detail", "google_auth_failed")
+        response = RedirectResponse(url=f"{target_base}?error={quote(str(message), safe='')}", status_code=302)
+
+    response.delete_cookie(GOOGLE_OAUTH_COOKIE_NAME, path="/")
+    return response
 
 
 @router.get("/auth/vk/login", summary="VK ID login redirect", include_in_schema=False)

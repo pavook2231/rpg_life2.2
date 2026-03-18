@@ -11,6 +11,7 @@ class SocialAuthProviderSchema(BaseModel):
     enabled: bool
     configured: bool
     mobile_client_id: str | None = None
+    browser_login_path: str | None = None
 
 
 class SocialAuthExchangeSchema(BaseModel):

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Alert, KeyboardAvoidingView, Linking, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import * as AuthSession from "expo-auth-session";
 import * as Google from "expo-auth-session/providers/google";
 import * as WebBrowser from "expo-web-browser";
 
@@ -13,6 +14,7 @@ import {
   GOOGLE_AUTH_WEB_CLIENT_ID,
   isDeprecatedLocalApiBaseUrl,
   normalizeApiBaseUrl,
+  SOCIAL_AUTH_REDIRECT_SCHEME,
 } from "../config/env";
 import { useAuth } from "../context/AuthContext";
 import { useTranslation } from "../context/LocalizationContext";
@@ -31,7 +33,7 @@ function isValidEmail(value: string) {
 }
 
 export function LoginScreen({ onShowRegister }: Props) {
-  const { signIn, signInWithProvider, socialProviders, reloadSocialProviders, authFlowNotice, clearAuthFlowNotice } = useAuth();
+  const { signIn, signInWithProvider, socialProviders, reloadSocialProviders, authFlowNotice, clearAuthFlowNotice, completeSocialRedirectUrl } = useAuth();
   const t = useTranslation();
   const { pushToast } = useFeedback();
   const colors = useThemeColors();
@@ -58,11 +60,15 @@ export function LoginScreen({ onShowRegister }: Props) {
       : Platform.OS === "ios"
         ? googleIosClientId
         : googleWebClientId;
+  const googleRedirectUri = AuthSession.makeRedirectUri({
+    native: "com.rpglife.mobile:/oauthredirect",
+  });
   const [googleRequest, googleResponse, promptGoogleAuth] = Google.useIdTokenAuthRequest(
     {
       androidClientId: googleAndroidClientId || undefined,
       iosClientId: googleIosClientId || undefined,
       webClientId: googleWebClientId || undefined,
+      redirectUri: googleRedirectUri,
       scopes: ["openid", "profile", "email"],
       selectAccount: true,
     },
@@ -247,12 +253,30 @@ export function LoginScreen({ onShowRegister }: Props) {
     }
   }
 
+  async function openBrowserSocialFlow(providerId: "google" | "vk", loginUrl: string) {
+    const authResult = await WebBrowser.openAuthSessionAsync(loginUrl, `${SOCIAL_AUTH_REDIRECT_SCHEME}://auth/${providerId}`);
+    if (authResult.type === "success" && authResult.url) {
+      await completeSocialRedirectUrl(authResult.url);
+      return;
+    }
+
+    if (authResult.type !== "cancel" && authResult.type !== "dismiss") {
+      throw new Error(providerId === "google" ? t("screens.login.quick.googleFailed") : t("errors.unknownError"));
+    }
+  }
+
   async function handleSocialLogin(providerId: "google" | "telegram" | "vk") {
     const provider = providerList.find((entry) => entry.id === providerId);
 
     try {
       setActiveSocialProviderId(providerId);
       if (providerId === "google") {
+        if (provider?.browser_login_path) {
+          setIsSocialLoading(true);
+          await openBrowserSocialFlow(providerId, `${normalizeApiBaseUrl(apiBaseUrl)}${provider.browser_login_path}`);
+          return;
+        }
+
         if (!googleClientId) {
           await pushToast({
             title: t("screens.login.quick.googleTitle"),
@@ -313,19 +337,10 @@ export function LoginScreen({ onShowRegister }: Props) {
       }
 
       if (providerId === "vk") {
-        const vkAppId = provider?.mobile_client_id;
-        if (vkAppId) {
-          const vkLoginUrl = `${normalizeApiBaseUrl(apiBaseUrl)}/auth/vk/login`;
-          await Linking.openURL(vkLoginUrl);
-          await pushToast(
-            {
-              title: t("screens.login.quick.vkTitle"),
-              description: t("screens.login.quick.vkOpened"),
-              icon: "open-outline",
-              tone: "info",
-            },
-            { haptic: "success" },
-          );
+        const vkLoginPath = provider?.browser_login_path || "/auth/vk/login";
+        if (provider?.mobile_client_id || provider?.browser_login_path) {
+          setIsSocialLoading(true);
+          await openBrowserSocialFlow(providerId, `${normalizeApiBaseUrl(apiBaseUrl)}${vkLoginPath}`);
           return;
         }
       }
@@ -392,7 +407,8 @@ export function LoginScreen({ onShowRegister }: Props) {
           <View style={styles.socialColumn}>
             {providerList.map((provider) => {
               const isReady = provider.enabled && provider.configured;
-              const isProviderActionable = provider.id !== "google" || Boolean(googleClientId && googleRequest);
+              const isProviderActionable =
+                provider.id !== "google" || Boolean(provider.browser_login_path || (googleClientId && googleRequest));
               const metaText = isReady
                 ? provider.id === "telegram"
                   ? t("screens.login.quick.provider.telegramReady")

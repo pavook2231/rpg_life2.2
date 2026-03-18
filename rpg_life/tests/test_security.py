@@ -187,6 +187,14 @@ def test_social_bridge_ticket_is_one_time() -> None:
     assert second_consume is None
 
 
+def test_authenticate_social_mobile_accepts_google_bridge_ticket(db_session) -> None:
+    ticket = auth_service.issue_social_bridge_ticket({"provider": "google", "ok": True})
+
+    payload = auth_service.authenticate_social_mobile(db_session, "google", bridge_ticket=ticket)
+
+    assert payload == {"provider": "google", "ok": True}
+
+
 def test_get_social_auth_providers_includes_vk(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(auth_service, "VK_AUTH_ENABLED", True)
     monkeypatch.setattr(auth_service, "VK_AUTH_APP_ID", "123456")

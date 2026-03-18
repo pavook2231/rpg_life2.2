@@ -229,6 +229,105 @@ def _verify_google_id_token(id_token: str) -> dict:
     return payload
 
 
+def _google_post_form(form_params: dict[str, str | int | None]) -> dict:
+    request = Request(
+        url="https://oauth2.googleapis.com/token",
+        data=urlencode({key: value for key, value in form_params.items() if value is not None}).encode("utf-8"),
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+
+    try:
+        with urlopen(request, timeout=10) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except HTTPError as error:
+        detail = error.reason
+        try:
+            error_payload = json.loads(error.read().decode("utf-8"))
+            detail = error_payload.get("error_description") or error_payload.get("error") or detail
+        except Exception:
+            pass
+        raise HTTPException(status_code=401, detail=f"Google request rejected: {detail}") from error
+    except URLError as error:
+        raise HTTPException(status_code=503, detail="Could not reach Google sign-in service") from error
+
+    if isinstance(payload, dict) and payload.get("error"):
+        detail = payload.get("error_description") or payload.get("error")
+        raise HTTPException(status_code=401, detail=f"Google request rejected: {detail}")
+
+    return payload
+
+
+def create_google_browser_login(redirect_uri: str) -> dict:
+    if not GOOGLE_AUTH_WEB_CLIENT_ID or not GOOGLE_AUTH_CLIENT_SECRET:
+        raise HTTPException(status_code=503, detail="Google sign-in is not configured yet")
+
+    state = token_urlsafe(24)
+    authorize_url = "https://accounts.google.com/o/oauth2/v2/auth?{query}".format(
+        query=urlencode(
+            {
+                "client_id": GOOGLE_AUTH_WEB_CLIENT_ID,
+                "redirect_uri": redirect_uri,
+                "response_type": "code",
+                "scope": "openid email profile",
+                "state": state,
+                "prompt": "select_account",
+                "access_type": "online",
+                "include_granted_scopes": "true",
+            }
+        ),
+    )
+    return {
+        "state": state,
+        "authorize_url": authorize_url,
+    }
+
+
+def _exchange_google_authorization_code(code: str, *, redirect_uri: str) -> dict:
+    payload = _google_post_form(
+        {
+            "client_id": GOOGLE_AUTH_WEB_CLIENT_ID,
+            "client_secret": GOOGLE_AUTH_CLIENT_SECRET,
+            "code": code,
+            "grant_type": "authorization_code",
+            "redirect_uri": redirect_uri,
+        }
+    )
+
+    expires_in = payload.get("expires_in")
+    if expires_in:
+        try:
+            if int(expires_in) <= 0:
+                raise HTTPException(status_code=401, detail="Google access token is invalid")
+        except ValueError as error:
+            raise HTTPException(status_code=401, detail="Google token expiry is invalid") from error
+
+    return payload
+
+
+def complete_google_browser_login(db: Session, *, code: str, redirect_uri: str) -> str:
+    if not GOOGLE_AUTH_WEB_CLIENT_ID or not GOOGLE_AUTH_CLIENT_SECRET:
+        raise HTTPException(status_code=503, detail="Google sign-in is not configured yet")
+
+    token_payload = _exchange_google_authorization_code(code, redirect_uri=redirect_uri)
+    id_token = str(token_payload.get("id_token") or "").strip()
+    if not id_token:
+        raise HTTPException(status_code=401, detail="Google response has no id_token")
+
+    verified = _verify_google_id_token(id_token)
+    user = _resolve_or_create_social_user(
+        db,
+        provider="google",
+        provider_user_id=str(verified["sub"]),
+        email=verified.get("email"),
+        display_name=verified.get("name"),
+        username=verified.get("given_name"),
+        avatar_url=verified.get("picture"),
+    )
+    _ensure_user_quest_content(db, user.id)
+    return issue_social_bridge_ticket(_build_auth_payload_for_user(db, user))
+
+
 def _base64url_encode(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).decode("utf-8").rstrip("=")
 
@@ -650,8 +749,9 @@ def get_social_auth_providers() -> list[dict]:
             "label": "Google",
             "kind": "oauth",
             "enabled": GOOGLE_AUTH_ENABLED,
-            "configured": bool(GOOGLE_AUTH_ACCEPTED_CLIENT_IDS),
+            "configured": bool(GOOGLE_AUTH_WEB_CLIENT_ID and GOOGLE_AUTH_CLIENT_SECRET) or bool(GOOGLE_AUTH_ACCEPTED_CLIENT_IDS),
             "mobile_client_id": GOOGLE_AUTH_ANDROID_CLIENT_ID or GOOGLE_AUTH_MOBILE_CLIENT_ID or GOOGLE_AUTH_IOS_CLIENT_ID or GOOGLE_AUTH_WEB_CLIENT_ID or None,
+            "browser_login_path": "/auth/google/login" if GOOGLE_AUTH_WEB_CLIENT_ID and GOOGLE_AUTH_CLIENT_SECRET else None,
         },
         {
             "id": "telegram",
@@ -660,6 +760,7 @@ def get_social_auth_providers() -> list[dict]:
             "enabled": TELEGRAM_AUTH_ENABLED,
             "configured": bool(TELEGRAM_BOT_TOKEN and TELEGRAM_BOT_USERNAME),
             "mobile_client_id": TELEGRAM_BOT_USERNAME or None,
+            "browser_login_path": "/auth/telegram/login" if TELEGRAM_BOT_TOKEN and TELEGRAM_BOT_USERNAME else None,
         },
         {
             "id": "vk",
@@ -668,6 +769,7 @@ def get_social_auth_providers() -> list[dict]:
             "enabled": VK_AUTH_ENABLED,
             "configured": bool(VK_AUTH_APP_ID),
             "mobile_client_id": VK_AUTH_APP_ID or None,
+            "browser_login_path": "/auth/vk/login" if VK_AUTH_APP_ID else None,
         },
     ]
 
@@ -692,8 +794,14 @@ def authenticate_social_mobile(
         raise HTTPException(status_code=503, detail=f"{provider_config['label']} sign-in is not configured yet")
 
     if provider == "google":
+        if bridge_ticket:
+            bridged_payload = consume_social_bridge_ticket(bridge_ticket)
+            if not bridged_payload:
+                raise HTTPException(status_code=400, detail="Google sign-in session has expired or was already used")
+            return bridged_payload
+
         if not id_token:
-            raise HTTPException(status_code=400, detail="Google sign-in requires id_token")
+            raise HTTPException(status_code=400, detail="Google sign-in requires bridge_ticket or id_token")
 
         verified = _verify_google_id_token(id_token)
         user = _resolve_or_create_social_user(

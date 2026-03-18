@@ -85,6 +85,50 @@ def test_telegram_login_page_rejects_invalid_bot_username(monkeypatch) -> None:
     assert "data-telegram-login" not in body
 
 
+def test_google_login_page_sets_signed_cookie_and_renders_fallback_link(monkeypatch) -> None:
+    request = _request("/api/v1/auth/google/login")
+    monkeypatch.setattr(mobile_routes, "GOOGLE_AUTH_ENABLED", True)
+    monkeypatch.setattr(mobile_routes, "GOOGLE_AUTH_WEB_CLIENT_ID", "web-client-id")
+    monkeypatch.setattr(mobile_routes, "GOOGLE_AUTH_CLIENT_SECRET", "top-secret")
+    monkeypatch.setattr(mobile_routes, "GOOGLE_AUTH_MAX_AGE_SECONDS", 900)
+    monkeypatch.setattr(mobile_routes, "COOKIE_SECURE", False)
+    monkeypatch.setattr(mobile_routes, "COOKIE_SAMESITE", "lax")
+    monkeypatch.setattr(
+        mobile_routes.auth_service,
+        "create_google_browser_login",
+        lambda redirect_uri: {
+            "state": "demo-state",
+            "authorize_url": "https://accounts.google.com/o/oauth2/v2/auth?client_id=web-client-id",
+        },
+    )
+
+    response = asyncio.run(mobile_routes.auth_google_login_page(request))
+    body = response.body.decode("utf-8")
+
+    assert response.status_code == 200
+    assert "Google" in body
+    assert "https://accounts.google.com/o/oauth2/v2/auth?client_id=web-client-id" in body
+    assert "google_oauth_flow=" in response.headers.get("set-cookie", "")
+
+
+def test_google_callback_redirects_to_error_when_cookie_is_missing() -> None:
+    request = _request("/api/v1/auth/google/callback")
+
+    response = asyncio.run(
+        mobile_routes.auth_google_callback(
+            request,
+            code="demo-code",
+            state="demo-state",
+            error=None,
+            error_description=None,
+            db=None,
+        )
+    )
+
+    assert response.status_code == 302
+    assert response.headers["location"] == "rpglife://auth/google?error=google_auth_cookie_missing"
+
+
 def test_vk_login_page_sets_signed_cookie_and_renders_fallback_link(monkeypatch) -> None:
     request = _request("/api/v1/auth/vk/login")
     monkeypatch.setattr(mobile_routes, "VK_AUTH_ENABLED", True)
