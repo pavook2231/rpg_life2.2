@@ -85,7 +85,7 @@ def test_telegram_login_page_rejects_invalid_bot_username(monkeypatch) -> None:
     assert "data-telegram-login" not in body
 
 
-def test_vk_login_redirect_sets_signed_cookie(monkeypatch) -> None:
+def test_vk_login_page_sets_signed_cookie_and_renders_fallback_link(monkeypatch) -> None:
     request = _request("/api/v1/auth/vk/login")
     monkeypatch.setattr(mobile_routes, "VK_AUTH_ENABLED", True)
     monkeypatch.setattr(mobile_routes, "VK_AUTH_APP_ID", "123456")
@@ -103,9 +103,11 @@ def test_vk_login_redirect_sets_signed_cookie(monkeypatch) -> None:
     )
 
     response = asyncio.run(mobile_routes.auth_vk_login_page(request))
+    body = response.body.decode("utf-8")
 
-    assert response.status_code == 302
-    assert response.headers["location"] == "https://id.vk.com/authorize?client_id=123456"
+    assert response.status_code == 200
+    assert "Переходим в VK ID" in body
+    assert "https://id.vk.com/authorize?client_id=123456" in body
     assert "vk_oauth_flow=" in response.headers.get("set-cookie", "")
 
 

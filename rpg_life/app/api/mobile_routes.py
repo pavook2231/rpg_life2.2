@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from fastapi.responses import HTMLResponse, RedirectResponse
 from urllib.parse import quote
 import base64
+import html
 import hashlib
 import hmac
 import json
@@ -355,7 +356,45 @@ async def auth_vk_login_page(request: Request):
 
     callback_url = str(request.url_for("auth_vk_callback"))
     browser_flow = auth_service.create_vk_browser_login(callback_url)
-    response = RedirectResponse(url=browser_flow["authorize_url"], status_code=302)
+    authorize_url = browser_flow["authorize_url"]
+    response = HTMLResponse(
+        f"""
+        <!doctype html>
+        <html lang="ru">
+          <head>
+            <meta charset="utf-8" />
+            <meta name="viewport" content="width=device-width, initial-scale=1" />
+            <title>VK ID Sign-in</title>
+            <style>
+              body {{ margin: 0; font-family: Arial, sans-serif; background: #0f172a; color: #e5e7eb; }}
+              .shell {{ min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }}
+              .card {{ width: 100%; max-width: 560px; background: rgba(15, 23, 42, 0.92); border: 1px solid rgba(148, 163, 184, 0.25); border-radius: 24px; padding: 28px; box-shadow: 0 30px 80px rgba(2, 6, 23, 0.5); }}
+              h1 {{ margin: 0 0 12px; font-size: 30px; }}
+              p {{ margin: 0 0 14px; line-height: 1.6; color: #cbd5e1; }}
+              .button {{ display: inline-flex; align-items: center; justify-content: center; margin-top: 12px; padding: 14px 18px; border-radius: 14px; background: #2563eb; color: #eff6ff; text-decoration: none; font-weight: 700; }}
+              .hint {{ margin-top: 18px; font-size: 14px; color: #94a3b8; }}
+            </style>
+          </head>
+          <body>
+            <main class="shell">
+              <section class="card">
+                <h1>Переходим в VK ID</h1>
+                <p>Сейчас откроем страницу входа VK ID, а после подтверждения автоматически вернём тебя в приложение.</p>
+                <p>Если переход не начался сам, нажми кнопку ниже.</p>
+                <a class="button" href="{html.escape(authorize_url, quote=True)}" rel="noreferrer">Продолжить через VK ID</a>
+                <p class="hint">Эта страница помогает браузеру сначала сохранить служебную cookie-сессию входа, а уже потом уйти в VK.</p>
+              </section>
+            </main>
+            <script>
+              window.setTimeout(function () {{
+                window.location.replace({json.dumps(authorize_url)});
+              }}, 150);
+            </script>
+          </body>
+        </html>
+        """,
+        status_code=200,
+    )
     response.set_cookie(
         key=VK_OAUTH_COOKIE_NAME,
         value=_sign_bridge_cookie(
