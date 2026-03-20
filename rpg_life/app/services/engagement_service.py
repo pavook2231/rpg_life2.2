@@ -482,7 +482,119 @@ def get_seasonal_goal_summary(db: Session, user: User) -> dict[str, Any] | None:
     }
 
 
+def _friend_ids(db: Session, user_id: int) -> list[int]:
+    rows = db.query(Friendship.friend_id).filter(Friendship.user_id == user_id).all()
+    return [friend_id for (friend_id,) in rows]
+
+
+def _public_name(user: User) -> str:
+    if user.name and user.name.strip():
+        return user.name.strip()
+    return f"Игрок #{user.id}"
+
+
+def _identity_payload(user: User, **extra: Any) -> dict[str, Any]:
+    return {
+        "user_id": user.id,
+        "name": _public_name(user),
+        "username": user.username,
+        "friend_id": crud.user_friend_id(user),
+        **extra,
+    }
+
+
+def _weekly_friend_snapshot(db: Session, user: User) -> dict[str, Any]:
+    friend_ids = _friend_ids(db, user.id)
+    if not friend_ids:
+        return {
+            "weekly_rank": 1,
+            "weekly_total": 1,
+            "closest_friend_ahead": None,
+            "closest_friend_behind": None,
+        }
+
+    week_start, week_end = _week_window()
+    tracked_ids = [user.id, *friend_ids]
+    step_rows = (
+        db.query(DailySteps.user_id, func.sum(DailySteps.steps))
+        .filter(
+            DailySteps.user_id.in_(tracked_ids),
+            DailySteps.date >= week_start,
+            DailySteps.date <= week_end,
+        )
+        .group_by(DailySteps.user_id)
+        .all()
+    )
+    steps_map = {user_id: int(value or 0) for user_id, value in step_rows}
+    users = db.query(User).filter(User.id.in_(friend_ids)).all()
+    user_lookup = {row.id: row for row in users}
+
+    ranked = sorted(
+        (
+            {
+                "user_id": tracked_id,
+                "steps": steps_map.get(tracked_id, 0),
+            }
+            for tracked_id in tracked_ids
+        ),
+        key=lambda item: (item["steps"], item["user_id"] == user.id),
+        reverse=True,
+    )
+    weekly_rank = next((index for index, entry in enumerate(ranked, start=1) if entry["user_id"] == user.id), 1)
+    current_steps = steps_map.get(user.id, 0)
+
+    ahead_candidate = min(
+        (entry for entry in ranked if entry["user_id"] != user.id and entry["steps"] > current_steps),
+        key=lambda entry: entry["steps"] - current_steps,
+        default=None,
+    )
+    behind_candidate = max(
+        (entry for entry in ranked if entry["user_id"] != user.id and entry["steps"] <= current_steps),
+        key=lambda entry: entry["steps"],
+        default=None,
+    )
+
+    def serialize_candidate(candidate: dict[str, Any] | None) -> dict[str, Any] | None:
+        if not candidate:
+            return None
+        friend = user_lookup.get(candidate["user_id"])
+        if not friend:
+            return None
+        gap_steps = abs(int(candidate["steps"]) - current_steps)
+        return _identity_payload(friend, score=int(candidate["steps"]), gap_steps=gap_steps)
+
+    return {
+        "weekly_rank": weekly_rank,
+        "weekly_total": len(ranked),
+        "closest_friend_ahead": serialize_candidate(ahead_candidate),
+        "closest_friend_behind": serialize_candidate(behind_candidate),
+    }
+
+
+def _recent_friend_activity(db: Session, user: User) -> dict[str, Any] | None:
+    friend_ids = _friend_ids(db, user.id)
+    if not friend_ids:
+        return None
+
+    since = utc_now() - timedelta(days=1)
+    rows = (
+        db.query(CompletedQuest.user_id, func.count(CompletedQuest.id))
+        .filter(CompletedQuest.user_id.in_(friend_ids), CompletedQuest.completed_at >= since)
+        .group_by(CompletedQuest.user_id)
+        .order_by(func.count(CompletedQuest.id).desc(), CompletedQuest.user_id.asc())
+        .all()
+    )
+    if not rows:
+        return None
+
+    friend = db.query(User).filter(User.id == rows[0][0]).first()
+    if not friend:
+        return None
+    return _identity_payload(friend, quests_completed=int(rows[0][1] or 0))
+
+
 def get_social_pulse(db: Session, user: User) -> dict[str, Any]:
+    crud.backfill_missing_usernames(db)
     language = _language(user)
     friends_count = int(
         db.query(func.count(Friendship.id)).filter(Friendship.user_id == user.id).scalar() or 0
@@ -516,24 +628,135 @@ def get_social_pulse(db: Session, user: User) -> dict[str, Any]:
         .scalar()
         or 0
     )
+    weekly_snapshot = _weekly_friend_snapshot(db, user)
+    recent_friend_activity = _recent_friend_activity(db, user)
 
-    if pending_friend_requests or pending_challenge_invitations:
+    feed_items: list[dict[str, Any]] = []
+    if pending_friend_requests:
+        feed_items.append(
+            {
+                "kind": "friend_requests",
+                "title": _localize(language, "Ждут ответы по друзьям", "Friend requests waiting"),
+                "description": _localize(
+                    language,
+                    f"У тебя {pending_friend_requests} входящих заявок. Ответь, чтобы открыть общий рейтинг и кооп.",
+                    f"You have {pending_friend_requests} incoming requests. Accept them to unlock more coop and ranking.",
+                ),
+                "action": "friends",
+                "action_label": _localize(language, "Открыть друзей", "Open friends"),
+            }
+        )
+    if pending_challenge_invitations:
+        feed_items.append(
+            {
+                "kind": "challenge_invitations",
+                "title": _localize(language, "Есть новые коопы и вызовы", "New coop and challenge invites"),
+                "description": _localize(
+                    language,
+                    f"Тебя ждут приглашения: {pending_challenge_invitations}. Не дай им остыть.",
+                    f"You have {pending_challenge_invitations} fresh invites waiting.",
+                ),
+                "action": "coop",
+                "action_label": _localize(language, "Открыть кооп", "Open coop"),
+            }
+        )
+    if weekly_snapshot.get("closest_friend_ahead"):
+        ahead = weekly_snapshot["closest_friend_ahead"]
+        feed_items.append(
+            {
+                "kind": "weekly_chase",
+                "title": _localize(language, "Близкая цель в недельном рейтинге", "Close target in the weekly board"),
+                "description": _localize(
+                    language,
+                    f"До @{ahead['username'] or ahead['name']} осталось {ahead['gap_steps']} шагов на недельной таблице.",
+                    f"Only {ahead['gap_steps']} steps left to catch @{ahead['username'] or ahead['name']} this week.",
+                ),
+                "action": "leaderboard",
+                "action_label": _localize(language, "Открыть рейтинг", "Open leaderboard"),
+            }
+        )
+    if recent_friend_activity:
+        feed_items.append(
+            {
+                "kind": "friend_activity",
+                "title": _localize(language, "Друг уже разогнался", "A friend is already moving"),
+                "description": _localize(
+                    language,
+                    f"@{recent_friend_activity['username'] or recent_friend_activity['name']} закрыл {recent_friend_activity['quests_completed']} задач за последние сутки.",
+                    f"@{recent_friend_activity['username'] or recent_friend_activity['name']} cleared {recent_friend_activity['quests_completed']} tasks in the last 24 hours.",
+                ),
+                "action": "friends",
+                "action_label": _localize(language, "Сравнить прогресс", "Compare progress"),
+            }
+        )
+    if weekly_snapshot.get("closest_friend_behind"):
+        behind = weekly_snapshot["closest_friend_behind"]
+        feed_items.append(
+            {
+                "kind": "weekly_defense",
+                "title": _localize(language, "Тебя уже догоняют", "Someone is chasing you"),
+                "description": _localize(
+                    language,
+                    f"@{behind['username'] or behind['name']} отстает всего на {behind['gap_steps']} шагов за неделю.",
+                    f"@{behind['username'] or behind['name']} is only {behind['gap_steps']} steps behind this week.",
+                ),
+                "action": "leaderboard",
+                "action_label": _localize(language, "Удержать позицию", "Defend the rank"),
+            }
+        )
+    if (active_duels or active_coop) and len(feed_items) < 4:
+        feed_items.append(
+            {
+                "kind": "active_social",
+                "title": _localize(language, "Социальные режимы уже активны", "Social modes are already active"),
+                "description": _localize(
+                    language,
+                    f"Сейчас у тебя {active_duels} дуэлей и {active_coop} кооп-целей в работе.",
+                    f"You currently have {active_duels} active duels and {active_coop} coop goals running.",
+                ),
+                "action": "coop" if active_coop else "friends",
+                "action_label": _localize(language, "Вернуться в социальный раздел", "Back to social"),
+            }
+        )
+
+    primary_action = "friends"
+    primary_action_label = _localize(language, "Открыть друзей", "Open friends")
+    if pending_challenge_invitations:
+        primary_action = "coop"
+        primary_action_label = _localize(language, "Проверить кооп", "Check coop")
         description = _localize(
             language,
-            f"Есть новые приглашения: друзья {pending_friend_requests}, челленджи {pending_challenge_invitations}.",
-            f"You have new invites: friends {pending_friend_requests}, challenges {pending_challenge_invitations}.",
+            f"У тебя {pending_challenge_invitations} новых приглашений в кооп и вызовы. Ответь, пока импульс живой.",
+            f"You have {pending_challenge_invitations} fresh coop or challenge invites waiting.",
+        )
+    elif pending_friend_requests:
+        description = _localize(
+            language,
+            f"Тебя уже ждут {pending_friend_requests} новых друзей. Прими заявки и расширь сеть прогресса.",
+            f"{pending_friend_requests} new friends are waiting. Accept them and expand your progress network.",
+        )
+    elif weekly_snapshot.get("closest_friend_ahead"):
+        ahead = weekly_snapshot["closest_friend_ahead"]
+        primary_action = "leaderboard"
+        primary_action_label = _localize(language, "Открыть недельный рейтинг", "Open weekly board")
+        description = _localize(
+            language,
+            f"До @{ahead['username'] or ahead['name']} осталось всего {ahead['gap_steps']} шагов в недельном рейтинге.",
+            f"Only {ahead['gap_steps']} steps separate you from @{ahead['username'] or ahead['name']} on the weekly board.",
         )
     elif active_duels or active_coop:
+        primary_action = "coop" if active_coop else "friends"
+        primary_action_label = _localize(language, "Вернуться в социальный раздел", "Back to social")
         description = _localize(
             language,
-            f"Активно дуэлей: {active_duels}, кооперативных целей: {active_coop}.",
-            f"Active duels: {active_duels}, coop goals: {active_coop}.",
+            f"В работе {active_duels} дуэлей и {active_coop} кооп-целей. Сейчас лучший момент дожать их.",
+            f"You have {active_duels} duels and {active_coop} coop goals in progress. Good moment to finish them.",
         )
     else:
         description = _localize(
             language,
-            f"Друзей в сети прогресса: {friends_count}. Самое время звать в кооп.",
-            f"Progress-network friends: {friends_count}. Good time to invite someone to coop.",
+            f"У тебя {friends_count} друзей в сети прогресса. Самое время открыть недельный рейтинг и найти цель рядом.",
+            f"You have {friends_count} friends in your progress network. Open the weekly board and find a nearby target.",
         )
 
     return {
@@ -544,6 +767,13 @@ def get_social_pulse(db: Session, user: User) -> dict[str, Any]:
         "pending_challenge_invitations": pending_challenge_invitations,
         "active_duels": active_duels,
         "active_coop": active_coop,
+        "weekly_rank": weekly_snapshot.get("weekly_rank"),
+        "weekly_total": weekly_snapshot.get("weekly_total"),
+        "closest_friend_ahead": weekly_snapshot.get("closest_friend_ahead"),
+        "closest_friend_behind": weekly_snapshot.get("closest_friend_behind"),
+        "primary_action": primary_action,
+        "primary_action_label": primary_action_label,
+        "feed_items": feed_items[:4],
     }
 
 

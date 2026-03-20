@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_
 
 from app import crud
+from app.core.cache import invalidate_leaderboard_cache
 from app.models import Quest, User
 from app.schemas import QuestCreate
 import app.services.goal_service as goal_service
@@ -88,6 +89,7 @@ def complete_quest(db: Session, user_id: int, quest_id: int):
         )
 
     goal_service.apply_goal_progress_on_completion(db, user_id, quest_id)
+    invalidate_leaderboard_cache()
     payload = _serialize_completion_result(result)
     if current_user:
         goal_state = goal_service.get_user_goal_state(db, current_user)

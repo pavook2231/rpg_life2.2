@@ -139,7 +139,6 @@ export function QuestsScreen() {
       await createCustomQuest({
         title,
         description,
-        xp_reward: 40,
         icon: "notebook-edit-outline",
       });
       setShowCreateModal(false);

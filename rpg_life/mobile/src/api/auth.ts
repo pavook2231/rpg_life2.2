@@ -5,6 +5,8 @@ export type AuthPayload = {
     id: number;
     email: string;
     name: string | null;
+    username?: string | null;
+    friend_id?: string | null;
   };
   tokens: {
     access_token: string;
@@ -55,6 +57,7 @@ export function register(payload: {
   email: string;
   password: string;
   name: string;
+  username?: string;
   birth_year: number;
   gender: string;
   character_class: string;

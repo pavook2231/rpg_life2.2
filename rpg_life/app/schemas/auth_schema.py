@@ -1,15 +1,18 @@
 import re
 from datetime import datetime
+from typing import Optional
 
 from pydantic import BaseModel, EmailStr, field_validator
 
 from app.goals import SUPPORTED_GOAL_TERMS, normalize_goal_type
+from app.user_identity import normalize_username, username_matches_rules, username_validation_error
 
 
 class UserCreate(BaseModel):
     email: EmailStr
     password: str
     name: str
+    username: Optional[str] = None
     birth_year: int
     gender: str = "unspecified"
     character_class: str = "mage"
@@ -35,6 +38,16 @@ class UserCreate(BaseModel):
         if cleaned[0].isdigit():
             raise ValueError("Имя не может начинаться с цифры")
         return cleaned
+
+    @field_validator("username")
+    @classmethod
+    def validate_username(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        normalized = normalize_username(value)
+        if not normalized or not username_matches_rules(normalized):
+            raise ValueError(username_validation_error())
+        return normalized
 
     @field_validator("birth_year")
     @classmethod

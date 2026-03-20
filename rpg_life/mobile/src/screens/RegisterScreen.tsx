@@ -12,6 +12,7 @@ import {
 } from "react-native";
 
 import { fetchGoalTemplates, type GoalTemplatePayload } from "../api/auth";
+import { SocialAuthSection } from "../components/SocialAuthSection";
 import { Screen } from "../components/Screen";
 import { useAuth } from "../context/AuthContext";
 import { useFeedback } from "../context/FeedbackContext";
@@ -30,6 +31,14 @@ function isValidEmail(value: string) {
 
 function hasLetter(value: string) {
   return /[A-Za-zА-Яа-я]/.test(value);
+}
+
+function normalizeUsernameInput(value: string) {
+  return value.trim().toLowerCase().replace(/^@+/, "");
+}
+
+function isValidUsername(value: string) {
+  return /^[a-z][a-z0-9_]{2,23}$/.test(normalizeUsernameInput(value));
 }
 
 function getFallbackGoals(t: (key: string, params?: Record<string, string | number>) => string): GoalCard[] {
@@ -98,6 +107,7 @@ export function RegisterScreen({ onBackToLogin }: Props) {
   const styles = useMemo(() => createStyles(colors, themeMode), [colors, themeMode]);
   const fallbackGoals = useMemo(() => getFallbackGoals(t), [t]);
   const [name, setName] = useState("");
+  const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [birthYear, setBirthYear] = useState("2000");
@@ -153,6 +163,7 @@ export function RegisterScreen({ onBackToLogin }: Props) {
   async function handleRegister() {
     const trimmedEmail = email.trim();
     const trimmedName = name.trim();
+    const trimmedUsername = normalizeUsernameInput(username);
     const numericBirthYear = Number(birthYear);
     const currentYear = new Date().getFullYear();
 
@@ -186,6 +197,16 @@ export function RegisterScreen({ onBackToLogin }: Props) {
       return;
     }
 
+    if (trimmedUsername && !isValidUsername(trimmedUsername)) {
+      await pushToast({
+        title: t("screens.register.errors.registrationFailed"),
+        description: t("screens.register.quick.invalidUsername"),
+        icon: "at",
+        tone: "warning",
+      });
+      return;
+    }
+
     if (!Number.isInteger(numericBirthYear) || numericBirthYear < 1950 || numericBirthYear > currentYear - 10) {
       await pushToast({
         title: t("screens.register.errors.registrationFailed"),
@@ -202,6 +223,7 @@ export function RegisterScreen({ onBackToLogin }: Props) {
         email: trimmedEmail,
         password,
         name: trimmedName,
+        username: trimmedUsername || undefined,
         birthYear: numericBirthYear,
         gender,
         characterClass,
@@ -232,6 +254,11 @@ export function RegisterScreen({ onBackToLogin }: Props) {
           </View>
         </View>
 
+        <SocialAuthSection
+          title={t("screens.register.quick.socialSectionTitle")}
+          hint={t("screens.register.quick.socialSectionHint")}
+        />
+
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>{t("screens.register.basicData")}</Text>
           <TextInput
@@ -240,6 +267,14 @@ export function RegisterScreen({ onBackToLogin }: Props) {
             style={styles.input}
             value={email}
             onChangeText={setEmail}
+            autoCapitalize="none"
+          />
+          <TextInput
+            placeholder={t("screens.register.usernamePlaceholder")}
+            placeholderTextColor={colors.textDim}
+            style={styles.input}
+            value={username}
+            onChangeText={setUsername}
             autoCapitalize="none"
           />
           <TextInput

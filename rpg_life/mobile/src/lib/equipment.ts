@@ -1,5 +1,8 @@
 type EquipmentEntry = {
   slot: string;
+  weapon_stats?: {
+    weapon_category?: string | null;
+  } | null;
 };
 
 type TranslateFn = (key: string, params?: Record<string, string | number>) => string;
@@ -99,6 +102,11 @@ export function pickEquipSlot(detail: ItemDetail, equipped: EquipmentEntry[] = [
   const slots = getAvailableSlots(detail);
   if (!slots.length) return item.slot ?? "main_hand";
   if (slots.length === 1) return slots[0];
+
+  const mainHandEntry = equipped.find((entry) => entry.slot === "main_hand");
+  if (mainHandEntry?.weapon_stats?.weapon_category === "two_hand" && slots.includes("main_hand")) {
+    return "main_hand";
+  }
 
   const occupied = new Set(equipped.map((entry) => entry.slot));
   const emptySlot = slots.find((slot) => !occupied.has(slot));

@@ -14,6 +14,7 @@ import { useFeedback } from "../context/FeedbackContext";
 import { useGame } from "../context/GameContext";
 import { useLocalization, useTranslation } from "../context/LocalizationContext";
 import { buildItemStatEntries, pickEquipSlot } from "../lib/equipment";
+import { buildItemComparison } from "../lib/itemComparison";
 import { buildDerivedStats } from "../lib/gameRules";
 import { getRarityLabel, getSlotLabel, normalizeItemText } from "../lib/gameUi";
 import { getNextHealthDecayLabel } from "../lib/healthUi";
@@ -31,7 +32,7 @@ import {
 } from "../ui";
 
 const LEFT_SLOTS = ["head", "neck", "shoulders", "chest", "waist", "ring1", "trinket1"] as const;
-const RIGHT_SLOTS = ["back", "main_hand", "wrist", "hands", "legs", "feet"] as const;
+const RIGHT_SLOTS = ["back", "main_hand", "off_hand", "wrist", "hands", "legs", "feet"] as const;
 
 function mapEquipmentToLayers(entries: Array<{ slot: string }> = []): LayeredEquipment {
   const layered: LayeredEquipment = {};
@@ -90,6 +91,10 @@ export function CharacterScreen() {
     }
     return map;
   }, [equipment?.equipment]);
+  const selectedComparison = useMemo(
+    () => (selectedItem?.is_equipped ? null : buildItemComparison(selectedItem, equipment?.equipment ?? [], t)),
+    [equipment?.equipment, selectedItem, t],
+  );
   const derivedStats = useMemo(
     () => buildDerivedStats(equipment?.class_info, equipment?.equipment_totals, equipment?.reward_effects),
     [equipment],
@@ -492,6 +497,9 @@ export function CharacterScreen() {
         description={normalizeItemText(selectedItem?.item?.description)}
         metaRows={selectedItem ? [{ label: t("screens.character.sellPrice"), value: `${selectedItem.sell_price} ${t("common.gold")}` }] : []}
         statEntries={selectedItem ? buildItemStatEntries(selectedItem, t) : []}
+        comparisonTitle={selectedComparison?.comparisonTitle}
+        comparisonIntro={selectedComparison?.comparisonIntro}
+        comparisonRows={selectedComparison?.comparisonRows}
         actions={
           selectedItem
             ? [

@@ -2,7 +2,7 @@ import pytest
 from fastapi import HTTPException
 
 from app.beta_content import CHEST_CATALOG
-from app.models import User, UserClassProgress, UserInventory
+from app.models import CharacterEquipment, User, UserClassProgress, UserInventory
 from app.schemas.beta_schema import ChestOpenSchema
 from app.services import beta_service, inventory_service
 from app.items_data import ITEMS
@@ -168,4 +168,101 @@ def test_shop_item_can_be_equipped_unequipped_and_sold(db_session) -> None:
     assert sell_result["ok"] is True
     assert sell_result["sell_price"] > 0
     assert db_session.query(UserInventory).filter(UserInventory.id == inventory_item.id).count() == 0
+
+
+def test_shop_item_stats_stay_consistent_after_purchase_and_equip(db_session) -> None:
+    user = _create_user(db_session, "shop-consistency@example.com")
+    progress = _create_progress(db_session, user.id, crystals=2_000)
+    progress.class_name = "warrior"
+    progress.display_name = "Warrior"
+    progress.level = 12
+    db_session.commit()
+
+    context = inventory_service.get_shop_context(db_session, user)
+    shop_item = next(item for item in context["items"] if item.get("id") == 205)
+
+    purchase_result = inventory_service.buy_shop_item(db_session, user, shop_item["id"])
+    assert purchase_result["ok"] is True
+
+    inventory_item = (
+        db_session.query(UserInventory)
+        .filter(UserInventory.user_id == user.id)
+        .order_by(UserInventory.id.desc())
+        .first()
+    )
+    assert inventory_item is not None
+
+    detail_before_equip = inventory_service.get_inventory_item_detail(db_session, user, inventory_item.id)
+    equip_result = inventory_service.equip_inventory_item(db_session, user, inventory_item.id, "main_hand", progress.id)
+    equipment_context = inventory_service.build_character_inventory_context(db_session, user, None)
+
+    assert equip_result["ok"] is True
+    assert detail_before_equip["item"]["strength_bonus"] == shop_item["stats"]["strength_bonus"]
+    assert detail_before_equip["item"]["stamina_bonus"] == shop_item["stats"]["stamina_bonus"]
+    assert detail_before_equip["weapon_stats"]["damage_min"] == shop_item["weapon_stats"]["damage_min"]
+    assert detail_before_equip["weapon_stats"]["damage_max"] == shop_item["weapon_stats"]["damage_max"]
+
+    equipped_main_hand = equipment_context["equipment"]["main_hand"]
+    assert equipped_main_hand["inventory_id"] == inventory_item.id
+    assert equipped_main_hand["item"].strength_bonus == shop_item["stats"]["strength_bonus"]
+    assert equipped_main_hand["item"].stamina_bonus == shop_item["stats"]["stamina_bonus"]
+    assert equipped_main_hand["weapon_stats"].damage_min == shop_item["weapon_stats"]["damage_min"]
+    assert equipped_main_hand["weapon_stats"].damage_max == shop_item["weapon_stats"]["damage_max"]
+
+
+def test_equipping_two_hand_weapon_clears_off_hand_and_returns_item_to_bag(db_session) -> None:
+    user = _create_user(db_session, "shop-two-hand@example.com")
+    progress = _create_progress(db_session, user.id, crystals=2_000)
+    progress.class_name = "warrior"
+    progress.display_name = "Warrior"
+    progress.level = 12
+    db_session.commit()
+
+    inventory_service.buy_shop_item(db_session, user, 101)
+    inventory_service.buy_shop_item(db_session, user, 205)
+
+    inventory_rows = (
+        db_session.query(UserInventory)
+        .filter(UserInventory.user_id == user.id)
+        .order_by(UserInventory.id.asc())
+        .all()
+    )
+    off_hand_item = inventory_rows[0]
+    two_hand_item = inventory_rows[-1]
+
+    off_hand_result = inventory_service.equip_inventory_item(db_session, user, off_hand_item.id, "off_hand", progress.id)
+    two_hand_result = inventory_service.equip_inventory_item(db_session, user, two_hand_item.id, "main_hand", progress.id)
+    off_hand_detail = inventory_service.get_inventory_item_detail(db_session, user, off_hand_item.id)
+    two_hand_detail = inventory_service.get_inventory_item_detail(db_session, user, two_hand_item.id)
+    equipment_row = (
+        db_session.query(CharacterEquipment)
+        .filter(CharacterEquipment.user_id == user.id, CharacterEquipment.class_progress_id == progress.id)
+        .one()
+    )
+    equipment_context = inventory_service.build_character_inventory_context(db_session, user, None)
+    bag_ids = {item.id for item in equipment_context["bag_items"]}
+
+    assert off_hand_result["ok"] is True
+    assert two_hand_result["ok"] is True
+    assert equipment_row.main_hand_id == two_hand_item.id
+    assert equipment_row.off_hand_id is None
+    assert two_hand_detail["is_equipped"] is True
+    assert off_hand_detail["is_equipped"] is False
+    assert "off_hand" not in equipment_context["equipment"]
+    assert off_hand_item.id in bag_ids
+
+
+def test_build_character_context_prunes_stale_off_hand_reference(db_session) -> None:
+    user = _create_user(db_session, "shop-stale-slot@example.com")
+    progress = _create_progress(db_session, user.id, crystals=500)
+
+    equipment_row = CharacterEquipment(user_id=user.id, class_progress_id=progress.id, off_hand_id=999999)
+    db_session.add(equipment_row)
+    db_session.commit()
+
+    context = inventory_service.build_character_inventory_context(db_session, user, None)
+    db_session.refresh(equipment_row)
+
+    assert context["equipment"] == {}
+    assert equipment_row.off_hand_id is None
 
