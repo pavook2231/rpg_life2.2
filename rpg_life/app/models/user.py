@@ -14,6 +14,7 @@ class User(Base):
     email = Column(String, unique=True, index=True)
     hashed_password = Column(String)
     name = Column(String, nullable=True)
+    username = Column(String, unique=True, index=True, nullable=True)
     birth_year = Column(Integer, nullable=True)
     gender = Column(String, default="unspecified")
     language_preference = Column(String, default="ru")

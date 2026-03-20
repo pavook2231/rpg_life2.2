@@ -16,6 +16,7 @@ import { useGame } from "../context/GameContext";
 import { useFeedback } from "../context/FeedbackContext";
 import { useTranslation } from "../context/LocalizationContext";
 import { buildItemStatEntries, buildItemStats, pickEquipSlot } from "../lib/equipment";
+import { buildItemComparison } from "../lib/itemComparison";
 import { getRarityLabel, getSlotLabel, normalizeItemText } from "../lib/gameUi";
 import { Button, Card, ChestOpeningModal, FullscreenItemDetails, ItemCard, LoadingAnimation, radii, useThemeColors } from "../ui";
 
@@ -46,6 +47,10 @@ export function InventoryScreen() {
   const [isLoadingInventory, setIsLoadingInventory] = useState(false);
   const [activeItemAction, setActiveItemAction] = useState<ItemAction>(null);
   const isPhoneLayout = width < 420;
+  const selectedComparison = useMemo(
+    () => (selectedItem?.is_equipped ? null : buildItemComparison(selectedItem, equipment?.equipment ?? [], t)),
+    [equipment?.equipment, selectedItem, t],
+  );
 
   const loadInventory = useCallback(async () => {
     setIsLoadingInventory(true);
@@ -305,6 +310,9 @@ export function InventoryScreen() {
             : []
         }
         stats={selectedItem ? buildItemStats(selectedItem, t) : []}
+        comparisonTitle={selectedComparison?.comparisonTitle}
+        comparisonIntro={selectedComparison?.comparisonIntro}
+        comparisonRows={selectedComparison?.comparisonRows}
         actions={
           selectedItem
             ? [

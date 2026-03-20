@@ -4,6 +4,7 @@ from typing import Optional
 from pydantic import BaseModel, field_validator
 
 from app.goals import SUPPORTED_GOAL_TERMS, normalize_goal_type
+from app.user_identity import normalize_username, username_matches_rules, username_validation_error
 
 
 def _validate_person_name(value: Optional[str], label: str) -> Optional[str]:
@@ -45,6 +46,7 @@ class OnboardingSchema(BaseModel):
 
 class ProfileUpdateSchema(BaseModel):
     name: Optional[str] = None
+    username: Optional[str] = None
     birth_year: Optional[int] = None
     gender: Optional[str] = None
     character_name: Optional[str] = None
@@ -58,6 +60,16 @@ class ProfileUpdateSchema(BaseModel):
     @classmethod
     def validate_name(cls, value: Optional[str]) -> Optional[str]:
         return _validate_person_name(value, "Имя")
+
+    @field_validator("username")
+    @classmethod
+    def validate_username(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        normalized = normalize_username(value)
+        if not normalized or not username_matches_rules(normalized):
+            raise ValueError(username_validation_error())
+        return normalized
 
     @field_validator("character_name")
     @classmethod

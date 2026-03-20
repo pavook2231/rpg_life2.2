@@ -81,11 +81,18 @@ def _issue_refresh_token(db: Session, user: User) -> str:
 
 
 def _build_auth_payload_for_user(db: Session, user: User) -> dict:
+    user = crud.ensure_user_identity(db, user, commit=True)
     access_token = auth.create_access_token(data={"sub": user.email}, expires_delta=ACCESS_TOKEN_EXPIRE_DELTA)
     refresh_token = _issue_refresh_token(db, user)
     db.commit()
     return {
-        "user": {"id": user.id, "email": user.email, "name": user.name},
+        "user": {
+            "id": user.id,
+            "email": user.email,
+            "name": user.name,
+            "username": user.username,
+            "friend_id": crud.user_friend_id(user),
+        },
         "tokens": {
             "access_token": access_token,
             "refresh_token": refresh_token,
@@ -189,7 +196,7 @@ def _resolve_or_create_social_user(
 
     db.commit()
     db.refresh(user)
-    return user
+    return crud.ensure_user_identity(db, user, preferred_username=username, commit=True)
 
 
 def _verify_google_id_token(id_token: str) -> dict:
@@ -601,6 +608,7 @@ def register_user(db: Session, user_data: UserCreate) -> JSONResponse:
         user_data.password,
         user_data.character_class,
         name=user_data.name,
+        username=user_data.username,
         birth_year=user_data.birth_year,
         gender=user_data.gender,
         goal_type=user_data.goal_type,
@@ -645,6 +653,7 @@ def register_user_tokens(db: Session, user_data: UserCreate) -> dict:
         user_data.password,
         user_data.character_class,
         name=user_data.name,
+        username=user_data.username,
         birth_year=user_data.birth_year,
         gender=user_data.gender,
         goal_type=user_data.goal_type,

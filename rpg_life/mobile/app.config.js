@@ -70,7 +70,7 @@ module.exports = () => {
   const enableAccountRecovery = envFlag("EXPO_PUBLIC_ENABLE_ACCOUNT_RECOVERY", false);
   const googleAuthClientId = getEnvValue(
     "EXPO_PUBLIC_GOOGLE_AUTH_CLIENT_ID",
-    getEnvValue("GOOGLE_AUTH_MOBILE_CLIENT_ID", "723557656382-ol45mkmikajrkjs1amidtkkmf08q8ftq.apps.googleusercontent.com")
+    getEnvValue("GOOGLE_AUTH_MOBILE_CLIENT_ID", "723557656382-vm0ahmv322777ea3l07t7rq87diif5uk.apps.googleusercontent.com")
   );
   const googleAuthAndroidClientId = getEnvValue(
     "EXPO_PUBLIC_GOOGLE_AUTH_ANDROID_CLIENT_ID",

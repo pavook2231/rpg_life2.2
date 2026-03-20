@@ -36,6 +36,8 @@ services:
         value: "60"
       - key: SOCIAL_AUTH_REDIRECT_SCHEME
         value: rpglife
+      - key: PUBLIC_BASE_URL
+        value: https://rpglife.online
       - key: DATABASE_URL
         fromDatabase:
           name: rpg-life-db
@@ -64,9 +66,25 @@ services:
       - key: GOOGLE_AUTH_ENABLED
         value: "true"
       - key: GOOGLE_AUTH_MOBILE_CLIENT_ID
-        value: 723557656382-ol45mkmikajrkjs1amidtkkmf08q8ftq.apps.googleusercontent.com
+        value: 723557656382-vm0ahmv322777ea3l07t7rq87diif5uk.apps.googleusercontent.com
+      - key: GOOGLE_AUTH_ANDROID_CLIENT_ID
+        value: 723557656382-vm0ahmv322777ea3l07t7rq87diif5uk.apps.googleusercontent.com
+      - key: GOOGLE_AUTH_WEB_CLIENT_ID
+        value: 723557656382-vm0ahmv322777ea3l07t7rq87diif5uk.apps.googleusercontent.com
       - key: GOOGLE_AUTH_CLIENT_SECRET
         sync: false
+      - key: VK_AUTH_ENABLED
+        value: "true"
+      - key: VK_AUTH_APP_ID
+        value: "54492457"
+      - key: VK_AUTH_SCOPE
+        value: email
+      - key: VK_AUTH_DOMAIN
+        value: id.vk.com
+      - key: VK_AUTH_MAX_AGE_SECONDS
+        value: "900"
+      - key: SOCIAL_BRIDGE_TICKET_MAX_AGE_SECONDS
+        value: "300"
       - key: YANDEX_AUTH_ENABLED
         sync: false
       - key: YANDEX_AUTH_MOBILE_CLIENT_ID

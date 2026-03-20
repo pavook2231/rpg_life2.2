@@ -16,6 +16,16 @@ import { useTranslation } from "../context/LocalizationContext";
 import { useGame } from "../context/GameContext";
 import { useThemeColors } from "../ui/theme";
 
+function translateOrFallback(
+  t: (key: string, params?: Record<string, string | number>) => string,
+  key: string,
+  fallback: string,
+  params?: Record<string, string | number>,
+) {
+  const translated = t(key, params);
+  return translated === key ? fallback : translated;
+}
+
 export function CoopQuestsScreen() {
   const navigation = useNavigation<any>();
   const t = useTranslation();
@@ -98,6 +108,24 @@ export function CoopQuestsScreen() {
       failed: t("screens.coopTasks.status.failed"),
     };
     return labels[status] ?? status;
+  }
+
+  function getProgressPercent(quest: CoopQuest) {
+    return Math.min(100, Math.round((quest.progress / Math.max(quest.goal, 1)) * 100));
+  }
+
+  function getQuestWindowLabel(quest: CoopQuest) {
+    const endsAt = new Date(quest.end_time).getTime();
+    const diffMs = endsAt - Date.now();
+    if (diffMs <= 0) {
+      return translateOrFallback(t, "screens.coopTasks.timeEnded", "Окно завершено");
+    }
+    const totalHours = Math.ceil(diffMs / (60 * 60 * 1000));
+    if (totalHours < 24) {
+      return translateOrFallback(t, "screens.coopTasks.timeHours", `Осталось ${totalHours} ч`, { hours: totalHours });
+    }
+    const totalDays = Math.ceil(totalHours / 24);
+    return translateOrFallback(t, "screens.coopTasks.timeDays", `Осталось ${totalDays} д`, { days: totalDays });
   }
 
   function scrollToPendingInvitations() {
@@ -185,27 +213,45 @@ export function CoopQuestsScreen() {
           ) : null}
           {coopQuests.map((quest) => (
             <Card key={quest.id}>
-              <Text style={styles.cardTitle}>{quest.title}</Text>
+              <View style={styles.questHeader}>
+                <View style={styles.questHeaderCopy}>
+                  <Text style={styles.cardTitle}>{quest.title}</Text>
+                  <Text style={styles.metaText}>
+                    {getObjectiveLabel(quest.objective_type)} - {getQuestWindowLabel(quest)}
+                  </Text>
+                </View>
+                <View style={styles.statusBadge}>
+                  <Text style={styles.statusBadgeText}>{getStatusLabel(quest.status)}</Text>
+                </View>
+              </View>
+              {!!quest.description ? <Text style={styles.description}>{quest.description}</Text> : null}
               <Text style={styles.metaText}>
                 {t("screens.coopTasks.progress", {
                   current: quest.progress,
                   goal: quest.goal,
                 })}
+                {" • "}
+                {getProgressPercent(quest)}%
               </Text>
-              <Text style={styles.metaText}>
-                {getObjectiveLabel(quest.objective_type)} - {getStatusLabel(quest.status)}
-              </Text>
-              {!!quest.description ? <Text style={styles.description}>{quest.description}</Text> : null}
+              <View style={styles.progressTrack}>
+                <View style={[styles.progressFill, { width: `${getProgressPercent(quest)}%` }]} />
+              </View>
               <Text style={styles.rewardText}>
                 +{quest.reward.xp} XP / +{quest.reward.crystals} {t("common.crystals")}
               </Text>
               <View style={styles.participants}>
-                {quest.participants.map((participant) => (
-                  <Text key={`${quest.id}-${participant.user_id}`} style={styles.participantText}>
-                    {participant.is_current_user ? t("screens.coopTasks.youLabel", { name: participant.name }) : participant.name}
-                    {" - "}
-                    {participant.contribution}
-                  </Text>
+                {quest.participants.map((participant, index) => (
+                  <View
+                    key={`${quest.id}-${participant.user_id}`}
+                    style={[styles.participantRow, participant.is_current_user ? styles.participantRowCurrent : null]}
+                  >
+                    <Text style={[styles.participantText, participant.is_current_user ? styles.participantTextCurrent : null]}>
+                      #{index + 1} {participant.is_current_user ? t("screens.coopTasks.youLabel", { name: participant.name }) : participant.name}
+                    </Text>
+                    <Text style={[styles.participantValue, participant.is_current_user ? styles.participantTextCurrent : null]}>
+                      {participant.contribution}
+                    </Text>
+                  </View>
                 ))}
               </View>
             </Card>
@@ -236,6 +282,28 @@ function createStyles(colors: ReturnType<typeof useThemeColors>) {
       color: colors.text,
       marginBottom: 4,
     },
+    questHeader: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "flex-start",
+      gap: 12,
+    },
+    questHeaderCopy: {
+      flex: 1,
+    },
+    statusBadge: {
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.backgroundRaised,
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+    },
+    statusBadgeText: {
+      color: colors.text,
+      fontSize: 12,
+      fontWeight: "700",
+    },
     metaText: {
       fontSize: 14,
       color: colors.textDim,
@@ -252,12 +320,48 @@ function createStyles(colors: ReturnType<typeof useThemeColors>) {
       fontWeight: "600",
       marginBottom: 10,
     },
+    progressTrack: {
+      height: 8,
+      borderRadius: 999,
+      backgroundColor: colors.backgroundRaised,
+      overflow: "hidden",
+      marginBottom: 10,
+    },
+    progressFill: {
+      height: "100%",
+      borderRadius: 999,
+      backgroundColor: colors.primary,
+    },
     participants: {
       gap: 4,
+    },
+    participantRow: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.backgroundRaised,
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+      gap: 8,
+    },
+    participantRowCurrent: {
+      borderColor: colors.primary,
     },
     participantText: {
       fontSize: 13,
       color: colors.textDim,
+    },
+    participantTextCurrent: {
+      color: colors.text,
+      fontWeight: "700",
+    },
+    participantValue: {
+      fontSize: 13,
+      color: colors.textDim,
+      fontWeight: "700",
     },
     actionsRow: {
       flexDirection: "row",

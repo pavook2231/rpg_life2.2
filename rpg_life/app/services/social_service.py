@@ -9,6 +9,8 @@ from fastapi import HTTPException
 from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session, joinedload, selectinload
 
+from app import crud
+from app.core.cache import invalidate_leaderboard_cache
 from app.core.dates import utc_now
 from app.models import (
     Challenge,
@@ -24,6 +26,7 @@ from app.models import (
     User,
     UserClassProgress,
 )
+from app.user_identity import normalize_username_lookup, parse_public_user_id
 from . import notification_service
 
 from app.core.config import REDIS_URL
@@ -32,6 +35,7 @@ logger = logging.getLogger(__name__)
 
 SUPPORTED_OBJECTIVES = {"steps", "workouts", "quests_completed"}
 LEADERBOARD_METRICS = {"level", "quests", "steps", "challenge_wins"}
+LEADERBOARD_PERIODS = {"all_time", "weekly", "season"}
 MAX_FRIENDS = 50
 
 
@@ -44,14 +48,21 @@ def _get_redis_client():
         return None
 
 
-def _cached_user_stats_map(db: Session, user_ids: list[int]) -> dict[int, dict]:
+def _cached_user_stats_map(
+    db: Session,
+    user_ids: list[int],
+    *,
+    started_at: datetime | None = None,
+    ended_at: datetime | None = None,
+) -> dict[int, dict]:
     """Get user stats with Redis caching"""
     if not user_ids:
         return {}
-    
+
     redis_client = _get_redis_client()
-    cache_key = f"user_stats:{','.join(map(str, sorted(user_ids)))}"
-    
+    window_key = f"{started_at.isoformat() if started_at else 'all'}:{ended_at.isoformat() if ended_at else 'all'}"
+    cache_key = f"user_stats:{','.join(map(str, sorted(user_ids)))}:{window_key}"
+
     # Try to get from cache
     if redis_client:
         try:
@@ -61,20 +72,27 @@ def _cached_user_stats_map(db: Session, user_ids: list[int]) -> dict[int, dict]:
                 return {int(user_id): stats for user_id, stats in payload.items()}
         except Exception:
             logger.warning("Failed to get stats from cache")
-    
+
     # Compute stats
-    stats_map = _compute_user_stats_map(db, user_ids)
-    
+    stats_map = _compute_user_stats_map(db, user_ids, started_at=started_at, ended_at=ended_at)
+
     # Cache for 5 minutes
     if redis_client:
         try:
             redis_client.setex(cache_key, 300, json.dumps(stats_map))
         except Exception:
             logger.warning("Failed to cache stats")
-    
+
     return stats_map
 
-def _compute_user_stats_map(db: Session, user_ids: list[int]) -> dict[int, dict]:
+
+def _compute_user_stats_map(
+    db: Session,
+    user_ids: list[int],
+    *,
+    started_at: datetime | None = None,
+    ended_at: datetime | None = None,
+) -> dict[int, dict]:
     if not user_ids:
         return {}
 
@@ -85,28 +103,34 @@ def _compute_user_stats_map(db: Session, user_ids: list[int]) -> dict[int, dict]
         .group_by(UserClassProgress.user_id)
         .all()
     )
-    quest_rows = (
-        db.query(CompletedQuest.user_id, func.count(CompletedQuest.id))
-        .filter(CompletedQuest.user_id.in_(user_ids))
-        .group_by(CompletedQuest.user_id)
-        .all()
-    )
-    step_rows = (
-        db.query(DailySteps.user_id, func.sum(DailySteps.steps))
-        .filter(DailySteps.user_id.in_(user_ids))
-        .group_by(DailySteps.user_id)
-        .all()
-    )
-    win_rows = (
+    quest_query = db.query(CompletedQuest.user_id, func.count(CompletedQuest.id)).filter(CompletedQuest.user_id.in_(user_ids))
+    if started_at:
+        quest_query = quest_query.filter(CompletedQuest.completed_at >= started_at)
+    if ended_at:
+        quest_query = quest_query.filter(CompletedQuest.completed_at <= ended_at)
+    quest_rows = quest_query.group_by(CompletedQuest.user_id).all()
+
+    step_query = db.query(DailySteps.user_id, func.sum(DailySteps.steps)).filter(DailySteps.user_id.in_(user_ids))
+    if started_at:
+        step_query = step_query.filter(DailySteps.date >= started_at)
+    if ended_at:
+        step_query = step_query.filter(DailySteps.date <= ended_at)
+    step_rows = step_query.group_by(DailySteps.user_id).all()
+
+    resolved_at_expr = func.coalesce(Challenge.resolved_at, Challenge.end_at)
+    win_query = (
         db.query(Challenge.winner_id, func.count(Challenge.id))
         .filter(
             Challenge.winner_id.in_(user_ids),
             Challenge.challenge_type == "pvp",
             Challenge.status == "resolved",
         )
-        .group_by(Challenge.winner_id)
-        .all()
     )
+    if started_at:
+        win_query = win_query.filter(resolved_at_expr >= started_at)
+    if ended_at:
+        win_query = win_query.filter(resolved_at_expr <= ended_at)
+    win_rows = win_query.group_by(Challenge.winner_id).all()
 
     stats_map = {user_id: {"level": 1, "quests_completed": 0, "steps": 0, "challenge_wins": 0} for user_id in user_ids}
     for user_id, value in level_rows:
@@ -189,6 +213,66 @@ def _friend_ids(db: Session, user_id: int) -> list[int]:
     return [friend_id for (friend_id,) in rows]
 
 
+def _public_search_name(user: User) -> str:
+    if user.name and user.name.strip():
+        return user.name.strip()
+    return f"Игрок #{user.id}"
+
+
+def _leaderboard_period_payload(db: Session, period: str) -> dict:
+    if period not in LEADERBOARD_PERIODS:
+        raise HTTPException(status_code=400, detail="Unsupported leaderboard period")
+
+    now = utc_now()
+    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    if period == "weekly":
+        started_at = day_start - timedelta(days=6)
+        return {
+            "period": period,
+            "started_at": started_at,
+            "stats_end_at": now,
+            "display_ends_at": now,
+            "event_id": None,
+            "season_key": None,
+        }
+
+    if period == "season":
+        active_event = (
+            db.query(GameEvent)
+            .filter(GameEvent.status == "active", GameEvent.event_type == "season")
+            .order_by(GameEvent.end_at.asc())
+            .first()
+        )
+        if active_event:
+            return {
+                "period": period,
+                "started_at": active_event.start_at or (day_start - timedelta(days=29)),
+                "stats_end_at": now,
+                "display_ends_at": active_event.end_at or now,
+                "event_id": active_event.id,
+                "season_key": active_event.season_key,
+            }
+        started_at = day_start - timedelta(days=29)
+        return {
+            "period": period,
+            "started_at": started_at,
+            "stats_end_at": now,
+            "display_ends_at": now,
+            "event_id": None,
+            "season_key": None,
+        }
+
+    return {
+        "period": period,
+        "started_at": None,
+        "stats_end_at": None,
+        "display_ends_at": now,
+        "event_id": None,
+        "season_key": None,
+    }
+
+
 def send_friend_request(db: Session, current_user: User, receiver_id: int) -> dict:
     if receiver_id == current_user.id:
         raise HTTPException(status_code=400, detail="Нельзя добавить себя в друзья")
@@ -211,11 +295,25 @@ def send_friend_request(db: Session, current_user: User, receiver_id: int) -> di
         )
         .first()
     )
-    if existing:
+    if existing and existing.status == "pending":
         raise HTTPException(status_code=400, detail="Запрос в друзья уже существует")
 
-    request = FriendRequest(requester_id=current_user.id, receiver_id=receiver.id, status="pending")
-    db.add(request)
+    request = (
+        db.query(FriendRequest)
+        .filter(
+            FriendRequest.requester_id == current_user.id,
+            FriendRequest.receiver_id == receiver.id,
+        )
+        .first()
+    )
+    if request:
+        # Re-open the archived request instead of creating a duplicate pair row.
+        request.status = "pending"
+        request.created_at = utc_now()
+        request.responded_at = None
+    else:
+        request = FriendRequest(requester_id=current_user.id, receiver_id=receiver.id, status="pending")
+        db.add(request)
     db.commit()
     db.refresh(request)
     try:
@@ -233,7 +331,12 @@ def send_friend_request(db: Session, current_user: User, receiver_id: int) -> di
         "request": {
             "id": request.id,
             "status": request.status,
-            "receiver": {"id": receiver.id, "name": receiver.name or receiver.email},
+            "receiver": {
+                "id": receiver.id,
+                "name": receiver.name or receiver.email,
+                "username": receiver.username,
+                "friend_id": crud.user_friend_id(receiver),
+            },
             "created_at": request.created_at.isoformat(),
         },
     }
@@ -273,6 +376,8 @@ def respond_friend_request(db: Session, current_user: User, request_id: int, act
                 db.add(Friendship(user_id=user_id, friend_id=friend_id))
 
     db.commit()
+    if action == "accept":
+        invalidate_leaderboard_cache()
     return {"ok": True, "request_id": request.id, "status": request.status}
 
 
@@ -288,12 +393,15 @@ def _serialize_friend_request(request: FriendRequest, current_user_id: int) -> d
         "user": {
             "id": other_user.id,
             "name": other_user.name or other_user.email,
+            "username": other_user.username,
+            "friend_id": crud.user_friend_id(other_user),
             "email": other_user.email,
         },
     }
 
 
 def list_friend_requests(db: Session, current_user: User, status: str = "pending") -> dict:
+    crud.backfill_missing_usernames(db)
     rows = (
         db.query(FriendRequest)
         .options(joinedload(FriendRequest.requester), joinedload(FriendRequest.receiver))
@@ -320,16 +428,22 @@ def list_friends(
     sort_by: str = "name",
     sort_order: str = "asc",
 ) -> dict:
+    crud.backfill_missing_usernames(db)
     query = (
         db.query(Friendship)
         .options(joinedload(Friendship.friend))
         .filter(Friendship.user_id == current_user.id)
     )
     if search:
-        like = f"%{search.lower()}%"
-        query = query.join(Friendship.friend).filter(
-            func.lower(func.coalesce(User.name, User.email)).like(like)
-        )
+        normalized_search = normalize_username_lookup(search)
+        public_user_id = parse_public_user_id(search)
+        search_filters = []
+        if normalized_search:
+            search_filters.append(func.lower(func.coalesce(User.username, "")).like(f"%{normalized_search}%"))
+        if public_user_id:
+            search_filters.append(User.id == public_user_id)
+        if search_filters:
+            query = query.join(Friendship.friend).filter(or_(*search_filters))
 
     rows = query.all()
     friend_ids = [row.friend_id for row in rows]
@@ -343,6 +457,8 @@ def list_friends(
             {
                 "id": friend.id,
                 "name": friend.name or friend.email,
+                "username": friend.username,
+                "friend_id": crud.user_friend_id(friend),
                 "email": friend.email,
                 "stats": stats,
                 "friends_since": row.created_at.isoformat(),
@@ -360,16 +476,23 @@ def list_friends(
 
 
 def search_users(db: Session, current_user: User, query: str, page: int, page_size: int) -> dict:
-    like = f"%{query.lower()}%"
+    crud.backfill_missing_usernames(db)
+    normalized_query = normalize_username_lookup(query)
+    raw_query = query.lower().strip().lstrip("@")
+    public_user_id = parse_public_user_id(query)
+    search_filters = []
+    if normalized_query:
+        search_filters.append(func.lower(func.coalesce(User.username, "")).like(f"%{normalized_query}%"))
+    if public_user_id:
+        search_filters.append(User.id == public_user_id)
+    if not search_filters:
+        return _paginate([], page, page_size)
     rows = (
         db.query(User)
         .filter(
             User.is_active == True,
             User.id != current_user.id,
-            or_(
-                func.lower(User.name).like(like),
-                func.lower(User.email).like(like),
-            ),
+            or_(*search_filters),
         )
         .all()
     )
@@ -396,6 +519,23 @@ def search_users(db: Session, current_user: User, query: str, page: int, page_si
     for user in rows:
         if user.id in friend_ids:
             continue  # Already friends
+        public_name = _public_search_name(user)
+        username_value = (user.username or "").lower()
+        friend_id = crud.user_friend_id(user)
+        username_match = username_value.find(normalized_query) if normalized_query else -1
+        friend_id_match = (friend_id or "").lower().find(raw_query) if raw_query else -1
+        if public_user_id and user.id == public_user_id:
+            match_rank = -1
+        elif normalized_query and username_value == normalized_query:
+            match_rank = 0
+        elif username_match == 0:
+            match_rank = 1
+        elif username_match >= 0:
+            match_rank = 2
+        elif friend_id_match >= 0:
+            match_rank = 3
+        else:
+            match_rank = 20_000
         status = "none"
         request_id = None
         if user.id in outgoing_pending_requests:
@@ -407,14 +547,17 @@ def search_users(db: Session, current_user: User, query: str, page: int, page_si
 
         items.append({
             "id": user.id,
-            "name": user.name or user.email,
-            "email": user.email,
+            "name": public_name,
+            "username": user.username,
+            "friend_id": friend_id,
             "status": status,
             "request_id": request_id,
+            "_match_rank": match_rank,
         })
 
-    # Sort by relevance (name match first)
-    items.sort(key=lambda x: (x["name"].lower().find(query.lower()), x["name"]))
+    items.sort(key=lambda item: (item["_match_rank"], item["name"].lower()))
+    for item in items:
+        item.pop("_match_rank", None)
 
     return _paginate(items, page, page_size)
 
@@ -627,6 +770,7 @@ def resolve_pvp_challenges(db: Session) -> list[int]:
 
     if pending or resolved_ids:
         db.commit()
+        invalidate_leaderboard_cache()
         for challenge_id in resolved_ids:
             try:
                 notification_service.notify_challenge_completed(db, challenge_id=challenge_id)
@@ -637,6 +781,11 @@ def resolve_pvp_challenges(db: Session) -> list[int]:
 
 
 def _serialize_coop_quest(coop_quest: CoopQuest, current_user_id: int | None = None) -> dict:
+    participants = sorted(
+        coop_quest.participants,
+        key=lambda participant: (participant.contribution or 0, participant.user_id == current_user_id),
+        reverse=True,
+    )
     return {
         "id": coop_quest.id,
         "title": coop_quest.title,
@@ -653,7 +802,7 @@ def _serialize_coop_quest(coop_quest: CoopQuest, current_user_id: int | None = N
                 "contribution": participant.contribution,
                 "is_current_user": participant.user_id == current_user_id,
             }
-            for participant in coop_quest.participants
+            for participant in participants
         ],
         "start_time": coop_quest.start_at.isoformat(),
         "end_time": coop_quest.end_at.isoformat(),
@@ -761,6 +910,9 @@ def list_coop_quests(
 
     total = query.count()
     rows = query.offset((page - 1) * page_size).limit(page_size).all()
+    for row in rows:
+        _refresh_coop_progress(db, row)
+    db.commit()
     items = [_serialize_coop_quest(row, current_user.id) for row in rows]
     return {"items": items, "pagination": _pagination_meta(page, page_size, total)}
 
@@ -860,15 +1012,33 @@ def resolve_coop_quests(db: Session) -> list[int]:
             changed_ids.append(coop_quest.id)
     if changed_ids:
         db.commit()
+        invalidate_leaderboard_cache()
     return changed_ids
 
 
-def _build_leaderboard_items(db: Session, user_ids: list[int], metric: str) -> list[dict]:
+def _build_leaderboard_items(db: Session, user_ids: list[int], metric: str, period: str) -> dict:
+    period_payload = _leaderboard_period_payload(db, period)
+    if not user_ids:
+        return {
+            "items": [],
+            "period": period_payload["period"],
+            "period_started_at": period_payload["started_at"].isoformat() if period_payload["started_at"] else None,
+            "period_ends_at": period_payload["display_ends_at"].isoformat() if period_payload["display_ends_at"] else None,
+            "event_id": period_payload["event_id"],
+            "season_key": period_payload["season_key"],
+        }
+    crud.backfill_missing_usernames(db)
+
     # Load base users
     users = db.query(User).filter(User.id.in_(user_ids)).all()
 
     # Load stats and character/class info
-    stats_map = _cached_user_stats_map(db, user_ids)
+    stats_map = _cached_user_stats_map(
+        db,
+        user_ids,
+        started_at=period_payload["started_at"],
+        ended_at=period_payload["stats_end_at"],
+    )
 
     # Determine each user's main class (highest level unlocked)
     class_rows = (
@@ -899,8 +1069,9 @@ def _build_leaderboard_items(db: Session, user_ids: list[int], metric: str) -> l
         items.append(
             {
                 "user_id": user.id,
-                "name": user.name or user.email,
-                "email": user.email,
+                "name": _public_search_name(user),
+                "username": user.username,
+                "friend_id": crud.user_friend_id(user),
                 "level": stats.get("level", 1),
                 "quests_completed": stats.get("quests_completed", 0),
                 "steps": stats.get("steps", 0),
@@ -927,26 +1098,56 @@ def _build_leaderboard_items(db: Session, user_ids: list[int], metric: str) -> l
     items.sort(key=lambda item: (item["score"], item["level"], item["quests_completed"]), reverse=True)
     for index, item in enumerate(items, start=1):
         item["rank"] = index
-    return items
-
-
-def get_global_leaderboard(db: Session, metric: str, page: int, page_size: int) -> dict:
-    if metric not in LEADERBOARD_METRICS:
-        raise HTTPException(status_code=400, detail="Неподдерживаемый рейтинг")
-    user_ids = [user_id for (user_id,) in db.query(User.id).filter(User.is_active == True).all()]
     return {
-        "metric": metric,
-        **_paginate(_build_leaderboard_items(db, user_ids, metric), page, page_size),
+        "items": items,
+        "period": period_payload["period"],
+        "period_started_at": period_payload["started_at"].isoformat() if period_payload["started_at"] else None,
+        "period_ends_at": period_payload["display_ends_at"].isoformat() if period_payload["display_ends_at"] else None,
+        "event_id": period_payload["event_id"],
+        "season_key": period_payload["season_key"],
     }
 
 
-def get_friends_leaderboard(db: Session, current_user: User, metric: str, page: int, page_size: int) -> dict:
+def get_global_leaderboard(db: Session, metric: str, page: int, page_size: int, period: str = "all_time") -> dict:
     if metric not in LEADERBOARD_METRICS:
         raise HTTPException(status_code=400, detail="Неподдерживаемый рейтинг")
-    user_ids = list({_id for _id in _friend_ids(db, current_user.id) + [current_user.id]})
+    if period not in LEADERBOARD_PERIODS:
+        raise HTTPException(status_code=400, detail="Unsupported leaderboard period")
+    user_ids = [user_id for (user_id,) in db.query(User.id).filter(User.is_active == True).all()]
+    payload = _build_leaderboard_items(db, user_ids, metric, period)
     return {
         "metric": metric,
-        **_paginate(_build_leaderboard_items(db, user_ids, metric), page, page_size),
+        "period": payload["period"],
+        "period_started_at": payload["period_started_at"],
+        "period_ends_at": payload["period_ends_at"],
+        "event_id": payload["event_id"],
+        "season_key": payload["season_key"],
+        **_paginate(payload["items"], page, page_size),
+    }
+
+
+def get_friends_leaderboard(
+    db: Session,
+    current_user: User,
+    metric: str,
+    page: int,
+    page_size: int,
+    period: str = "all_time",
+) -> dict:
+    if metric not in LEADERBOARD_METRICS:
+        raise HTTPException(status_code=400, detail="Неподдерживаемый рейтинг")
+    if period not in LEADERBOARD_PERIODS:
+        raise HTTPException(status_code=400, detail="Unsupported leaderboard period")
+    user_ids = list({_id for _id in _friend_ids(db, current_user.id) + [current_user.id]})
+    payload = _build_leaderboard_items(db, user_ids, metric, period)
+    return {
+        "metric": metric,
+        "period": payload["period"],
+        "period_started_at": payload["period_started_at"],
+        "period_ends_at": payload["period_ends_at"],
+        "event_id": payload["event_id"],
+        "season_key": payload["season_key"],
+        **_paginate(payload["items"], page, page_size),
     }
 
 
@@ -976,8 +1177,27 @@ def send_challenge_invitation(
         ChallengeInvitation.sender_id == sender.id,
         ChallengeInvitation.receiver_id == receiver_id,
         ChallengeInvitation.challenge_type == challenge_type,
-        ChallengeInvitation.status == "pending",
     ).first()
+    if existing and existing.status != "pending":
+        existing.title = title
+        existing.description = description
+        existing.objective_type = objective_type
+        existing.goal = goal
+        existing.reward_xp = reward_xp
+        existing.reward_crystals = reward_crystals
+        existing.status = "pending"
+        existing.created_at = utc_now()
+        existing.responded_at = None
+        db.commit()
+        db.refresh(existing)
+        notification_service.create_notification(
+            db,
+            receiver_id,
+            "challenge_invitation",
+            f"{sender.name} РїСЂРёРіР»Р°С€Р°РµС‚ РІР°СЃ РЅР° С‡РµР»РµРЅРґР¶: {title}",
+            {"invitation_id": existing.id, "sender_name": sender.name},
+        )
+        return existing
     if existing:
         raise HTTPException(status_code=400, detail="Приглашение уже отправлено")
 

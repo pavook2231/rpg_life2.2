@@ -899,12 +899,13 @@ async def get_challenges(
 async def get_leaderboard(
     scope: str = Query("global", pattern="^(global|friends)$"),
     metric: str = Query("level"),
+    period: str = Query("all_time", pattern="^(all_time|weekly|season)$"),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
     current_user: User = Depends(auth.get_current_user),
 ):
-    return success_response(mobile_service.get_leaderboard(db, current_user, scope, metric, page, limit))
+    return success_response(mobile_service.get_leaderboard(db, current_user, scope, metric, page, limit, period))
 
 
 @router.get("/events", summary="РЎРѕР±С‹С‚РёСЏ")

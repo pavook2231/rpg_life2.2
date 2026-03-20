@@ -72,6 +72,14 @@ function isValidProfileName(value: string) {
   return trimmed.length >= 2 && !/^\d/.test(trimmed);
 }
 
+function normalizeUsernameInput(value: string) {
+  return value.trim().toLowerCase().replace(/^@+/, "");
+}
+
+function isValidUsername(value: string) {
+  return /^[a-z][a-z0-9_]{2,23}$/.test(normalizeUsernameInput(value));
+}
+
 function getAchievementStatusLabel(t: (key: string, params?: Record<string, string | number>) => string, status?: string | null) {
   if (status === "earned") return t("screens.profile.achievementStatus.earned");
   if (status === "available") return t("screens.profile.achievementStatus.available");
@@ -126,6 +134,7 @@ export function ProfileScreen() {
   const themeMode = useThemeMode();
   const styles = useMemo(() => createStyles(colors, themeMode), [colors, themeMode]);
   const [name, setName] = useState("");
+  const [username, setUsername] = useState("");
   const [characterName, setCharacterName] = useState("");
   const [birthYear, setBirthYear] = useState("2000");
   const [selectedAchievement, setSelectedAchievement] = useState<any>(null);
@@ -137,11 +146,12 @@ export function ProfileScreen() {
 
   useEffect(() => {
     setName(profile?.user?.name ?? "");
+    setUsername(profile?.user?.username ?? "");
     setCharacterName(hero?.name ?? profile?.user?.name ?? "");
     setBirthYear(String(profile?.user?.birth_year ?? 2000));
     setGoalType(profile?.user?.goal_type ?? "personal_development");
     setGoalTermMonths(profile?.user?.goal_term_months ?? 6);
-  }, [hero?.name, profile?.user?.birth_year, profile?.user?.goal_term_months, profile?.user?.goal_type, profile?.user?.name]);
+  }, [hero?.name, profile?.user?.birth_year, profile?.user?.goal_term_months, profile?.user?.goal_type, profile?.user?.name, profile?.user?.username]);
 
   useEffect(() => {
     let active = true;
@@ -162,6 +172,7 @@ export function ProfileScreen() {
 
   async function handleSave() {
     const trimmedName = name.trim();
+    const trimmedUsername = normalizeUsernameInput(username);
     const trimmedCharacterName = characterName.trim();
     const numericBirthYear = Number(birthYear);
     const currentYear = new Date().getFullYear();
@@ -171,6 +182,16 @@ export function ProfileScreen() {
         title: t("screens.profile.errors.failedToSave"),
         description: t("screens.profile.quick.invalidAccountName"),
         icon: "account-alert-outline",
+        tone: "warning",
+      });
+      return;
+    }
+
+    if (!isValidUsername(trimmedUsername)) {
+      await pushToast({
+        title: t("screens.profile.errors.failedToSave"),
+        description: t("screens.profile.quick.invalidUsername"),
+        icon: "at",
         tone: "warning",
       });
       return;
@@ -200,6 +221,7 @@ export function ProfileScreen() {
       setIsSavingProfile(true);
       await updateProfile({
         name: trimmedName,
+        username: trimmedUsername,
         character_name: trimmedCharacterName,
         birth_year: numericBirthYear,
         gender: profile?.user?.gender ?? "male",
@@ -261,7 +283,8 @@ export function ProfileScreen() {
 
   const currentLanguageLabel = t(`settings.languageSwitcher.${language}`);
   const displayHeroName = normalizeDisplayText(hero?.name ?? profile?.user?.name ?? t("screens.profile.unknownHero"));
-  const displayEmail = normalizeDisplayText(profile?.user?.email ?? "-");
+  const displayUsername = normalizeDisplayText(profile?.user?.username ? `@${profile.user.username}` : "-");
+  const displayFriendId = normalizeDisplayText(profile?.user?.friend_id ?? "-");
   const displayClass = getClassLabel(hero?.class ?? undefined, t);
   const earnedAchievements = useMemo(
     () => (achievements ?? []).filter((achievement) => achievement.status === "earned").length,
@@ -284,7 +307,7 @@ export function ProfileScreen() {
         isWounded={hero?.health?.is_wounded ?? profile?.health?.is_wounded ?? false}
         penaltyQuestsRemaining={hero?.health?.penalty_quests_remaining ?? profile?.health?.penalty_quests_remaining ?? 0}
         rewardPenaltyPercent={hero?.health?.reward_penalty_percent ?? profile?.health?.reward_penalty_percent ?? 0}
-        subtitle={`${displayClass} | ${displayEmail}`}
+        subtitle={`${displayClass} | ${displayUsername}`}
       />
 
       <Card>
@@ -293,12 +316,24 @@ export function ProfileScreen() {
           <Text style={styles.sectionMeta}>{currentLanguageLabel}</Text>
         </View>
 
+        <Text style={styles.quickSubtitle}>
+          {displayUsername} {displayFriendId !== "-" ? `| ${displayFriendId}` : ""}
+        </Text>
+
         <TextInput
           placeholder={t("screens.profile.accountName")}
           placeholderTextColor={colors.textDim}
           style={styles.input}
           value={name}
           onChangeText={setName}
+        />
+        <TextInput
+          placeholder={t("screens.profile.username")}
+          placeholderTextColor={colors.textDim}
+          style={styles.input}
+          value={username}
+          onChangeText={setUsername}
+          autoCapitalize="none"
         />
         <TextInput
           placeholder={t("screens.profile.characterName")}

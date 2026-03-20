@@ -648,9 +648,46 @@ const BY_SOURCE = CATALOG_ITEMS.reduce<Record<number, UnifiedCatalogItem>>((acc,
 function applyBonusesFromCatalog(base: AnyItemPayload, catalog: UnifiedCatalogItem) {
   const next: AnyItemPayload = { ...base };
   for (const key of BONUS_FIELDS) {
-    next[key] = catalog.bonuses[key];
+    if (typeof next[key] !== "number") {
+      next[key] = catalog.bonuses[key];
+    }
   }
   return next;
+}
+
+function pickPayloadValue<T>(payloadValue: T | null | undefined, fallbackValue: T): T {
+  if (payloadValue === null || payloadValue === undefined) {
+    return fallbackValue;
+  }
+  if (typeof payloadValue === "string") {
+    const normalized = payloadValue.trim();
+    return (normalized ? payloadValue : fallbackValue) as T;
+  }
+  return payloadValue;
+}
+
+function hasObjectValues(value: unknown) {
+  return Boolean(value && typeof value === "object" && Object.keys(value as Record<string, unknown>).length);
+}
+
+function buildStatsRecord(
+  payloadStats: Record<string, number> | undefined,
+  payloadItem: AnyItemPayload,
+  catalog: UnifiedCatalogItem | null,
+) {
+  if (hasObjectValues(payloadStats)) {
+    return { ...payloadStats };
+  }
+
+  const stats = BONUS_FIELDS.reduce<Record<string, number>>((acc, key) => {
+    const value = typeof payloadItem[key] === "number" ? payloadItem[key] : catalog?.bonuses[key] ?? 0;
+    if (value) {
+      acc[key] = value;
+    }
+    return acc;
+  }, {});
+
+  return stats;
 }
 
 export function getUnifiedItemCatalog() {
@@ -691,14 +728,14 @@ export function mapPayloadItemToCatalog<T extends AnyItemPayload>(payloadItem: T
   return {
     ...merged,
     id: payloadItem.id ?? catalog.id,
-    name: catalog.name,
-    description: catalog.description,
-    icon: catalog.iconName,
-    rarity: normalizeRarity(catalog.rarity),
-    type: catalog.category,
-    slot: catalog.slot ?? payloadItem.slot ?? null,
-    subclass: catalog.subclass ?? payloadItem.subclass ?? null,
-    required_level: catalog.requiredLevel,
+    name: pickPayloadValue(payloadItem.name, catalog.name),
+    description: pickPayloadValue(payloadItem.description, catalog.description),
+    icon: pickPayloadValue(payloadItem.icon, catalog.iconName),
+    rarity: normalizeRarity(payloadItem.rarity ?? catalog.rarity),
+    type: pickPayloadValue(payloadItem.type, catalog.category),
+    slot: payloadItem.slot ?? catalog.slot ?? null,
+    subclass: payloadItem.subclass ?? catalog.subclass ?? null,
+    required_level: payloadItem.required_level ?? catalog.requiredLevel,
   } as T;
 }
 
@@ -709,8 +746,8 @@ export function mapInventoryEntryToCatalog<T extends { item: AnyItemPayload; ite
   });
   const catalog = findUnifiedItemById(item.id) ?? findUnifiedItemByIcon(item.icon);
 
-  const weaponStats = catalog?.weaponStats ?? entry.weapon_stats ?? null;
-  const armorStats = catalog?.armorStats ?? entry.armor_stats ?? null;
+  const weaponStats = entry.weapon_stats ?? catalog?.weaponStats ?? null;
+  const armorStats = entry.armor_stats ?? catalog?.armorStats ?? null;
 
   return {
     ...entry,
@@ -733,8 +770,8 @@ export function mapInventoryDetailToCatalog<
   return {
     ...detail,
     item,
-    weapon_stats: catalog?.weaponStats ?? detail.weapon_stats ?? null,
-    armor_stats: catalog?.armorStats ?? detail.armor_stats ?? null,
+    weapon_stats: detail.weapon_stats ?? catalog?.weaponStats ?? null,
+    armor_stats: detail.armor_stats ?? catalog?.armorStats ?? null,
   };
 }
 
@@ -742,25 +779,19 @@ export function mapShopItemToCatalog<T extends AnyItemPayload & { id: number; pr
   const mapped = mapPayloadItemToCatalog(item);
   const catalog = findUnifiedItemById(mapped.id) ?? findUnifiedItemByIcon(mapped.icon);
   if (!catalog) {
-    return mapped;
+    return {
+      ...mapped,
+      stats: buildStatsRecord(item.stats, mapped, null),
+    };
   }
-
-  const floorByRarity = getRarityLevelFloor(catalog.rarity, catalog.category);
-  const requiredLevel = Math.max(item.required_level ?? 1, catalog.requiredLevel, floorByRarity);
 
   return {
     ...mapped,
     price_crystals: item.price_crystals ?? catalog.priceGold,
-    required_level: requiredLevel,
-    weapon_stats: catalog.weaponStats ?? item.weapon_stats ?? null,
-    armor_stats: catalog.armorStats ?? item.armor_stats ?? null,
-    stats: BONUS_FIELDS.reduce<Record<string, number>>((acc, key) => {
-      const value = catalog.bonuses[key];
-      if (value > 0) {
-        acc[key] = value;
-      }
-      return acc;
-    }, {}),
+    required_level: item.required_level ?? catalog.requiredLevel,
+    weapon_stats: item.weapon_stats ?? catalog.weaponStats ?? null,
+    armor_stats: item.armor_stats ?? catalog.armorStats ?? null,
+    stats: buildStatsRecord(item.stats, mapped, catalog),
   };
 }
 

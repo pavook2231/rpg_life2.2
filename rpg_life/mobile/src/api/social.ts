@@ -1,9 +1,12 @@
 import { apiRequest } from "./client";
+import type { LeaderboardPeriod, LeaderboardResponse } from "./game";
 
 export type FriendItem = {
   id: number;
   name: string;
-  email: string;
+  username?: string | null;
+  friend_id?: string | null;
+  email?: string;
   friends_since: string;
   stats: {
     level?: number;
@@ -60,7 +63,9 @@ export type FriendRequestItem = {
   user: {
     id: number;
     name: string;
-    email: string;
+    username?: string | null;
+    friend_id?: string | null;
+    email?: string;
   };
 };
 
@@ -105,22 +110,11 @@ export function createCoopQuest(payload: {
   });
 }
 
-export function fetchFriendsList(page = 1, pageSize = 30) {
-  return apiRequest<{
-    items: FriendItem[];
-    pagination: {
-      page: number;
-      page_size: number;
-      total_items: number;
-      total_pages: number;
-    };
-  }>(`/social/friends/list?page=${page}&page_size=${pageSize}`);
-}
-
 export type UserSearchResult = {
   id: number;
   name: string;
-  email: string;
+  username?: string | null;
+  friend_id?: string | null;
   status: "none" | "outgoing_pending" | "incoming_pending";
   request_id?: number;
 };
@@ -138,7 +132,15 @@ export function searchUsers(query: string, page = 1, pageSize = 20) {
 }
 
 export function sendFriendRequest(receiverId: number) {
-  return apiRequest<{ ok: boolean; request: { id: number; status: string; receiver: { id: number; name: string }; created_at: string } }>(`/social/friends/request`, {
+  return apiRequest<{
+    ok: boolean;
+    request: {
+      id: number;
+      status: string;
+      receiver: { id: number; name: string; username?: string | null; friend_id?: string | null };
+      created_at: string;
+    };
+  }>(`/social/friends/request`, {
     method: "POST",
     body: JSON.stringify({ receiver_id: receiverId }),
   });
@@ -158,26 +160,15 @@ export function respondToFriendRequest(requestId: number, action: "accept" | "de
   });
 }
 
-export function fetchFriendsLeaderboard(metric: string = "level", page = 1, pageSize = 20) {
-  return apiRequest<{
-    metric: string;
-    items: Array<{
-      user_id: number;
-      name: string;
-      level: number;
-      quests_completed: number;
-      steps: number;
-      challenge_wins: number;
-      score: number;
-      rank: number;
-    }>;
-    pagination: {
-      page: number;
-      page_size: number;
-      total_items: number;
-      total_pages: number;
-    };
-  }>(`/social/leaderboard/friends?metric=${encodeURIComponent(metric)}&page=${page}&page_size=${pageSize}`);
+export function fetchFriendsLeaderboard(
+  metric: string = "level",
+  page = 1,
+  pageSize = 20,
+  period: LeaderboardPeriod = "all_time",
+) {
+  return apiRequest<LeaderboardResponse>(
+    `/social/leaderboard/friends?metric=${encodeURIComponent(metric)}&period=${encodeURIComponent(period)}&page=${page}&page_size=${pageSize}`
+  );
 }
 
 export function fetchChallengeInvitations(status?: ChallengeInvitation["status"]) {

@@ -47,6 +47,62 @@ export type StepsSyncPayload = {
   source: string;
 };
 
+export type LeaderboardPeriod = "all_time" | "weekly" | "season";
+
+export type LeaderboardEntry = {
+  user_id: number;
+  name: string;
+  username?: string | null;
+  friend_id?: string | null;
+  rank: number;
+  score: number;
+  level: number;
+  quests_completed: number;
+  steps: number;
+  challenge_wins: number;
+  class_display_name?: string | null;
+  class_name?: string | null;
+  class_level?: number | null;
+  goal_type?: string | null;
+  goal_progress_percent?: number | null;
+  goal_cycle_xp?: number | null;
+  goal_target_xp?: number | null;
+};
+
+export type LeaderboardResponse = {
+  metric: string;
+  period: LeaderboardPeriod;
+  period_started_at?: string | null;
+  period_ends_at?: string | null;
+  event_id?: number | null;
+  season_key?: string | null;
+  items: LeaderboardEntry[];
+  pagination: {
+    page: number;
+    page_size: number;
+    total_items: number;
+    total_pages: number;
+  };
+};
+
+export type SocialPulseIdentity = {
+  user_id: number;
+  name: string;
+  username?: string | null;
+  friend_id?: string | null;
+  score?: number | null;
+  gap_steps?: number | null;
+  quests_completed?: number | null;
+};
+
+export type SocialPulseItem = {
+  kind: string;
+  title: string;
+  description: string;
+  action?: string | null;
+  action_label?: string | null;
+};
+
 export type DailyLimitsPayload = {
   completed_total: number;
   total_cap: number;
@@ -64,6 +120,8 @@ export type ProfilePayload = {
     id: number;
     email: string;
     name: string | null;
+    username?: string | null;
+    friend_id?: string | null;
     birth_year: number | null;
     gender: string | null;
     goal_type?: string | null;
@@ -212,10 +270,16 @@ export type InventoryItem = {
     set_name?: string | null;
   };
   weapon_stats?: {
+    weapon_type?: string;
+    weapon_category?: string;
     damage_min: number;
     damage_max: number;
     speed?: number;
     dps?: number;
+    critical_strike_chance?: number;
+    required_strength?: number;
+    required_agility?: number;
+    required_intellect?: number;
   } | null;
   armor_stats?: {
     armor_value: number;
@@ -320,8 +384,12 @@ export type ShopItemPayload = {
   chest_name?: string;
   stats?: Record<string, number>;
   weapon_stats?: {
+    weapon_type?: string;
+    weapon_category?: string;
     damage_min: number;
     damage_max: number;
+    speed?: number;
+    dps?: number;
   } | null;
   armor_stats?: {
     armor_value: number;
@@ -474,6 +542,13 @@ export type RewardsSummaryPayload = {
     pending_challenge_invitations: number;
     active_duels: number;
     active_coop: number;
+    weekly_rank?: number | null;
+    weekly_total?: number | null;
+    closest_friend_ahead?: SocialPulseIdentity | null;
+    closest_friend_behind?: SocialPulseIdentity | null;
+    primary_action?: string | null;
+    primary_action_label?: string | null;
+    feed_items?: SocialPulseItem[];
   } | null;
   class_role?: {
     class_name: string;
@@ -593,7 +668,7 @@ export function replaceQuest(questId: number, source: "base" | "ai" = "ai") {
   });
 }
 
-export function createCustomQuest(payload: { title: string; description: string; xp_reward: number; icon: string }) {
+export function createCustomQuest(payload: { title: string; description: string; icon: string }) {
   return apiRequest<{ ok: boolean; quest: QuestItem }>("/quests", {
     method: "POST",
     body: JSON.stringify(payload)
@@ -817,26 +892,17 @@ export function joinChallenge(challengeId: number) {
   return apiRequest(`/challenges/${challengeId}/join`, { method: "POST" });
 }
 
-export function fetchLeaderboard(metric = "level", scope = "global", page = 1, limit = 20, options: CachedRequestOptions = {}) {
-  return fetchWithTtlCache(`leaderboard:${metric}:${scope}:${page}:${limit}`, () => apiRequest<{
-    metric: string;
-    items: Array<{
-      user_id: number;
-      name: string;
-      rank: number;
-      score: number;
-      level: number;
-      quests_completed: number;
-      steps: number;
-      challenge_wins: number;
-    }>;
-    pagination: {
-      page: number;
-      page_size: number;
-      total_items: number;
-      total_pages: number;
-    };
-  }>(`/leaderboard?metric=${metric}&scope=${scope}&page=${page}&limit=${limit}`), {
+export function fetchLeaderboard(
+  metric = "level",
+  scope = "global",
+  page = 1,
+  limit = 20,
+  period: LeaderboardPeriod = "all_time",
+  options: CachedRequestOptions = {},
+) {
+  return fetchWithTtlCache(`leaderboard:${metric}:${scope}:${period}:${page}:${limit}`, () => apiRequest<LeaderboardResponse>(
+    `/leaderboard?metric=${metric}&scope=${scope}&period=${period}&page=${page}&limit=${limit}`
+  ), {
     ttlMs: CACHE_TTL.leaderboard,
     forceRefresh: options.forceRefresh,
   });
@@ -994,6 +1060,7 @@ export function openChest(payload: { inventory_id?: number | null; chest_id?: nu
 
 export function updateProfile(payload: {
   name?: string;
+  username?: string;
   birth_year?: number;
   gender?: string;
   character_name?: string;

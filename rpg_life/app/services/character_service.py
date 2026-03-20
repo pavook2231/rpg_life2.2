@@ -170,9 +170,14 @@ def update_profile(db: Session, user_id: int, profile_data: ProfileUpdateSchema)
     goal_term_months = update_data.pop("goal_term_months", None)
     start_new_goal_cycle = bool(update_data.pop("start_new_goal_cycle", False))
 
-    user = crud.update_user_profile(db, user_id, update_data)
+    try:
+        user = crud.update_user_profile(db, user_id, update_data)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     if not user:
         raise HTTPException(status_code=404, detail="Пользователь не найден")
+
+    user = crud.ensure_user_identity(db, user, commit=True)
 
     if goal_type or goal_term_months:
         goal_payload = goal_service.set_user_goal(
@@ -200,6 +205,8 @@ def update_profile(db: Session, user_id: int, profile_data: ProfileUpdateSchema)
                 "id": user.id,
                 "email": user.email,
                 "name": user.name,
+                "username": user.username,
+                "friend_id": crud.user_friend_id(user),
                 "birth_year": user.birth_year,
                 "gender": user.gender,
                 "goal_type": user.selected_goal_type,

@@ -21,6 +21,7 @@ import { QuestsScreen } from "../screens/QuestsScreen";
 import { RegisterScreen } from "../screens/RegisterScreen";
 import { SettingsScreen } from "../screens/SettingsScreen";
 import { ShopScreen } from "../screens/ShopScreen";
+import { getNavigationUnlockState } from "../lib/navigationUnlocks";
 import { fetchChallengeInvitations } from "../api/social";
 import { GameIcon } from "../ui";
 import { radii, useThemeColors, useThemeMode } from "../ui/theme";
@@ -32,11 +33,21 @@ function MainTabs() {
   const t = useTranslation();
   const colors = useThemeColors();
   const themeMode = useThemeMode();
-  const { rewards } = useGame();
+  const { profile, hero, equipment, inventory, rewards } = useGame();
   const styles = useMemo(() => createStyles(colors, themeMode), [colors, themeMode]);
-  const [hasPendingCoopInvitation, setHasPendingCoopInvitation] = useState(false);
   const [pendingCoopInvitationCount, setPendingCoopInvitationCount] = useState(0);
   const [tabBounceSeed, setTabBounceSeed] = useState<Record<string, number>>({});
+  const unlockState = useMemo(
+    () =>
+      getNavigationUnlockState({
+        profile,
+        hero,
+        equipment,
+        inventory,
+        rewards,
+      }),
+    [equipment, hero, inventory, profile, rewards],
+  );
 
   const rewardBadgeCount = useMemo(() => {
     let count = 0;
@@ -52,18 +63,15 @@ function MainTabs() {
   useEffect(() => {
     let cancelled = false;
 
-    async function resolveCoopTabVisibility() {
-      const hasActiveCoop = (rewards?.social_pulse?.active_coop ?? 0) > 0;
+    async function resolveCoopBadge() {
       const hasPendingInvitations = (rewards?.social_pulse?.pending_challenge_invitations ?? 0) > 0;
 
-      if (hasActiveCoop) {
-        setHasPendingCoopInvitation(true);
+      if (!unlockState.coopUnlocked) {
         setPendingCoopInvitationCount(0);
         return;
       }
 
       if (!hasPendingInvitations) {
-        setHasPendingCoopInvitation(false);
         setPendingCoopInvitationCount(0);
         return;
       }
@@ -72,23 +80,21 @@ function MainTabs() {
         const payload = await fetchChallengeInvitations("pending");
         if (!cancelled) {
           const coopInvitations = (payload.invitations ?? []).filter((invitation) => invitation.challenge_type === "coop");
-          setHasPendingCoopInvitation(coopInvitations.length > 0);
           setPendingCoopInvitationCount(coopInvitations.length);
         }
       } catch {
         if (!cancelled) {
-          setHasPendingCoopInvitation(false);
           setPendingCoopInvitationCount(0);
         }
       }
     }
 
-    void resolveCoopTabVisibility();
+    void resolveCoopBadge();
 
     return () => {
       cancelled = true;
     };
-  }, [rewards?.social_pulse?.active_coop, rewards?.social_pulse?.pending_challenge_invitations]);
+  }, [rewards?.social_pulse?.pending_challenge_invitations, unlockState.coopUnlocked]);
 
   function triggerTabBounce(routeName: string) {
     setTabBounceSeed((prev) => ({
@@ -141,7 +147,27 @@ function MainTabs() {
           tabBarIcon: ({ focused }) => <TabIcon name="notebook-outline" focused={focused} trigger={tabBounceSeed.Quests ?? 0} />,
         }}
       />
-      {hasPendingCoopInvitation ? (
+      <Tabs.Screen
+        name="Character"
+        component={CharacterScreen}
+        listeners={buildTabListeners("Character")}
+        options={{
+          title: t("navigation.character"),
+          tabBarIcon: ({ focused }) => <TabIcon name="shield-account" focused={focused} trigger={tabBounceSeed.Character ?? 0} />,
+        }}
+      />
+      {unlockState.shopUnlocked ? (
+        <Tabs.Screen
+          name="Shop"
+          component={ShopScreen}
+          listeners={buildTabListeners("Shop")}
+          options={{
+            title: t("navigation.shop"),
+            tabBarIcon: ({ focused }) => <TabIcon name="storefront-outline" focused={focused} trigger={tabBounceSeed.Shop ?? 0} />,
+          }}
+        />
+      ) : null}
+      {unlockState.coopUnlocked ? (
         <Tabs.Screen
           name="CoopQuests"
           component={CoopQuestsScreen}
@@ -153,24 +179,6 @@ function MainTabs() {
           }}
         />
       ) : null}
-      <Tabs.Screen
-        name="Character"
-        component={CharacterScreen}
-        listeners={buildTabListeners("Character")}
-        options={{
-          title: t("navigation.character"),
-          tabBarIcon: ({ focused }) => <TabIcon name="shield-account" focused={focused} trigger={tabBounceSeed.Character ?? 0} />,
-        }}
-      />
-      <Tabs.Screen
-        name="Shop"
-        component={ShopScreen}
-        listeners={buildTabListeners("Shop")}
-        options={{
-          title: t("navigation.shop"),
-          tabBarIcon: ({ focused }) => <TabIcon name="storefront-outline" focused={focused} trigger={tabBounceSeed.Shop ?? 0} />,
-        }}
-      />
       <Tabs.Screen
         name="Profile"
         component={ProfileScreen}

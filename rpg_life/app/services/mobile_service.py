@@ -1,11 +1,11 @@
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session, joinedload
 
 from app import crud
 from app.achievements import ACHIEVEMENTS
-from app.core.cache import cache_get_json, cache_set_json
+from app.core.cache import cache_get_json, cache_set_json, invalidate_leaderboard_cache
 from app.core.dates import utc_now
 from app.item_service import SET_BONUSES, calculate_set_bonus
 from app.models import DailyBonus, DailySteps, Item, User, UserClassProgress, UserInventory
@@ -13,8 +13,12 @@ from app.stat_effects import StatEffects
 from app.services import character_service, engagement_service, health_service, inventory_service, quest_service, social_service
 from app.text_utils import normalize_item_model, normalize_nested_strings
 
+MAX_SYNCABLE_STEPS_PER_DAY = 70_000
+MAX_STEP_SYNC_INCREMENT = 30_000
+
 
 def get_profile(db: Session, current_user: User) -> dict:
+    current_user = crud.ensure_user_identity(db, current_user, commit=True)
     health_context = health_service.sync_character_health(db, current_user.id)
     classes = crud.get_all_unlocked_classes(db, current_user.id)
     return {
@@ -22,6 +26,8 @@ def get_profile(db: Session, current_user: User) -> dict:
             "id": current_user.id,
             "email": current_user.email,
             "name": current_user.name,
+            "username": current_user.username,
+            "friend_id": crud.user_friend_id(current_user),
             "birth_year": current_user.birth_year,
             "gender": current_user.gender,
             "goal_type": current_user.selected_goal_type,
@@ -88,6 +94,7 @@ def get_character_profile(db: Session, current_user: User) -> dict:
 
 
 def get_bootstrap_payload(db: Session, current_user: User) -> dict:
+    current_user = crud.ensure_user_identity(db, current_user, commit=True)
     health_context = health_service.sync_character_health(db, current_user.id)
     classes = crud.get_all_unlocked_classes(db, current_user.id)
     goal_state = quest_service.get_goal_state(db, current_user)
@@ -116,6 +123,8 @@ def get_bootstrap_payload(db: Session, current_user: User) -> dict:
                     "id": current_user.id,
                     "email": current_user.email,
                     "name": current_user.name,
+                    "username": current_user.username,
+                    "friend_id": crud.user_friend_id(current_user),
                     "birth_year": current_user.birth_year,
                     "gender": current_user.gender,
                     "goal_type": current_user.selected_goal_type,
@@ -196,17 +205,20 @@ def sync_today_steps(
     normalized_steps = max(0, int(steps or 0))
     now = utc_now()
 
+    if normalized_steps > MAX_SYNCABLE_STEPS_PER_DAY:
+        raise HTTPException(status_code=400, detail="Daily step sync exceeds the allowed limit")
+
+    requested_day_start: datetime | None = None
     if day_started_at:
         try:
-            day_start = datetime.fromisoformat(day_started_at.replace("Z", "+00:00"))
-            if day_start.tzinfo is not None:
-                day_start = day_start.astimezone().replace(tzinfo=None)
+            requested_day_start = datetime.fromisoformat(day_started_at.replace("Z", "+00:00"))
+            if requested_day_start.tzinfo is not None:
+                requested_day_start = requested_day_start.astimezone(UTC).replace(tzinfo=None)
         except ValueError as error:
             raise HTTPException(status_code=400, detail="Invalid day_started_at") from error
-    else:
-        day_start = datetime(now.year, now.month, now.day)
-
-    day_end = day_start + timedelta(days=1)
+        requested_day_end = requested_day_start + timedelta(days=1)
+        if not (requested_day_start <= now < requested_day_end):
+            raise HTTPException(status_code=400, detail="Step sync is only allowed for the current day")
 
     main_progress = (
         db.query(UserClassProgress)
@@ -219,14 +231,23 @@ def sync_today_steps(
         db.query(DailySteps)
         .filter(
             DailySteps.user_id == current_user.id,
-            DailySteps.date >= day_start,
-            DailySteps.date < day_end,
+            DailySteps.date <= now,
+            DailySteps.date > now - timedelta(days=1),
         )
         .order_by(DailySteps.date.desc())
         .first()
     )
 
+    if record is not None:
+        day_start = record.date
+    elif requested_day_start is not None:
+        day_start = requested_day_start
+    else:
+        day_start = datetime(now.year, now.month, now.day)
+
     previous_steps = int(record.steps or 0) if record else 0
+    if previous_steps > 0 and normalized_steps > previous_steps and normalized_steps - previous_steps > MAX_STEP_SYNC_INCREMENT:
+        raise HTTPException(status_code=400, detail="Step sync jump is too large")
 
     if record is None:
         record = DailySteps(
@@ -248,10 +269,14 @@ def sync_today_steps(
     db.commit()
     db.refresh(record)
 
+    delta = max(0, int(record.steps or 0) - previous_steps)
+    if delta > 0:
+        invalidate_leaderboard_cache()
+
     return {
         "steps": int(record.steps or 0),
         "previous_steps": previous_steps,
-        "delta": max(0, int(record.steps or 0) - previous_steps),
+        "delta": delta,
         "synced_at": record.synced_at.isoformat() if record.synced_at else None,
         "day_started_at": day_start.isoformat(),
         "source": source,
@@ -315,6 +340,8 @@ def get_inventory(db: Session, current_user: User, page: int, limit: int, sort: 
                         "health_bonus": inv.item.health_bonus,
                     },
                     "weapon_stats": {
+                        "weapon_type": inv.item.weapon_stats.weapon_type,
+                        "weapon_category": inv.item.weapon_stats.weapon_category,
                         "damage_min": inv.item.weapon_stats.damage_min,
                         "damage_max": inv.item.weapon_stats.damage_max,
                         "speed": inv.item.weapon_stats.speed,
@@ -375,7 +402,9 @@ def get_rewards_summary(db: Session, current_user: User) -> dict:
 
 def claim_weekly_goal_reward(db: Session, current_user: User) -> dict:
     try:
-        return normalize_nested_strings(engagement_service.claim_weekly_goal_reward(db, current_user))
+        payload = engagement_service.claim_weekly_goal_reward(db, current_user)
+        invalidate_leaderboard_cache()
+        return normalize_nested_strings(payload)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
@@ -383,6 +412,7 @@ def claim_weekly_goal_reward(db: Session, current_user: User) -> dict:
 def claim_seasonal_goal_reward(db: Session, current_user: User) -> dict:
     try:
         payload = engagement_service.claim_seasonal_goal_reward(db, current_user)
+        invalidate_leaderboard_cache()
         reward_chest = payload.get("reward_chest")
         if reward_chest and isinstance(reward_chest, dict) and reward_chest.get("item") is not None:
             item = reward_chest.get("item")
@@ -405,15 +435,23 @@ def claim_seasonal_goal_reward(db: Session, current_user: User) -> dict:
         raise HTTPException(status_code=400, detail=str(exc))
 
 
-def get_leaderboard(db: Session, current_user: User, scope: str, metric: str, page: int, limit: int) -> dict:
-    cache_key = f"leaderboard:{scope}:{metric}:{page}:{limit}:{current_user.id}"
+def get_leaderboard(
+    db: Session,
+    current_user: User,
+    scope: str,
+    metric: str,
+    page: int,
+    limit: int,
+    period: str = "all_time",
+) -> dict:
+    cache_key = f"leaderboard:{scope}:{metric}:{period}:{page}:{limit}:{current_user.id}"
     cached = cache_get_json(cache_key)
     if cached:
         return cached
     if scope == "friends":
-        payload = social_service.get_friends_leaderboard(db, current_user, metric, page, limit)
+        payload = social_service.get_friends_leaderboard(db, current_user, metric, page, limit, period)
     else:
-        payload = social_service.get_global_leaderboard(db, metric, page, limit)
+        payload = social_service.get_global_leaderboard(db, metric, page, limit, period)
     cache_set_json(cache_key, payload, ttl=60)
     return payload
 
@@ -485,6 +523,8 @@ def get_equipment_overview(db: Session, current_user: User) -> dict:
                         "required_level": item.required_level,
                     },
                     "weapon_stats": {
+                        "weapon_type": entry["weapon_stats"].weapon_type,
+                        "weapon_category": entry["weapon_stats"].weapon_category,
                         "damage_min": entry["weapon_stats"].damage_min,
                         "damage_max": entry["weapon_stats"].damage_max,
                         "speed": entry["weapon_stats"].speed,
@@ -530,6 +570,8 @@ def get_equipment_overview(db: Session, current_user: User) -> dict:
                         "required_level": item.required_level,
                     },
                     "weapon_stats": {
+                        "weapon_type": item.weapon_stats.weapon_type,
+                        "weapon_category": item.weapon_stats.weapon_category,
                         "damage_min": item.weapon_stats.damage_min,
                         "damage_max": item.weapon_stats.damage_max,
                         "speed": item.weapon_stats.speed,

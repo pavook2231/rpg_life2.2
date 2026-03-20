@@ -8,7 +8,15 @@ from app.beta_content import CHEST_CATALOG
 from app.chest_items import CHEST_PRESENTATION, ensure_chest_item, get_chest_catalog_entry, grant_chest_to_user
 from app.core.cache import cache_get_json, cache_set_json
 from app.core.dates import utc_now
-from app.equipment_service import EquipmentError, equip_item, get_equipped_inventory_ids, get_equipped_items, recalculate_total_stats, unequip_item
+from app.equipment_service import (
+    EquipmentError,
+    equip_item,
+    get_equipped_inventory_ids,
+    get_equipped_items,
+    recalculate_total_stats,
+    sync_equipped_inventory_flags,
+    unequip_item,
+)
 from app.item_service import EquipmentError as ItemEquipmentError, buy_item, sell_item
 from app.items_data import ITEMS
 from app.models import CharacterEquipment, Item, User, UserClassProgress, UserInventory
@@ -383,6 +391,7 @@ def unequip_inventory_item(db: Session, current_user: User, inventory_id: int) -
                 setattr(equipment, slot, None)
                 recalculate_total_stats(db, equipment)
                 break
+    sync_equipped_inventory_flags(db, current_user.id)
     db.commit()
     return {"ok": True}
 

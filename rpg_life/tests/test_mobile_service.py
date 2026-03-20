@@ -1,9 +1,10 @@
 from datetime import timedelta
 
+import pytest
 from fastapi import HTTPException
 
 from app.core.dates import utc_now
-from app.models import CompletedQuest, DailySteps, FriendRequest, GameEvent, Quest, User, UserClassProgress, UserInventory
+from app.models import CompletedQuest, DailySteps, FriendRequest, Friendship, GameEvent, Quest, User, UserClassProgress, UserInventory
 from app.services import mobile_service
 
 
@@ -28,6 +29,12 @@ def _create_progress(session, user_id: int, class_name: str = "archer") -> UserC
     session.commit()
     session.refresh(progress)
     return progress
+
+
+def _make_friends(session, left_id: int, right_id: int) -> None:
+    session.add(Friendship(user_id=left_id, friend_id=right_id))
+    session.add(Friendship(user_id=right_id, friend_id=left_id))
+    session.commit()
 
 
 def _create_completed_quest(session, user_id: int, class_progress_id: int, *, xp_earned: int = 100) -> None:
@@ -102,6 +109,44 @@ def test_rewards_summary_includes_engagement_layers(db_session) -> None:
     assert payload["social_pulse"]["pending_friend_requests"] == 1
     assert payload["active_event"]["title"] == "Spring Festival"
     assert payload["class_role"]["class_name"] == "archer"
+
+
+def test_rewards_summary_exposes_social_feed_and_weekly_rank(db_session) -> None:
+    user = _create_user(db_session, "pulse-owner@example.com")
+    friend = _create_user(db_session, "friend-summary@example.com")
+    requester = _create_user(db_session, "requester-summary@example.com")
+    user_progress = _create_progress(db_session, user.id, class_name="archer")
+    friend_progress = _create_progress(db_session, friend.id, class_name="archer")
+    _make_friends(db_session, user.id, friend.id)
+    _create_completed_quest(db_session, friend.id, friend_progress.id, xp_earned=120)
+
+    db_session.add_all([
+        DailySteps(
+            user_id=user.id,
+            class_progress_id=user_progress.id,
+            steps=4_000,
+            date=utc_now() - timedelta(hours=8),
+        ),
+        DailySteps(
+            user_id=friend.id,
+            class_progress_id=friend_progress.id,
+            steps=4_700,
+            date=utc_now() - timedelta(hours=4),
+        ),
+        FriendRequest(requester_id=requester.id, receiver_id=user.id, status="pending"),
+    ])
+    db_session.commit()
+
+    payload = mobile_service.get_rewards_summary(db_session, user)
+    pulse = payload["social_pulse"]
+
+    assert pulse["weekly_rank"] == 2
+    assert pulse["weekly_total"] == 2
+    assert pulse["closest_friend_ahead"]["username"] == "friend_summary"
+    assert pulse["primary_action"] == "friends"
+    assert any(item["kind"] == "friend_requests" for item in pulse["feed_items"])
+    assert any(item["kind"] == "weekly_chase" for item in pulse["feed_items"])
+    assert any(item["kind"] == "friend_activity" for item in pulse["feed_items"])
 
 
 def test_claim_weekly_goal_reward_claims_first_available_tier(db_session) -> None:
@@ -190,3 +235,102 @@ def test_claim_seasonal_goal_reward_grants_class_specific_chest(db_session) -> N
     assert payload["tier_index"] == 3
     assert payload["reward_chest"]["chest_name"] == "EPIC_CHEST"
     assert any((entry.item.subclass if entry.item else None) == "EPIC_CHEST" for entry in chest_inventory)
+
+
+def test_sync_today_steps_rejects_backdated_day_started_at(db_session) -> None:
+    user = _create_user(db_session, "backdated-steps@example.com")
+    _create_progress(db_session, user.id)
+
+    with pytest.raises(HTTPException) as exc:
+        mobile_service.sync_today_steps(
+            db_session,
+            user,
+            1234,
+            (utc_now() - timedelta(days=2)).isoformat(),
+            "device",
+        )
+
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "Step sync is only allowed for the current day"
+
+
+def test_sync_today_steps_rejects_anomalous_step_jump(db_session) -> None:
+    user = _create_user(db_session, "step-spike@example.com")
+    _create_progress(db_session, user.id)
+    current_day_start = utc_now().replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+
+    first_sync = mobile_service.sync_today_steps(db_session, user, 4_000, current_day_start, "device")
+
+    with pytest.raises(HTTPException) as exc:
+        mobile_service.sync_today_steps(db_session, user, 40_001, current_day_start, "device")
+
+    assert first_sync["steps"] == 4_000
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "Step sync jump is too large"
+
+
+def test_sync_today_steps_invalidates_leaderboard_cache_on_progress_change(db_session, monkeypatch: pytest.MonkeyPatch) -> None:
+    user = _create_user(db_session, "step-cache@example.com")
+    _create_progress(db_session, user.id)
+    current_day_start = utc_now().replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+    invalidations: list[str] = []
+
+    monkeypatch.setattr(mobile_service, "invalidate_leaderboard_cache", lambda: invalidations.append("leaderboard"))
+
+    payload = mobile_service.sync_today_steps(db_session, user, 5_500, current_day_start, "device")
+
+    assert payload["delta"] == 5_500
+    assert invalidations == ["leaderboard"]
+
+
+def test_claim_weekly_goal_reward_invalidates_leaderboard_cache(db_session, monkeypatch: pytest.MonkeyPatch) -> None:
+    user = _create_user(db_session, "weekly-cache@example.com")
+    progress = _create_progress(db_session, user.id, class_name="archer")
+    invalidations: list[str] = []
+
+    db_session.add(
+        DailySteps(
+            user_id=user.id,
+            class_progress_id=progress.id,
+            steps=20000,
+            date=utc_now() - timedelta(days=1),
+        )
+    )
+    db_session.commit()
+
+    monkeypatch.setattr(mobile_service, "invalidate_leaderboard_cache", lambda: invalidations.append("leaderboard"))
+
+    payload = mobile_service.claim_weekly_goal_reward(db_session, user)
+
+    assert payload["success"] is True
+    assert invalidations == ["leaderboard"]
+
+
+def test_get_profile_exposes_public_identity(db_session) -> None:
+    user = _create_user(db_session, "profile-identity@example.com")
+    _create_progress(db_session, user.id)
+
+    payload = mobile_service.get_profile(db_session, user)
+
+    assert payload["user"]["username"] == "profile_identity"
+    assert payload["user"]["friend_id"] == "RPG-000001"
+
+
+def test_get_leaderboard_returns_period_metadata(db_session) -> None:
+    user = _create_user(db_session, "leaderboard-period@example.com")
+    progress = _create_progress(db_session, user.id)
+    db_session.add(
+        DailySteps(
+            user_id=user.id,
+            class_progress_id=progress.id,
+            steps=6_100,
+            date=utc_now() - timedelta(hours=3),
+        )
+    )
+    db_session.commit()
+
+    payload = mobile_service.get_leaderboard(db_session, user, "global", "steps", 1, 20, "weekly")
+
+    assert payload["period"] == "weekly"
+    assert payload["period_started_at"] is not None
+    assert payload["items"][0]["user_id"] == user.id

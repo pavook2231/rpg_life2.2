@@ -1,62 +1,78 @@
 import asyncio
-
-from fastapi import FastAPI
-from starlette.requests import Request
+import json
 
 from app import auth
 from app.api import mobile_routes
 from app.api.mobile_routes import router
-
-
-def _request(path: str, headers: list[tuple[bytes, bytes]] | None = None) -> Request:
-    app = FastAPI()
-    app.include_router(router)
-    return Request(
-        {
-            "type": "http",
-            "method": "GET",
-            "path": path,
-            "headers": headers or [],
-            "app": app,
-            "router": app.router,
-            "scheme": "https",
-            "server": ("example.com", 443),
-            "root_path": "",
-            "query_string": b"",
-        }
-    )
+from tests.route_test_utils import build_request, dependency_calls_for
 
 
 def test_events_endpoint_requires_authenticated_user() -> None:
-    route = next(route for route in router.routes if getattr(route, "path", None) == "/api/v1/events")
-    dependency_calls = {dependency.call for dependency in route.dependant.dependencies}
-
-    assert auth.get_current_user in dependency_calls
+    assert auth.get_current_user in dependency_calls_for(router, "/api/v1/events")
 
 
 def test_regenerate_today_quests_endpoint_requires_authenticated_user() -> None:
-    route = next(route for route in router.routes if getattr(route, "path", None) == "/api/v1/quests/regenerate-today")
-    dependency_calls = {dependency.call for dependency in route.dependant.dependencies}
-
-    assert auth.get_current_user in dependency_calls
+    assert auth.get_current_user in dependency_calls_for(router, "/api/v1/quests/regenerate-today")
 
 
 def test_claim_weekly_goal_reward_endpoint_requires_authenticated_user() -> None:
-    route = next(route for route in router.routes if getattr(route, "path", None) == "/api/v1/rewards/weekly-goal/claim")
-    dependency_calls = {dependency.call for dependency in route.dependant.dependencies}
-
-    assert auth.get_current_user in dependency_calls
+    assert auth.get_current_user in dependency_calls_for(router, "/api/v1/rewards/weekly-goal/claim")
 
 
 def test_claim_seasonal_goal_reward_endpoint_requires_authenticated_user() -> None:
-    route = next(route for route in router.routes if getattr(route, "path", None) == "/api/v1/rewards/seasonal-goal/claim")
-    dependency_calls = {dependency.call for dependency in route.dependant.dependencies}
+    assert auth.get_current_user in dependency_calls_for(router, "/api/v1/rewards/seasonal-goal/claim")
 
-    assert auth.get_current_user in dependency_calls
+
+def test_leaderboard_endpoint_requires_authenticated_user() -> None:
+    assert auth.get_current_user in dependency_calls_for(router, "/api/v1/leaderboard")
+
+
+def test_leaderboard_endpoint_forwards_period_to_service(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_get_leaderboard(db, current_user, scope, metric, page, limit, period):
+        captured.update({
+            "db": db,
+            "current_user": current_user,
+            "scope": scope,
+            "metric": metric,
+            "page": page,
+            "limit": limit,
+            "period": period,
+        })
+        return {"metric": metric, "period": period, "items": []}
+
+    monkeypatch.setattr(mobile_routes.mobile_service, "get_leaderboard", fake_get_leaderboard)
+
+    response = asyncio.run(
+        mobile_routes.get_leaderboard(
+            scope="friends",
+            metric="steps",
+            period="weekly",
+            page=2,
+            limit=15,
+            db="demo-db",
+            current_user="demo-user",
+        )
+    )
+    body = json.loads(response.body.decode("utf-8"))
+
+    assert response.status_code == 200
+    assert captured == {
+        "db": "demo-db",
+        "current_user": "demo-user",
+        "scope": "friends",
+        "metric": "steps",
+        "page": 2,
+        "limit": 15,
+        "period": "weekly",
+    }
+    assert body["status"] == "success"
+    assert body["data"]["period"] == "weekly"
 
 
 def test_telegram_login_page_renders_widget_with_normalized_bot_username(monkeypatch) -> None:
-    request = _request("/api/v1/auth/telegram/login")
+    request = build_request(router, "/api/v1/auth/telegram/login")
     monkeypatch.setattr(mobile_routes, "TELEGRAM_AUTH_ENABLED", True)
     monkeypatch.setattr(mobile_routes, "TELEGRAM_BOT_USERNAME_RAW", "@rpglife_auth_bot")
     monkeypatch.setattr(mobile_routes, "TELEGRAM_BOT_USERNAME", "rpglife_auth_bot")
@@ -71,7 +87,7 @@ def test_telegram_login_page_renders_widget_with_normalized_bot_username(monkeyp
 
 
 def test_telegram_login_page_rejects_invalid_bot_username(monkeypatch) -> None:
-    request = _request("/api/v1/auth/telegram/login")
+    request = build_request(router, "/api/v1/auth/telegram/login")
     monkeypatch.setattr(mobile_routes, "TELEGRAM_AUTH_ENABLED", True)
     monkeypatch.setattr(mobile_routes, "TELEGRAM_BOT_USERNAME_RAW", "https://example.com/not-a-bot")
     monkeypatch.setattr(mobile_routes, "TELEGRAM_BOT_USERNAME", "")
@@ -86,7 +102,7 @@ def test_telegram_login_page_rejects_invalid_bot_username(monkeypatch) -> None:
 
 
 def test_google_login_page_sets_signed_cookie_and_renders_fallback_link(monkeypatch) -> None:
-    request = _request("/api/v1/auth/google/login")
+    request = build_request(router, "/api/v1/auth/google/login")
     monkeypatch.setattr(mobile_routes, "GOOGLE_AUTH_ENABLED", True)
     monkeypatch.setattr(mobile_routes, "GOOGLE_AUTH_WEB_CLIENT_ID", "web-client-id")
     monkeypatch.setattr(mobile_routes, "GOOGLE_AUTH_CLIENT_SECRET", "top-secret")
@@ -112,7 +128,7 @@ def test_google_login_page_sets_signed_cookie_and_renders_fallback_link(monkeypa
 
 
 def test_google_callback_redirects_to_error_when_cookie_is_missing() -> None:
-    request = _request("/api/v1/auth/google/callback")
+    request = build_request(router, "/api/v1/auth/google/callback")
 
     response = asyncio.run(
         mobile_routes.auth_google_callback(
@@ -130,7 +146,7 @@ def test_google_callback_redirects_to_error_when_cookie_is_missing() -> None:
 
 
 def test_vk_login_page_sets_signed_cookie_and_renders_fallback_link(monkeypatch) -> None:
-    request = _request("/api/v1/auth/vk/login")
+    request = build_request(router, "/api/v1/auth/vk/login")
     monkeypatch.setattr(mobile_routes, "VK_AUTH_ENABLED", True)
     monkeypatch.setattr(mobile_routes, "VK_AUTH_APP_ID", "123456")
     monkeypatch.setattr(mobile_routes, "VK_AUTH_MAX_AGE_SECONDS", 900)
@@ -156,7 +172,7 @@ def test_vk_login_page_sets_signed_cookie_and_renders_fallback_link(monkeypatch)
 
 
 def test_vk_callback_redirects_to_error_when_cookie_is_missing() -> None:
-    request = _request("/api/v1/auth/vk/callback")
+    request = build_request(router, "/api/v1/auth/vk/callback")
 
     response = asyncio.run(
         mobile_routes.auth_vk_callback(
@@ -175,7 +191,8 @@ def test_vk_callback_redirects_to_error_when_cookie_is_missing() -> None:
 
 
 def test_external_url_for_prefers_forwarded_proto_and_host() -> None:
-    request = _request(
+    request = build_request(
+        router,
         "/api/v1/auth/vk/login",
         headers=[
             (b"x-forwarded-proto", b"https"),
@@ -188,7 +205,8 @@ def test_external_url_for_prefers_forwarded_proto_and_host() -> None:
 
 
 def test_external_url_for_prefers_public_base_url(monkeypatch) -> None:
-    request = _request(
+    request = build_request(
+        router,
         "/api/v1/auth/vk/login",
         headers=[
             (b"x-forwarded-proto", b"http"),
