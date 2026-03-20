@@ -1,12 +1,14 @@
 param(
-  [string]$VersionName = "2.2",
-  [int]$VersionCode = 3
+  [string]$VersionName = "1.1",
+  [int]$VersionCode = 4
 )
 
 $ErrorActionPreference = "Stop"
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $androidDir = Join-Path $projectRoot "android"
+$releaseOutputDir = Join-Path $androidDir "app\build\outputs\apk\release"
+$namedApkPath = Join-Path $releaseOutputDir "rpg_life $VersionName.apk"
 $sdkRoot = Join-Path $env:LOCALAPPDATA "Android\Sdk"
 $localPropertiesPath = Join-Path $androidDir "local.properties"
 $preferredJavaHomes = @(
@@ -43,6 +45,14 @@ sdk.dir=$($sdkRoot.Replace('\', '\\'))
 Push-Location $androidDir
 try {
   & .\gradlew.bat assembleRelease
+
+  $defaultApkPath = Join-Path $releaseOutputDir "app-release.apk"
+  if (-not (Test-Path $defaultApkPath)) {
+    throw "Release APK not found: $defaultApkPath"
+  }
+
+  Copy-Item -Path $defaultApkPath -Destination $namedApkPath -Force
+  Write-Host "Created $namedApkPath"
 }
 finally {
   Pop-Location

@@ -7,22 +7,19 @@ import { StateBlock } from "../components/StateBlock";
 import { useFeedback } from "../context/FeedbackContext";
 import { useGame } from "../context/GameContext";
 import { useLocalization, useTranslation } from "../context/LocalizationContext";
-import { type ItemStatEntry } from "../lib/equipment";
-import {
-  buildCatalogLookupTokens,
-  findUnifiedItemByIcon,
-  getUnifiedItemCatalog,
-  type UnifiedCatalogItem,
-} from "../lib/itemCatalog";
+import { buildItemComparison } from "../lib/itemComparison";
+import { buildItemStatEntries, type ItemStatEntry } from "../lib/equipment";
 import { Button, Card, FullscreenItemDetails, GameIcon, ItemCard, useThemeColors, useThemeMode } from "../ui";
 
 type CatalogFilter = "all" | "weapon" | "armor" | "accessory" | "chest";
 type SortMode = "rarity" | "price" | "level" | "name";
 
-type ShopVisualItem = UnifiedCatalogItem & {
+type ShopVisualItem = ShopItemPayload & {
   shopItemId: number;
   priceGold: number;
   requiredLevel: number;
+  category: "weapon" | "armor" | "accessory" | "chest" | "misc";
+  iconName: string;
 };
 
 const FILTERS: CatalogFilter[] = ["all", "weapon", "armor", "accessory", "chest"];
@@ -37,15 +34,6 @@ const RARITY_ORDER: Record<string, number> = {
   immortal: 5,
 };
 
-function normalizeToken(value?: string | null) {
-  return (value ?? "")
-    .toLowerCase()
-    .replace(/^\.?\//, "")
-    .replace(/\.(png|webp|jpg|jpeg)$/g, "")
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
-}
-
 function toItemCardType(category: string) {
   if (category === "weapon") return "weapon";
   if (category === "armor") return "armor";
@@ -54,48 +42,28 @@ function toItemCardType(category: string) {
   return "misc";
 }
 
-function toStatEntries(item: UnifiedCatalogItem): ItemStatEntry[] {
-  return item.statEntries;
+function toStatEntries(item: ShopVisualItem, t: ReturnType<typeof useTranslation>): ItemStatEntry[] {
+  return buildItemStatEntries(item, t);
 }
 
-function buildFallbackShopItem(serverItem: ShopItemPayload): ShopVisualItem {
-  const normalizedType = serverItem.type === "chest" ? "chest" : serverItem.type === "weapon" ? "weapon" : serverItem.type === "armor" ? "armor" : "accessory";
-  const sectionKey =
-    normalizedType === "weapon"
-      ? "weapons"
-      : normalizedType === "armor"
-        ? "armor"
-        : normalizedType === "chest"
-          ? "chests"
-          : "accessories";
+function buildShopVisualItem(serverItem: ShopItemPayload): ShopVisualItem {
+  const normalizedType =
+    serverItem.type === "chest"
+      ? "chest"
+      : serverItem.type === "weapon"
+        ? "weapon"
+        : serverItem.type === "armor"
+          ? "armor"
+          : serverItem.type === "accessory"
+            ? "accessory"
+            : "misc";
   return {
-    id: serverItem.id,
-    key: `shop-fallback-${serverItem.id}`,
-    sourceId: serverItem.id,
-    iconName: serverItem.icon || "package-variant-closed",
-    aliases: [serverItem.icon || ""].filter(Boolean),
-    sectionKey,
-    category: normalizedType,
-    rarity: (serverItem.rarity as UnifiedCatalogItem["rarity"]) ?? "common",
-    name: serverItem.name,
-    description: serverItem.description || "",
-    requiredLevel: serverItem.required_level ?? 1,
-    priceGold: serverItem.price_crystals ?? 0,
-    slot: serverItem.slot ?? null,
-    subclass: serverItem.subclass ?? null,
-    weaponStats: serverItem.weapon_stats ?? null,
-    armorStats: serverItem.armor_stats ?? null,
-    bonuses: {
-      strength_bonus: serverItem.stats?.strength_bonus ?? 0,
-      agility_bonus: serverItem.stats?.agility_bonus ?? 0,
-      intellect_bonus: serverItem.stats?.intellect_bonus ?? 0,
-      stamina_bonus: serverItem.stats?.stamina_bonus ?? 0,
-      health_bonus: serverItem.stats?.health_bonus ?? 0,
-      xp_bonus: serverItem.stats?.xp_bonus ?? 0,
-      crystal_bonus: serverItem.stats?.crystal_bonus ?? 0,
-    },
-    statEntries: [],
+    ...serverItem,
     shopItemId: serverItem.id,
+    priceGold: serverItem.price_crystals ?? 0,
+    requiredLevel: serverItem.required_level ?? 1,
+    category: normalizedType,
+    iconName: serverItem.icon || "package-variant-closed",
   };
 }
 
@@ -103,7 +71,7 @@ export function ShopScreen() {
   const { language } = useLocalization();
   const t = useTranslation();
   const { pushToast } = useFeedback();
-  const { hero, refreshGame } = useGame();
+  const { hero, equipment, refreshGame } = useGame();
   const { width } = useWindowDimensions();
   const colors = useThemeColors();
   const themeMode = useThemeMode();
@@ -118,35 +86,9 @@ export function ShopScreen() {
   const [search, setSearch] = useState("");
   const [shopError, setShopError] = useState<string | null>(null);
 
-  const catalog = useMemo(() => getUnifiedItemCatalog(), []);
-  const catalogByToken = useMemo(() => {
-    const map = new Map<string, UnifiedCatalogItem>();
-    for (const item of catalog) {
-      for (const token of buildCatalogLookupTokens(item)) {
-        map.set(token, item);
-      }
-    }
-    return map;
-  }, [catalog]);
-
   const shopItems = useMemo(() => {
-    const result: ShopVisualItem[] = [];
-
-    for (const serverItem of shopPayload?.items ?? []) {
-      const directMatch = findUnifiedItemByIcon(serverItem.icon);
-      const tokenMatch = catalogByToken.get(normalizeToken(serverItem.icon));
-      const catalogItem = directMatch ?? tokenMatch ?? buildFallbackShopItem(serverItem);
-
-      result.push({
-        ...catalogItem,
-        shopItemId: serverItem.id,
-        priceGold: serverItem.price_crystals ?? catalogItem.priceGold,
-        requiredLevel: serverItem.required_level ?? catalogItem.requiredLevel,
-      });
-    }
-
-    return result;
-  }, [catalogByToken, shopPayload?.items]);
+    return (shopPayload?.items ?? []).map((serverItem) => buildShopVisualItem(serverItem));
+  }, [shopPayload?.items]);
 
   const visibleItems = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -172,6 +114,10 @@ export function ShopScreen() {
 
   const shopGold = hero?.crystals ?? shopPayload?.crystals ?? 0;
   const heroLevel = hero?.level ?? shopPayload?.character_level ?? 1;
+  const selectedComparison = useMemo(
+    () => buildItemComparison(selectedItem, equipment?.equipment ?? [], t),
+    [equipment?.equipment, selectedItem, t],
+  );
   const gridColumns = width < 760 ? 1 : width < 1160 ? 2 : 3;
   const gridGap = 10;
   const gridWidth = Math.max(width - 32, 300);
@@ -350,14 +296,14 @@ export function ShopScreen() {
         <StateBlock tone="info" icon="timer-sand" title={t("common.loading")} />
       ) : null}
 
-      {!isLoadingShop && visibleItems.length ? (
+      {visibleItems.length ? (
         <View style={styles.grid}>
           {visibleItems.map((item, index) => {
             const rarityLabel = getRarityLabel(item.rarity);
             const lockedByLevel = heroLevel < item.requiredLevel;
 
             return (
-              <View key={`${item.shopItemId}-${item.key}`} style={[styles.gridCell, { width: cardWidth }]}>
+              <View key={String(item.shopItemId)} style={[styles.gridCell, { width: cardWidth }]}>
                 <ItemCard
                   itemId={item.id}
                   itemType={toItemCardType(item.category)}
@@ -367,7 +313,7 @@ export function ShopScreen() {
                   name={item.name}
                   rarity={item.rarity}
                   description={item.description}
-                  statEntries={toStatEntries(item)}
+                  statEntries={toStatEntries(item, t)}
                   price={item.priceGold}
                   badge={t("screens.shop.quick.itemBadge", {
                     rarity: rarityLabel,
@@ -387,7 +333,7 @@ export function ShopScreen() {
             );
           })}
         </View>
-      ) : (
+      ) : !isLoadingShop ? (
         <StateBlock
           icon="package-variant-closed"
           title={t("screens.shop.quick.emptyTitle")}
@@ -395,7 +341,7 @@ export function ShopScreen() {
           actionLabel={t("screens.shop.quick.resetFilters")}
           onAction={resetFilters}
         />
-      )}
+      ) : null}
 
       <FullscreenItemDetails
         visible={Boolean(selectedItem)}
@@ -422,7 +368,10 @@ export function ShopScreen() {
               ]
             : []
         }
-        statEntries={selectedItem ? toStatEntries(selectedItem) : []}
+        statEntries={selectedItem ? toStatEntries(selectedItem, t) : []}
+        comparisonTitle={selectedComparison?.comparisonTitle}
+        comparisonIntro={selectedComparison?.comparisonIntro}
+        comparisonRows={selectedComparison?.comparisonRows}
         actions={
           selectedItem && heroLevel >= selectedItem.requiredLevel
             ? [

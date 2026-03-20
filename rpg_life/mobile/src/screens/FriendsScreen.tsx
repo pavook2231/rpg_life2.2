@@ -1,12 +1,12 @@
-import { useNavigation } from "@react-navigation/native";
+import { useNavigation, useRoute } from "@react-navigation/native";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
-import { fetchLeaderboard } from "../api/game";
+import { fetchLeaderboard, type LeaderboardEntry, type LeaderboardPeriod, type LeaderboardResponse } from "../api/game";
 import {
   fetchFriendRequests,
+  fetchFriends,
   fetchFriendsLeaderboard,
-  fetchFriendsList,
   respondToFriendRequest,
   searchUsers,
   sendFriendRequest,
@@ -22,6 +22,7 @@ import { useThemeColors } from "../ui/theme";
 
 const tabs = ["friends", "leaderboard", "global"] as const;
 const metrics = ["level", "quests", "steps", "challenge_wins"] as const;
+const periods = ["weekly", "season", "all_time"] as const;
 type LeaderboardMetric = (typeof metrics)[number];
 type LeaderboardScope = "leaderboard" | "global";
 const FRIENDS_PAGE_SIZE = 20;
@@ -30,22 +31,15 @@ const LEADERBOARD_PAGE_SIZE = 20;
 const LEADERBOARD_SEPARATOR = " | ";
 const EMPTY_VALUE = "-";
 
-type LeaderboardItem = {
-  user_id: number;
-  rank: number;
-  name: string;
-  score: number;
-  level: number;
-  quests_completed: number;
-  steps: number;
-  challenge_wins: number;
-  class_display_name?: string | null;
-  class_name?: string | null;
-  class_level?: number | null;
-  goal_type?: string | null;
-  goal_progress_percent?: number | null;
-  goal_cycle_xp?: number | null;
-  goal_target_xp?: number | null;
+type LeaderboardMeta = Pick<
+  LeaderboardResponse,
+  "period" | "period_started_at" | "period_ends_at" | "event_id" | "season_key"
+>;
+
+type FriendsRouteParams = {
+  initialTab?: (typeof tabs)[number];
+  initialPeriod?: LeaderboardPeriod;
+  requestedAt?: number;
 };
 
 function translateOrFallback(
@@ -58,9 +52,17 @@ function translateOrFallback(
   return translated === key ? fallback : translated;
 }
 
+function formatIdentityLabel(username?: string | null, friendId?: string | null) {
+  const parts = [username ? `@${username}` : null, friendId ?? null].filter(Boolean);
+  return parts.length ? parts.join(LEADERBOARD_SEPARATOR) : null;
+}
+
 export function FriendsScreen() {
   const navigation = useNavigation<any>();
+  const route = useRoute<any>();
+  const friendsScrollRef = useRef<ScrollView | null>(null);
   const searchInputRef = useRef<TextInput | null>(null);
+  const searchSectionYRef = useRef(0);
   const friendsRequestRef = useRef(0);
   const searchRequestRef = useRef(0);
   const leaderboardRequestRef = useRef(0);
@@ -87,11 +89,14 @@ export function FriendsScreen() {
   const [sendingRequestIds, setSendingRequestIds] = useState<number[]>([]);
   const [respondingRequestIds, setRespondingRequestIds] = useState<number[]>([]);
   const [leaderboardMetric, setLeaderboardMetric] = useState<LeaderboardMetric>("level");
-  const [leaderboardItems, setLeaderboardItems] = useState<LeaderboardItem[]>([]);
+  const [leaderboardPeriod, setLeaderboardPeriod] = useState<LeaderboardPeriod>("weekly");
+  const [leaderboardItems, setLeaderboardItems] = useState<LeaderboardEntry[]>([]);
+  const [leaderboardMeta, setLeaderboardMeta] = useState<LeaderboardMeta | null>(null);
   const [leaderboardPage, setLeaderboardPage] = useState(1);
   const [leaderboardHasMore, setLeaderboardHasMore] = useState(false);
   const [leaderboardLoadingMore, setLeaderboardLoadingMore] = useState(false);
-  const [globalLeaderboardItems, setGlobalLeaderboardItems] = useState<LeaderboardItem[]>([]);
+  const [globalLeaderboardItems, setGlobalLeaderboardItems] = useState<LeaderboardEntry[]>([]);
+  const [globalLeaderboardMeta, setGlobalLeaderboardMeta] = useState<LeaderboardMeta | null>(null);
   const [globalLeaderboardPage, setGlobalLeaderboardPage] = useState(1);
   const [globalLeaderboardHasMore, setGlobalLeaderboardHasMore] = useState(false);
   const [globalLeaderboardLoadingMore, setGlobalLeaderboardLoadingMore] = useState(false);
@@ -101,12 +106,14 @@ export function FriendsScreen() {
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [leaderboardRefreshing, setLeaderboardRefreshing] = useState(false);
+  const [shouldRevealSearch, setShouldRevealSearch] = useState(false);
 
   useEffect(() => {
     if (activeTab === "friends") {
       void Promise.all([
         loadFriends({ page: 1, refresh: false, append: false }),
         loadFriendRequests(),
+        loadLeaderboard({ page: 1, append: false, scope: "leaderboard" }),
       ]);
     }
   }, [activeTab]);
@@ -115,7 +122,37 @@ export function FriendsScreen() {
     if (activeTab === "leaderboard" || activeTab === "global") {
       void loadLeaderboard({ page: 1, append: false, scope: activeTab });
     }
-  }, [activeTab, leaderboardMetric]);
+  }, [activeTab, leaderboardMetric, leaderboardPeriod]);
+
+  useEffect(() => {
+    const params = route.params as FriendsRouteParams | undefined;
+    if (!params) {
+      return;
+    }
+    if (params.initialTab && tabs.includes(params.initialTab)) {
+      setActiveTab(params.initialTab);
+    }
+    if (params.initialPeriod && periods.includes(params.initialPeriod)) {
+      setLeaderboardPeriod(params.initialPeriod);
+    }
+  }, [route.params?.requestedAt, route.params?.initialTab, route.params?.initialPeriod]);
+
+  useEffect(() => {
+    if (!shouldRevealSearch || activeTab !== "friends") {
+      return;
+    }
+
+    const revealTimer = setTimeout(() => {
+      friendsScrollRef.current?.scrollTo({
+        y: Math.max(0, searchSectionYRef.current - 16),
+        animated: true,
+      });
+      searchInputRef.current?.focus();
+      setShouldRevealSearch(false);
+    }, 80);
+
+    return () => clearTimeout(revealTimer);
+  }, [activeTab, shouldRevealSearch]);
 
   async function loadFriends({ page, refresh, append }: { page: number; refresh: boolean; append: boolean }) {
     const requestId = ++friendsRequestRef.current;
@@ -129,7 +166,7 @@ export function FriendsScreen() {
     }
     setFriendsError(null);
     try {
-      const payload = await fetchFriendsList(page, FRIENDS_PAGE_SIZE);
+      const payload = await fetchFriends(page, FRIENDS_PAGE_SIZE);
       if (requestId !== friendsRequestRef.current) {
         return;
       }
@@ -179,21 +216,35 @@ export function FriendsScreen() {
     setLeaderboardError(null);
     try {
       if (scope === "leaderboard") {
-        const payload = await fetchFriendsLeaderboard(leaderboardMetric, page, LEADERBOARD_PAGE_SIZE);
+        const payload = await fetchFriendsLeaderboard(leaderboardMetric, page, LEADERBOARD_PAGE_SIZE, leaderboardPeriod);
         if (requestId !== leaderboardRequestRef.current) {
           return;
         }
         setLeaderboardItems((prev) => (append ? [...prev, ...payload.items] : payload.items));
+        setLeaderboardMeta({
+          period: payload.period,
+          period_started_at: payload.period_started_at,
+          period_ends_at: payload.period_ends_at,
+          event_id: payload.event_id,
+          season_key: payload.season_key,
+        });
         setLeaderboardPage(payload.pagination.page);
         setLeaderboardHasMore(payload.pagination.page < payload.pagination.total_pages);
       } else {
-        const payload = await fetchLeaderboard(leaderboardMetric, "global", page, LEADERBOARD_PAGE_SIZE, {
+        const payload = await fetchLeaderboard(leaderboardMetric, "global", page, LEADERBOARD_PAGE_SIZE, leaderboardPeriod, {
           forceRefresh: !append,
         });
         if (requestId !== leaderboardRequestRef.current) {
           return;
         }
         setGlobalLeaderboardItems((prev) => (append ? [...prev, ...payload.items] : payload.items));
+        setGlobalLeaderboardMeta({
+          period: payload.period,
+          period_started_at: payload.period_started_at,
+          period_ends_at: payload.period_ends_at,
+          event_id: payload.event_id,
+          season_key: payload.season_key,
+        });
         setGlobalLeaderboardPage(payload.pagination.page);
         setGlobalLeaderboardHasMore(payload.pagination.page < payload.pagination.total_pages);
       }
@@ -365,16 +416,41 @@ export function FriendsScreen() {
     return translated === key ? value : translated;
   }
 
+  function getPeriodLabel(value: LeaderboardPeriod) {
+    switch (value) {
+      case "weekly":
+        return translateOrFallback(t, "screens.friends.periods.weekly", "Неделя");
+      case "season":
+        return translateOrFallback(t, "screens.friends.periods.season", "Сезон");
+      default:
+        return translateOrFallback(t, "screens.friends.periods.all_time", "Все время");
+    }
+  }
+
   function focusSearchInput() {
-    searchInputRef.current?.focus();
+    setShouldRevealSearch(true);
+    if (activeTab !== "friends") {
+      setActiveTab("friends");
+    }
   }
 
   const currentLeaderboardItems = activeTab === "leaderboard" ? leaderboardItems : globalLeaderboardItems;
+  const currentLeaderboardMeta = activeTab === "leaderboard" ? leaderboardMeta : globalLeaderboardMeta;
   const incomingRequests = friendRequests.filter((request) => request.direction === "incoming");
   const outgoingRequests = friendRequests.filter((request) => request.direction === "outgoing");
   const pendingRequestCount = friendRequests.length;
   const topLeaderboardEntry = currentLeaderboardItems[0] ?? null;
   const topLeaderboardLabel = topLeaderboardEntry ? `#${topLeaderboardEntry.rank} ${topLeaderboardEntry.name}` : EMPTY_VALUE;
+  const leaderboardPeriodLabel = getPeriodLabel(currentLeaderboardMeta?.period ?? leaderboardPeriod);
+  const leaderboardPeriodEndsLabel = currentLeaderboardMeta?.period_ends_at
+    ? new Date(currentLeaderboardMeta.period_ends_at).toLocaleDateString()
+    : null;
+  const leaderboardEmptyActionLabel = activeTab === "leaderboard"
+    ? t("screens.friends.tabs.global")
+    : t("common.createGoal");
+  const handleLeaderboardEmptyAction = activeTab === "leaderboard"
+    ? () => setActiveTab("global")
+    : () => navigation.navigate("GoalSelect");
   const socialPulse = friends.length === 0
     ? {
         title: translateOrFallback(t, "screens.friends.quick.pulseNoFriendsTitle", "Добавь первых союзников"),
@@ -428,6 +504,7 @@ export function FriendsScreen() {
 
       {activeTab === "friends" && (
         <ScrollView
+          ref={friendsScrollRef}
           style={styles.content}
           contentContainerStyle={styles.contentBody}
           keyboardShouldPersistTaps="handled"
@@ -437,6 +514,7 @@ export function FriendsScreen() {
               onRefresh={() => Promise.all([
                 loadFriends({ page: 1, refresh: true, append: false }),
                 loadFriendRequests(),
+                loadLeaderboard({ page: 1, append: false, scope: "leaderboard" }),
               ])}
               tintColor={colors.primary}
             />
@@ -466,6 +544,126 @@ export function FriendsScreen() {
             </View>
           </View>
 
+          <View
+            style={styles.section}
+            onLayout={(event) => {
+              searchSectionYRef.current = event.nativeEvent.layout.y;
+            }}
+          >
+            <Text style={styles.sectionTitle}>
+              {translateOrFallback(t, "screens.friends.findFriendsTitle", "Найти друзей")}
+            </Text>
+            <View style={styles.searchContainer}>
+              <TextInput
+                ref={searchInputRef}
+                style={styles.searchInput}
+                placeholder={t("screens.friends.searchPlaceholder")}
+                value={searchQuery}
+                onChangeText={(value) => {
+                  setSearchQuery(value);
+                  if (!value.trim()) {
+                    resetSearchState();
+                  }
+                }}
+                onSubmitEditing={handleSearch}
+              />
+              <Pressable style={styles.searchButton} onPress={handleSearch} disabled={searchLoading}>
+                <Text style={styles.searchButtonText}>{searchLoading ? t("common.loading") : t("common.search")}</Text>
+              </Pressable>
+            </View>
+
+            {!!searchError ? (
+              <StateBlock
+                tone="warning"
+                icon="alert-circle"
+                title={t("screens.friends.errorTitle")}
+                description={searchError}
+                actionLabel={t("common.retry")}
+                onAction={handleSearch}
+              />
+            ) : null}
+
+            {searchResults.length > 0 ? (
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>{t("screens.friends.searchResults")}</Text>
+                {searchResults.map((user) => {
+                  const isSending = sendingRequestIds.includes(user.id);
+                  const identityLabel = formatIdentityLabel(user.username, user.friend_id);
+                  return (
+                    <Card key={user.id}>
+                      <View style={styles.userRow}>
+                        <View style={styles.userInfo}>
+                          <Text style={styles.userName}>{user.name}</Text>
+                          {identityLabel ? <Text style={styles.userEmail}>{identityLabel}</Text> : null}
+                        </View>
+                        {user.status === "none" ? (
+                          <Pressable
+                            style={[styles.actionButton, isSending ? styles.actionButtonDisabled : null]}
+                            onPress={() => handleSendRequest(user.id)}
+                            disabled={isSending}
+                          >
+                            <Text style={styles.actionButtonText}>
+                              {isSending ? t("common.loading") : t("screens.friends.addFriend")}
+                            </Text>
+                          </Pressable>
+                        ) : null}
+                        {user.status === "outgoing_pending" ? (
+                          <View style={styles.pendingBadge}>
+                            <Text style={styles.pendingText}>{t("screens.friends.requestPending")}</Text>
+                          </View>
+                        ) : null}
+                        {user.status === "incoming_pending" ? (
+                          <View style={styles.requestActions}>
+                            <Pressable
+                              style={[
+                                styles.actionButton,
+                                user.request_id && respondingRequestIds.includes(user.request_id) ? styles.actionButtonDisabled : null,
+                              ]}
+                              onPress={() => user.request_id && handleRespondToFriendRequest(user.request_id, "accept", user.id)}
+                              disabled={!user.request_id || respondingRequestIds.includes(user.request_id)}
+                            >
+                              <Text style={styles.actionButtonText}>
+                                {translateOrFallback(t, "screens.friends.acceptRequest", "РџСЂРёРЅСЏС‚СЊ")}
+                              </Text>
+                            </Pressable>
+                            <Pressable
+                              style={[
+                                styles.secondaryButton,
+                                user.request_id && respondingRequestIds.includes(user.request_id) ? styles.actionButtonDisabled : null,
+                              ]}
+                              onPress={() => user.request_id && handleRespondToFriendRequest(user.request_id, "decline", user.id)}
+                              disabled={!user.request_id || respondingRequestIds.includes(user.request_id)}
+                            >
+                              <Text style={styles.secondaryButtonText}>
+                                {translateOrFallback(t, "screens.friends.declineRequest", "РћС‚РєР»РѕРЅРёС‚СЊ")}
+                              </Text>
+                            </Pressable>
+                          </View>
+                        ) : null}
+                      </View>
+                    </Card>
+                  );
+                })}
+              </View>
+            ) : null}
+
+            {searchHasMore ? (
+              <Pressable style={styles.loadMoreButton} onPress={handleLoadMoreSearch} disabled={searchLoadingMore}>
+                <Text style={styles.loadMoreButtonText}>{searchLoadingMore ? t("common.loading") : t("common.loadMore")}</Text>
+              </Pressable>
+            ) : null}
+
+            {searchAttempted && !searchLoading && searchResults.length === 0 ? (
+              <StateBlock
+                icon="account-search-outline"
+                title={t("screens.friends.empty.searchTitle")}
+                description={t("screens.friends.empty.searchDescription")}
+                actionLabel={t("screens.friends.empty.findFriendsAction")}
+                onAction={focusSearchInput}
+              />
+            ) : null}
+          </View>
+
           {!!friendRequestsError ? (
             <StateBlock
               tone="warning"
@@ -486,12 +684,13 @@ export function FriendsScreen() {
               </Text>
               {incomingRequests.map((request) => {
                 const isResponding = respondingRequestIds.includes(request.id);
+                const identityLabel = formatIdentityLabel(request.user.username, request.user.friend_id);
                 return (
                   <Card key={request.id}>
                     <View style={styles.requestCard}>
                       <View style={styles.userInfo}>
                         <Text style={styles.userName}>{request.user.name}</Text>
-                        <Text style={styles.userEmail}>{request.user.email}</Text>
+                        {identityLabel ? <Text style={styles.userEmail}>{identityLabel}</Text> : null}
                       </View>
                       <View style={styles.requestActions}>
                         <Pressable
@@ -532,7 +731,9 @@ export function FriendsScreen() {
                   <View style={styles.userRow}>
                     <View style={styles.userInfo}>
                       <Text style={styles.userName}>{request.user.name}</Text>
-                      <Text style={styles.userEmail}>{request.user.email}</Text>
+                      {formatIdentityLabel(request.user.username, request.user.friend_id) ? (
+                        <Text style={styles.userEmail}>{formatIdentityLabel(request.user.username, request.user.friend_id)}</Text>
+                      ) : null}
                     </View>
                     <View style={styles.pendingBadge}>
                       <Text style={styles.pendingText}>{t("screens.friends.requestPending")}</Text>
@@ -543,112 +744,6 @@ export function FriendsScreen() {
             </View>
           ) : null}
 
-          <View style={styles.searchContainer}>
-            <TextInput
-              ref={searchInputRef}
-              style={styles.searchInput}
-              placeholder={t("screens.friends.searchPlaceholder")}
-              value={searchQuery}
-              onChangeText={(value) => {
-                setSearchQuery(value);
-                if (!value.trim()) {
-                  resetSearchState();
-                }
-              }}
-              onSubmitEditing={handleSearch}
-            />
-            <Pressable style={styles.searchButton} onPress={handleSearch} disabled={searchLoading}>
-              <Text style={styles.searchButtonText}>{searchLoading ? t("common.loading") : t("common.search")}</Text>
-            </Pressable>
-          </View>
-
-          {!!searchError ? (
-            <StateBlock
-              tone="warning"
-              icon="alert-circle"
-              title={t("screens.friends.errorTitle")}
-              description={searchError}
-              actionLabel={t("common.retry")}
-              onAction={handleSearch}
-            />
-          ) : null}
-
-          {searchResults.length > 0 ? (
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>{t("screens.friends.searchResults")}</Text>
-              {searchResults.map((user) => {
-                const isSending = sendingRequestIds.includes(user.id);
-                return (
-                  <Card key={user.id}>
-                    <View style={styles.userRow}>
-                      <View style={styles.userInfo}>
-                        <Text style={styles.userName}>{user.name}</Text>
-                        <Text style={styles.userEmail}>{user.email}</Text>
-                      </View>
-                      {user.status === "none" ? (
-                        <Pressable
-                          style={[styles.actionButton, isSending ? styles.actionButtonDisabled : null]}
-                          onPress={() => handleSendRequest(user.id)}
-                          disabled={isSending}
-                        >
-                          <Text style={styles.actionButtonText}>{isSending ? t("common.loading") : t("screens.friends.addFriend")}</Text>
-                        </Pressable>
-                      ) : null}
-                      {user.status === "outgoing_pending" ? (
-                        <View style={styles.pendingBadge}>
-                          <Text style={styles.pendingText}>{t("screens.friends.requestPending")}</Text>
-                        </View>
-                      ) : null}
-                      {user.status === "incoming_pending" ? (
-                        <View style={styles.requestActions}>
-                          <Pressable
-                            style={[
-                              styles.actionButton,
-                              user.request_id && respondingRequestIds.includes(user.request_id) ? styles.actionButtonDisabled : null,
-                            ]}
-                            onPress={() => user.request_id && handleRespondToFriendRequest(user.request_id, "accept", user.id)}
-                            disabled={!user.request_id || respondingRequestIds.includes(user.request_id)}
-                          >
-                            <Text style={styles.actionButtonText}>
-                              {translateOrFallback(t, "screens.friends.acceptRequest", "Принять")}
-                            </Text>
-                          </Pressable>
-                          <Pressable
-                            style={[
-                              styles.secondaryButton,
-                              user.request_id && respondingRequestIds.includes(user.request_id) ? styles.actionButtonDisabled : null,
-                            ]}
-                            onPress={() => user.request_id && handleRespondToFriendRequest(user.request_id, "decline", user.id)}
-                            disabled={!user.request_id || respondingRequestIds.includes(user.request_id)}
-                          >
-                            <Text style={styles.secondaryButtonText}>
-                              {translateOrFallback(t, "screens.friends.declineRequest", "Отклонить")}
-                            </Text>
-                          </Pressable>
-                        </View>
-                      ) : null}
-                    </View>
-                  </Card>
-                );
-              })}
-            </View>
-          ) : null}
-
-          {searchHasMore ? (
-            <Pressable style={styles.loadMoreButton} onPress={handleLoadMoreSearch} disabled={searchLoadingMore}>
-              <Text style={styles.loadMoreButtonText}>{searchLoadingMore ? t("common.loading") : t("common.loadMore")}</Text>
-            </Pressable>
-          ) : null}
-
-          {searchAttempted && !searchLoading && searchResults.length === 0 ? (
-            <StateBlock
-              icon="account-search-outline"
-              title={t("screens.friends.empty.searchTitle")}
-              description={t("screens.friends.empty.searchDescription")}
-              actionLabel={t("screens.friends.empty.findFriendsAction")}
-              onAction={focusSearchInput}
-            />
-          ) : null}
 
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>{t("screens.friends.myFriends")}</Text>
@@ -677,6 +772,9 @@ export function FriendsScreen() {
                 <View style={styles.friendRow}>
                   <View style={styles.friendInfo}>
                     <Text style={styles.friendName}>{friend.name}</Text>
+                    {formatIdentityLabel(friend.username, friend.friend_id) ? (
+                      <Text style={styles.friendSince}>{formatIdentityLabel(friend.username, friend.friend_id)}</Text>
+                    ) : null}
                     <Text style={styles.friendStats}>
                       {t("screens.friends.friendStats", {
                         level: friend.stats.level ?? 1,
@@ -719,6 +817,10 @@ export function FriendsScreen() {
               <Text style={styles.summaryValue}>{getMetricLabel(leaderboardMetric)}</Text>
             </View>
             <View style={styles.summaryChip}>
+              <Text style={styles.summaryLabel}>{translateOrFallback(t, "screens.friends.periodLabel", "Период")}</Text>
+              <Text style={styles.summaryValue}>{leaderboardPeriodLabel}</Text>
+            </View>
+            <View style={styles.summaryChip}>
               <Text style={styles.summaryLabel}>{t("navigation.leaderboard")}</Text>
               <Text style={styles.summaryValue}>{currentLeaderboardItems.length}</Text>
             </View>
@@ -729,6 +831,13 @@ export function FriendsScreen() {
               </Text>
             </View>
           </View>
+          {leaderboardPeriodEndsLabel ? (
+            <Text style={styles.periodHint}>
+              {translateOrFallback(t, "screens.friends.periodEnds", `Окно заканчивается ${leaderboardPeriodEndsLabel}`, {
+                date: leaderboardPeriodEndsLabel,
+              })}
+            </Text>
+          ) : null}
 
           {!!leaderboardError ? (
             <StateBlock
@@ -753,6 +862,19 @@ export function FriendsScreen() {
               </Pressable>
             ))}
           </View>
+          <View style={styles.filters}>
+            {periods.map((period) => (
+              <Pressable
+                key={period}
+                style={[styles.filter, leaderboardPeriod === period ? styles.filterActive : null]}
+                onPress={() => setLeaderboardPeriod(period)}
+              >
+                <Text style={[styles.filterText, leaderboardPeriod === period ? styles.filterTextActive : null]}>
+                  {getPeriodLabel(period)}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
 
           {leaderboardLoading ? <StateBlock tone="info" icon="timer-sand" title={t("common.loading")} /> : null}
           {!leaderboardLoading && currentLeaderboardItems.length === 0 ? (
@@ -760,8 +882,8 @@ export function FriendsScreen() {
               icon="flag-checkered"
               title={t("screens.friends.empty.leaderboardTitle")}
               description={t("screens.friends.empty.leaderboardDescription")}
-              actionLabel={t("common.createGoal")}
-              onAction={() => navigation.navigate("GoalSelect")}
+              actionLabel={leaderboardEmptyActionLabel}
+              onAction={handleLeaderboardEmptyAction}
             />
           ) : null}
 
@@ -770,6 +892,9 @@ export function FriendsScreen() {
               <Text style={styles.title}>
                 #{item.rank} {item.name}
               </Text>
+              {formatIdentityLabel(item.username, item.friend_id) ? (
+                <Text style={styles.meta}>{formatIdentityLabel(item.username, item.friend_id)}</Text>
+              ) : null}
               <Text style={styles.subTitle}>
                 {t("screens.leaderboard.fields.class")}: {item.class_display_name ?? item.class_name ?? EMPTY_VALUE}
                 {LEADERBOARD_SEPARATOR}
@@ -859,6 +984,11 @@ function createStyles(colors: ReturnType<typeof useThemeColors>) {
       fontSize: 15,
       color: colors.text,
       fontWeight: "800",
+    },
+    periodHint: {
+      color: colors.textDim,
+      fontSize: 13,
+      marginBottom: 12,
     },
     searchContainer: {
       flexDirection: "row",

@@ -38,14 +38,98 @@ class EquipmentError(Exception):
     pass
 
 
+def _slot_field(slot: str) -> str:
+    return f"{slot}_id"
+
+
 def _equipped_inventory_ids(equipment: CharacterEquipment | None) -> set[int]:
     if not equipment:
         return set()
     return {
         inv_id
-        for inv_id in (getattr(equipment, f"{slot}_id") for slot in SLOTS)
+        for inv_id in (getattr(equipment, _slot_field(slot)) for slot in SLOTS)
         if inv_id
     }
+
+
+def _get_weapon_stats_for_inventory(
+    db: Session,
+    user_id: int,
+    inventory_id: int | None,
+) -> ItemWeaponStats | None:
+    if not inventory_id:
+        return None
+
+    inventory_item = (
+        db.query(UserInventory)
+        .filter(UserInventory.id == inventory_id, UserInventory.user_id == user_id)
+        .first()
+    )
+    if not inventory_item:
+        return None
+
+    return db.query(ItemWeaponStats).filter(ItemWeaponStats.item_id == inventory_item.item_id).first()
+
+
+def _prune_invalid_equipment_slots(db: Session, equipment: CharacterEquipment, user_id: int) -> bool:
+    slot_values = {slot: getattr(equipment, _slot_field(slot)) for slot in SLOTS}
+    inventory_ids = [inventory_id for inventory_id in slot_values.values() if inventory_id]
+    if not inventory_ids:
+        return False
+
+    valid_ids = {
+        row.id
+        for row in (
+            db.query(UserInventory)
+            .filter(UserInventory.user_id == user_id, UserInventory.id.in_(inventory_ids))
+            .all()
+        )
+    }
+
+    changed = False
+    for slot, inventory_id in slot_values.items():
+        if inventory_id and inventory_id not in valid_ids:
+            setattr(equipment, _slot_field(slot), None)
+            changed = True
+    return changed
+
+
+def _clear_inventory_from_slots(
+    equipment: CharacterEquipment,
+    inventory_id: int,
+    *,
+    except_slot: str | None = None,
+) -> bool:
+    changed = False
+    for slot in SLOTS:
+        if slot == except_slot:
+            continue
+        if getattr(equipment, _slot_field(slot)) == inventory_id:
+            setattr(equipment, _slot_field(slot), None)
+            changed = True
+    return changed
+
+
+def ensure_equipment_integrity(db: Session, equipment: CharacterEquipment, user_id: int) -> bool:
+    changed = _prune_invalid_equipment_slots(db, equipment, user_id)
+
+    main_hand_weapon = _get_weapon_stats_for_inventory(db, user_id, equipment.main_hand_id)
+    if main_hand_weapon and main_hand_weapon.weapon_category == "two_hand" and equipment.off_hand_id:
+        equipment.off_hand_id = None
+        changed = True
+
+    if changed:
+        db.flush()
+
+    return changed
+
+
+def sync_equipped_inventory_flags(db: Session, user_id: int) -> None:
+    db.flush()
+    equipped_ids = get_equipped_inventory_ids(db, user_id)
+    inventory_rows = db.query(UserInventory).filter(UserInventory.user_id == user_id).all()
+    for inventory_row in inventory_rows:
+        inventory_row.is_equipped = inventory_row.id in equipped_ids
 
 
 def get_equipped_inventory_ids(
@@ -160,18 +244,24 @@ def can_equip_item(
             return False, f"Required intellect: {weapon_stats.required_intellect}"
 
         equipment = get_or_create_character_equipment(db, user_id, class_progress_id)
+        ensure_equipment_integrity(db, equipment, user_id)
         category = weapon_stats.weapon_category
         if category == "two_hand":
             if target_slot != "main_hand":
                 return False, "Two-hand weapon can be equipped only to main hand"
-            if equipment.off_hand_id:
-                return False, "Off-hand must be empty for two-hand weapon"
         elif category == "ranged" and target_slot != "ranged":
             return False, "Ranged weapon can be equipped only to ranged slot"
         elif category == "main_hand_only" and target_slot != "main_hand":
             return False, "Weapon can be equipped only to main hand"
         elif category == "off_hand_only" and target_slot != "off_hand":
             return False, "Weapon can be equipped only to off hand"
+
+    if target_slot == "off_hand":
+        equipment = get_or_create_character_equipment(db, user_id, class_progress_id)
+        ensure_equipment_integrity(db, equipment, user_id)
+        main_hand_weapon = _get_weapon_stats_for_inventory(db, user_id, equipment.main_hand_id)
+        if main_hand_weapon and main_hand_weapon.weapon_category == "two_hand":
+            return False, "Cannot equip off-hand item while two-hand weapon is equipped"
 
     return True, "OK"
 
@@ -196,6 +286,7 @@ def equip_item(
         return False
 
     equipment = get_or_create_character_equipment(db, user_id, class_progress_id)
+    ensure_equipment_integrity(db, equipment, user_id)
     weapon_stats = (
         db.query(ItemWeaponStats).filter(ItemWeaponStats.item_id == inventory_item.item_id).first()
     )
@@ -204,20 +295,24 @@ def equip_item(
     if weapon_stats and weapon_stats.weapon_category == "two_hand" and equipment.off_hand_id:
         equipment.off_hand_id = None
 
-    setattr(equipment, f"{target_slot}_id", inventory_id)
+    _clear_inventory_from_slots(equipment, inventory_id, except_slot=target_slot)
+    setattr(equipment, _slot_field(target_slot), inventory_id)
     recalculate_total_stats(db, equipment)
+    sync_equipped_inventory_flags(db, user_id)
     db.commit()
     return True
 
 
 def unequip_item(db: Session, user_id: int, class_progress_id: int, slot: str) -> bool:
     equipment = get_or_create_character_equipment(db, user_id, class_progress_id)
-    inventory_id = getattr(equipment, f"{slot}_id")
+    ensure_equipment_integrity(db, equipment, user_id)
+    inventory_id = getattr(equipment, _slot_field(slot))
     if not inventory_id:
         return False
 
-    setattr(equipment, f"{slot}_id", None)
+    setattr(equipment, _slot_field(slot), None)
     recalculate_total_stats(db, equipment)
+    sync_equipped_inventory_flags(db, user_id)
     db.commit()
     return True
 
@@ -296,6 +391,7 @@ def recalculate_total_stats(db: Session, equipment: CharacterEquipment):
 
 def get_equipped_items(db: Session, user_id: int, class_progress_id: int):
     equipment = get_or_create_character_equipment(db, user_id, class_progress_id)
+    ensure_equipment_integrity(db, equipment, user_id)
     recalculate_total_stats(db, equipment)
 
     result = {}

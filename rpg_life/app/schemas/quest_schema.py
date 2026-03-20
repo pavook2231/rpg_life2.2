@@ -8,7 +8,7 @@ from app.goals import SUPPORTED_GOAL_TERMS, normalize_goal_type
 class QuestCreate(BaseModel):
     title: str
     description: str
-    xp_reward: int
+    xp_reward: Optional[int] = None
     icon: str = "📝"
 
 

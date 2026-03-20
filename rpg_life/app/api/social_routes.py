@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 
 from app import auth
-from app.api.dependencies import require_admin_user, verify_csrf_token
+from app.api.dependencies import enforce_rate_limit, require_admin_user, verify_csrf_token
 from app.core.database import get_db
 from app.models import User
 from app.schemas import (
@@ -45,19 +45,23 @@ async def api_join_challenge(
 
 @router.post("/friends/request")
 async def send_friend_request(
+    request: Request,
     payload: FriendRequestCreateSchema,
     db: Session = Depends(get_db),
     current_user: User = Depends(auth.get_current_user),
 ):
+    await enforce_rate_limit(request, bucket="social-friend-request", limit=10, window_seconds=60)
     return social_service.send_friend_request(db, current_user, payload.receiver_id)
 
 
 @router.post("/friends/accept")
 async def respond_friend_request(
+    request: Request,
     payload: FriendRequestRespondSchema,
     db: Session = Depends(get_db),
     current_user: User = Depends(auth.get_current_user),
 ):
+    await enforce_rate_limit(request, bucket="social-friend-response", limit=20, window_seconds=60)
     return social_service.respond_friend_request(db, current_user, payload.request_id, payload.action)
 
 
@@ -85,12 +89,14 @@ async def list_friend_requests(
 
 @router.get("/friends/search")
 async def search_users(
+    request: Request,
     q: str = Query(..., min_length=1, max_length=100),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=50),
     db: Session = Depends(get_db),
     current_user: User = Depends(auth.get_current_user),
 ):
+    await enforce_rate_limit(request, bucket="social-friend-search", limit=20, window_seconds=60)
     return social_service.search_users(db, current_user, q, page, page_size)
 
 
@@ -137,24 +143,30 @@ async def get_pvp_result(
 
 @router.get("/leaderboard/global")
 async def get_global_leaderboard(
+    request: Request,
     metric: str = "level",
+    period: str = Query("all_time", pattern="^(all_time|weekly|season)$"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
     current_user: User = Depends(auth.get_current_user),
 ):
-    return social_service.get_global_leaderboard(db, metric, page, page_size)
+    await enforce_rate_limit(request, bucket="social-leaderboard", limit=60, window_seconds=60)
+    return social_service.get_global_leaderboard(db, metric, page, page_size, period)
 
 
 @router.get("/leaderboard/friends")
 async def get_friends_leaderboard(
+    request: Request,
     metric: str = "level",
+    period: str = Query("all_time", pattern="^(all_time|weekly|season)$"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
     current_user: User = Depends(auth.get_current_user),
 ):
-    return social_service.get_friends_leaderboard(db, current_user, metric, page, page_size)
+    await enforce_rate_limit(request, bucket="social-leaderboard", limit=60, window_seconds=60)
+    return social_service.get_friends_leaderboard(db, current_user, metric, page, page_size, period)
 
 
 @router.post("/coop-quests/create")
@@ -206,10 +218,12 @@ async def list_events(
 
 @router.post("/challenges/invitations")
 async def send_challenge_invitation(
+    request: Request,
     payload: ChallengeInvitationCreateSchema,
     db: Session = Depends(get_db),
     current_user: User = Depends(auth.get_current_user),
 ):
+    await enforce_rate_limit(request, bucket="social-challenge-invitation-write", limit=10, window_seconds=60)
     invitation = social_service.send_challenge_invitation(
         db,
         current_user,
@@ -227,19 +241,23 @@ async def send_challenge_invitation(
 
 @router.post("/challenges/invitations/respond")
 async def respond_challenge_invitation(
+    request: Request,
     payload: ChallengeInvitationRespondSchema,
     db: Session = Depends(get_db),
     current_user: User = Depends(auth.get_current_user),
 ):
+    await enforce_rate_limit(request, bucket="social-challenge-invitation-write", limit=20, window_seconds=60)
     result = social_service.respond_challenge_invitation(db, current_user, payload.invitation_id, payload.action)
     return result
 
 
 @router.get("/challenges/invitations")
 async def list_challenge_invitations(
+    request: Request,
     status: str | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(auth.get_current_user),
 ):
+    await enforce_rate_limit(request, bucket="social-challenge-invitation-read", limit=30, window_seconds=60)
     invitations = social_service.list_challenge_invitations(db, current_user, status)
     return {"invitations": invitations}

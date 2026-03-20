@@ -5,6 +5,7 @@ import pytest
 from app import crud
 from app.core.dates import utc_now
 from app.models import Challenge, CompletedQuest, DailySteps, Item, Quest, User, UserClassProgress, UserInventory
+from app.schemas.quest_schema import QuestCreate
 
 
 def _create_user(session, email: str, *, is_active: bool = True) -> User:
@@ -179,6 +180,72 @@ def test_get_daily_quests_auto_generates_daily_and_boss_quests_when_missing(db_s
     assert "boss_daily" in quest_types
 
 
+def test_create_custom_quest_uses_server_side_reward_even_for_legacy_payload(db_session) -> None:
+    user = _create_user(db_session, "custom-reward@example.com")
+    progress = _create_progress(db_session, user.id)
+
+    quest = crud.create_custom_quest(
+        db_session,
+        user.id,
+        progress.id,
+        QuestCreate(
+            title="Legacy custom quest",
+            description="Client tries to overstate the reward.",
+            xp_reward=9999,
+            icon="notebook-edit-outline",
+        ),
+    )
+
+    assert quest.xp_reward == crud.CUSTOM_QUEST_XP_REWARD
+    assert quest.crystal_reward == crud.CUSTOM_QUEST_CRYSTAL_REWARD
+    assert quest.rarity == "uncommon"
+
+
+def test_create_user_assigns_public_identity(db_session) -> None:
+    user = crud.create_user(
+        db_session,
+        "identity@example.com",
+        "Password123",
+        "mage",
+        name="Identity Hero",
+        birth_year=1995,
+        gender="unspecified",
+        goal_type="personal_development",
+        goal_term_months=6,
+    )
+
+    assert user.username == "identity_hero"
+    assert crud.user_friend_id(user) == "RPG-000001"
+
+
+def test_update_user_profile_rejects_duplicate_username(db_session) -> None:
+    first_user = crud.create_user(
+        db_session,
+        "first-identity@example.com",
+        "Password123",
+        "mage",
+        name="First Hero",
+        birth_year=1995,
+        gender="unspecified",
+        goal_type="personal_development",
+        goal_term_months=6,
+    )
+    second_user = crud.create_user(
+        db_session,
+        "second-identity@example.com",
+        "Password123",
+        "mage",
+        name="Second Hero",
+        birth_year=1995,
+        gender="unspecified",
+        goal_type="personal_development",
+        goal_term_months=6,
+    )
+
+    with pytest.raises(ValueError, match="Username is already taken"):
+        crud.update_user_profile(db_session, second_user.id, {"username": first_user.username})
+
+
 def test_resolve_due_challenges_skips_pvp_challenges(db_session) -> None:
     creator = _create_user(db_session, "creator@example.com")
     opponent = _create_user(db_session, "opponent@example.com")
@@ -282,6 +349,37 @@ def test_manual_quest_completes_without_competitive_record(db_session, monkeypat
 
     assert result is not None
     assert db_session.query(CompletedQuest).filter(CompletedQuest.user_id == user.id).count() == 0
+
+
+def test_complete_quest_invalidates_leaderboard_cache(db_session, monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.services import quest_service
+
+    monkeypatch.setattr(crud.random, "random", lambda: 1.0)
+
+    user = _create_user(db_session, "quest-cache@example.com")
+    progress = _create_progress(db_session, user.id)
+    invalidations: list[str] = []
+    quest = Quest(
+        user_id=user.id,
+        class_progress_id=progress.id,
+        title="Cache quest",
+        description="",
+        xp_reward=25,
+        crystal_reward=5,
+        is_custom=True,
+        is_completed=False,
+        quest_type="daily",
+        created_at=utc_now(),
+    )
+    db_session.add(quest)
+    db_session.commit()
+
+    monkeypatch.setattr(quest_service, "invalidate_leaderboard_cache", lambda: invalidations.append("leaderboard"))
+
+    result = quest_service.complete_quest(db_session, user.id, quest.id)
+
+    assert result is not None
+    assert invalidations == ["leaderboard"]
 
 
 def test_level_up_grants_chest_to_inventory_instead_of_direct_loot(db_session, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -49,6 +49,7 @@ def ensure_sqlite_schema():
     columns = {column["name"] for column in inspector.get_columns("users")}
     required_columns = {
         "name": "ALTER TABLE users ADD COLUMN name VARCHAR",
+        "username": "ALTER TABLE users ADD COLUMN username VARCHAR",
         "birth_year": "ALTER TABLE users ADD COLUMN birth_year INTEGER",
         "gender": "ALTER TABLE users ADD COLUMN gender VARCHAR DEFAULT 'unspecified'",
         "selected_goal_type": "ALTER TABLE users ADD COLUMN selected_goal_type VARCHAR DEFAULT 'personal_development'",
@@ -165,6 +166,7 @@ def ensure_sqlite_schema():
             "CREATE INDEX IF NOT EXISTS ix_notification_queue_status_schedule ON notification_queue (status, scheduled_at)",
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_notification_queue_event_device ON notification_queue (event_id, device_id)",
             "CREATE INDEX IF NOT EXISTS ix_users_selected_goal_type ON users (selected_goal_type)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_users_username ON users (username)",
             "CREATE INDEX IF NOT EXISTS ix_quests_goal_id ON quests (goal_id)",
             "CREATE INDEX IF NOT EXISTS ix_quests_template_key ON quests (template_key)",
             "CREATE INDEX IF NOT EXISTS ix_quests_bucket_accepted ON quests (quest_bucket, is_accepted)",
@@ -229,7 +231,13 @@ def normalize_existing_strings():
 
 def init_db():
     import app.models  # noqa: F401
+    from app import crud
 
     if AUTO_CREATE_TABLES:
         Base.metadata.create_all(bind=engine)
     ensure_sqlite_schema()
+    db = SessionLocal()
+    try:
+        crud.backfill_missing_usernames(db)
+    finally:
+        db.close()

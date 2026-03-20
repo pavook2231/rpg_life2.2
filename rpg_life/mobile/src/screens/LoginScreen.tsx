@@ -1,28 +1,19 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Alert, KeyboardAvoidingView, Linking, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
-import * as AuthSession from "expo-auth-session";
-import * as Google from "expo-auth-session/providers/google";
-import * as WebBrowser from "expo-web-browser";
+import { KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 
 import { probeApiConnection } from "../api/auth";
+import { SocialAuthSection } from "../components/SocialAuthSection";
 import { Screen } from "../components/Screen";
 import {
-  GOOGLE_AUTH_ANDROID_CLIENT_ID,
   DEFAULT_API_BASE_URL,
-  GOOGLE_AUTH_CLIENT_ID,
-  GOOGLE_AUTH_IOS_CLIENT_ID,
-  GOOGLE_AUTH_WEB_CLIENT_ID,
   isDeprecatedLocalApiBaseUrl,
   normalizeApiBaseUrl,
-  SOCIAL_AUTH_REDIRECT_SCHEME,
 } from "../config/env";
 import { useAuth } from "../context/AuthContext";
 import { useTranslation } from "../context/LocalizationContext";
 import { clearApiBaseUrl, getStoredApiBaseUrl, saveApiBaseUrl } from "../storage/appConfigStorage";
 import { useFeedback } from "../context/FeedbackContext";
 import { useThemeColors, useThemeMode } from "../ui";
-
-WebBrowser.maybeCompleteAuthSession();
 
 type Props = {
   onShowRegister: () => void;
@@ -33,7 +24,7 @@ function isValidEmail(value: string) {
 }
 
 export function LoginScreen({ onShowRegister }: Props) {
-  const { signIn, signInWithProvider, socialProviders, reloadSocialProviders, authFlowNotice, clearAuthFlowNotice, completeSocialRedirectUrl } = useAuth();
+  const { signIn } = useAuth();
   const t = useTranslation();
   const { pushToast } = useFeedback();
   const colors = useThemeColors();
@@ -45,108 +36,19 @@ export function LoginScreen({ onShowRegister }: Props) {
   const [isSavingApi, setIsSavingApi] = useState(false);
   const [isCheckingApi, setIsCheckingApi] = useState(false);
   const [isSigningIn, setIsSigningIn] = useState(false);
-  const [isSocialLoading, setIsSocialLoading] = useState(false);
-  const [activeSocialProviderId, setActiveSocialProviderId] = useState<"google" | "telegram" | "vk" | null>(null);
   const [showApiTools, setShowApiTools] = useState(false);
-  const providerList = Array.isArray(socialProviders) ? socialProviders : [];
-  const googleProvider = providerList.find((entry) => entry.id === "google");
-  const googleFallbackClientId = googleProvider?.mobile_client_id || GOOGLE_AUTH_CLIENT_ID;
-  const googleAndroidClientId = GOOGLE_AUTH_ANDROID_CLIENT_ID || googleFallbackClientId;
-  const googleIosClientId = GOOGLE_AUTH_IOS_CLIENT_ID || googleFallbackClientId;
-  const googleWebClientId = GOOGLE_AUTH_WEB_CLIENT_ID || GOOGLE_AUTH_CLIENT_ID || googleFallbackClientId;
-  const googleClientId =
-    Platform.OS === "android"
-      ? googleAndroidClientId
-      : Platform.OS === "ios"
-        ? googleIosClientId
-        : googleWebClientId;
-  const googleRedirectUri = AuthSession.makeRedirectUri({
-    native: "com.rpglife.mobile:/oauthredirect",
-  });
-  const [googleRequest, googleResponse, promptGoogleAuth] = Google.useIdTokenAuthRequest(
-    {
-      androidClientId: googleAndroidClientId || undefined,
-      iosClientId: googleIosClientId || undefined,
-      webClientId: googleWebClientId || undefined,
-      redirectUri: googleRedirectUri,
-      scopes: ["openid", "profile", "email"],
-      selectAccount: true,
-    },
-  );
 
   useEffect(() => {
     getStoredApiBaseUrl()
       .then((storedValue) => {
-        if (
-          storedValue &&
-          !isDeprecatedLocalApiBaseUrl(storedValue) &&
-          normalizeApiBaseUrl(storedValue) === normalizeApiBaseUrl(DEFAULT_API_BASE_URL)
-        ) {
-          setApiBaseUrl(storedValue);
-        } else {
-          setApiBaseUrl(DEFAULT_API_BASE_URL);
-        }
+        const initialApiBaseUrl =
+          storedValue && !isDeprecatedLocalApiBaseUrl(storedValue)
+            ? normalizeApiBaseUrl(storedValue)
+            : normalizeApiBaseUrl(DEFAULT_API_BASE_URL);
+        setApiBaseUrl(initialApiBaseUrl);
       })
       .catch(() => undefined);
-
-    reloadSocialProviders().catch(() => undefined);
-  }, [reloadSocialProviders]);
-
-  useEffect(() => {
-    if (!authFlowNotice) {
-      return;
-    }
-
-    Alert.alert(t("screens.login.quick.socialLoginTitle"), authFlowNotice, [
-      {
-        text: t("screens.login.quick.ok"),
-        onPress: clearAuthFlowNotice,
-      },
-    ]);
-  }, [authFlowNotice, clearAuthFlowNotice, t]);
-
-  useEffect(() => {
-    if (!googleResponse) {
-      return;
-    }
-
-    if (googleResponse.type !== "success") {
-      if (googleResponse.type === "error") {
-        void pushToast({
-          title: t("screens.login.quick.googleTitle"),
-          description: googleResponse.error?.message || t("errors.unknownError"),
-          icon: "alert-circle",
-          tone: "warning",
-        });
-      }
-      return;
-    }
-
-    const idToken = googleResponse.params?.id_token || googleResponse.authentication?.idToken;
-    if (!idToken) {
-      void pushToast({
-        title: t("screens.login.quick.googleTitle"),
-        description: t("screens.login.quick.googleMissingIdToken"),
-        icon: "alert-circle",
-        tone: "warning",
-      });
-      setIsSocialLoading(false);
-      return;
-    }
-
-    signInWithProvider("google", { id_token: idToken })
-      .catch((error) => {
-        void pushToast({
-          title: t("screens.login.quick.socialLoginTitle"),
-          description: error instanceof Error ? error.message : t("errors.unknownError"),
-          icon: "alert-circle",
-          tone: "warning",
-        });
-      })
-      .finally(() => {
-        setIsSocialLoading(false);
-      });
-  }, [googleResponse, signInWithProvider, t]);
+  }, []);
 
   async function handleLogin() {
     const trimmedEmail = email.trim();
@@ -253,115 +155,6 @@ export function LoginScreen({ onShowRegister }: Props) {
     }
   }
 
-  async function openBrowserSocialFlow(providerId: "google" | "vk", loginUrl: string) {
-    const authResult = await WebBrowser.openAuthSessionAsync(loginUrl, `${SOCIAL_AUTH_REDIRECT_SCHEME}://auth/${providerId}`);
-    if (authResult.type === "success" && authResult.url) {
-      await completeSocialRedirectUrl(authResult.url);
-      return;
-    }
-
-    if (authResult.type !== "cancel" && authResult.type !== "dismiss") {
-      throw new Error(providerId === "google" ? t("screens.login.quick.googleFailed") : t("errors.unknownError"));
-    }
-  }
-
-  async function handleSocialLogin(providerId: "google" | "telegram" | "vk") {
-    const provider = providerList.find((entry) => entry.id === providerId);
-
-    try {
-      setActiveSocialProviderId(providerId);
-      if (providerId === "google") {
-        if (provider?.browser_login_path) {
-          setIsSocialLoading(true);
-          await openBrowserSocialFlow(providerId, `${normalizeApiBaseUrl(apiBaseUrl)}${provider.browser_login_path}`);
-          return;
-        }
-
-        if (!googleClientId) {
-          await pushToast({
-            title: t("screens.login.quick.googleTitle"),
-            description: t("screens.login.quick.googleClientMissing"),
-            icon: "alert-circle",
-            tone: "warning",
-          });
-          return;
-        }
-
-        if (!googleRequest) {
-          await pushToast({
-            title: t("screens.login.quick.googleTitle"),
-            description: t("screens.login.quick.googleNotReady"),
-            icon: "alert-circle",
-            tone: "warning",
-          });
-          return;
-        }
-
-        setIsSocialLoading(true);
-        const result = await promptGoogleAuth().catch((error) => {
-          setIsSocialLoading(false);
-          setActiveSocialProviderId(null);
-          throw error;
-        });
-        if (result.type !== "success") {
-          setIsSocialLoading(false);
-          setActiveSocialProviderId(null);
-          if (result.type !== "dismiss" && result.type !== "cancel") {
-            await pushToast({
-              title: t("screens.login.quick.googleTitle"),
-              description: t("screens.login.quick.googleFailed"),
-              icon: "alert-circle",
-              tone: "warning",
-            });
-          }
-        }
-        return;
-      }
-
-      if (providerId === "telegram") {
-        const botUsername = provider?.mobile_client_id;
-        if (botUsername) {
-          const telegramLoginUrl = `${normalizeApiBaseUrl(apiBaseUrl)}/auth/telegram/login`;
-          await Linking.openURL(telegramLoginUrl);
-          await pushToast(
-            {
-              title: t("screens.login.quick.telegramTitle"),
-              description: t("screens.login.quick.telegramOpened"),
-              icon: "send-circle-outline",
-              tone: "info",
-            },
-            { haptic: "success" },
-          );
-          return;
-        }
-      }
-
-      if (providerId === "vk") {
-        const vkLoginPath = provider?.browser_login_path || "/auth/vk/login";
-        if (provider?.mobile_client_id || provider?.browser_login_path) {
-          setIsSocialLoading(true);
-          await openBrowserSocialFlow(providerId, `${normalizeApiBaseUrl(apiBaseUrl)}${vkLoginPath}`);
-          return;
-        }
-      }
-
-      setIsSocialLoading(true);
-      await signInWithProvider(providerId);
-    } catch (error) {
-      await pushToast({
-        title: t("screens.login.quick.socialLoginTitle"),
-        description: error instanceof Error ? error.message : t("errors.unknownError"),
-        icon: "alert-circle",
-        tone: "warning",
-      });
-    } finally {
-      if (providerId !== "google") {
-        setIsSocialLoading(false);
-      }
-      setActiveSocialProviderId(null);
-    }
-  }
-
   return (
     <Screen title={t("screens.login.title")} subtitle={t("screens.login.subtitle")}>
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.container}>
@@ -401,49 +194,7 @@ export function LoginScreen({ onShowRegister }: Props) {
           </TouchableOpacity>
         </View>
 
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>{t("screens.login.quick.socialSectionTitle")}</Text>
-          <Text style={styles.hint}>{t("screens.login.quick.socialSectionHint")}</Text>
-          <View style={styles.socialColumn}>
-            {providerList.map((provider) => {
-              const isReady = provider.enabled && provider.configured;
-              const isProviderActionable =
-                provider.id !== "google" || Boolean(provider.browser_login_path || (googleClientId && googleRequest));
-              const metaText = isReady
-                ? provider.id === "telegram"
-                  ? t("screens.login.quick.provider.telegramReady")
-                  : t("screens.login.quick.provider.configured")
-                : provider.id === "telegram"
-                  ? t("screens.login.quick.provider.telegramPending")
-                  : t("screens.login.quick.provider.pending");
-
-              return (
-                <TouchableOpacity
-                  key={provider.id}
-                  style={[
-                    styles.socialButton,
-                    isReady ? styles.socialButtonReady : styles.socialButtonPending,
-                  ]}
-                  activeOpacity={0.85}
-                  disabled={!isReady || !isProviderActionable || isSocialLoading}
-                  onPress={() => handleSocialLogin(provider.id)}
-                >
-                  <View style={styles.socialButtonCopy}>
-                    <Text style={styles.socialButtonTitle}>{t("screens.login.quick.continueWith", { provider: provider.label })}</Text>
-                    <Text style={styles.socialButtonMeta}>{metaText}</Text>
-                  </View>
-                  <Text style={[styles.socialStatus, isReady ? styles.socialStatusReady : styles.socialStatusPending]}>
-                    {activeSocialProviderId === provider.id && isSocialLoading
-                      ? t("common.loading")
-                      : isReady
-                        ? t("screens.login.quick.ready")
-                        : t("screens.login.quick.comingSoon")}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        </View>
+        <SocialAuthSection title={t("screens.login.quick.socialSectionTitle")} hint={t("screens.login.quick.socialSectionHint")} />
 
         <View style={styles.apiCard}>
           <View style={styles.apiHeaderRow}>

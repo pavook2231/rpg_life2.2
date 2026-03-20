@@ -11,12 +11,15 @@ type AuthUser = {
   id: number;
   email: string;
   name: string | null;
+  username?: string | null;
+  friend_id?: string | null;
 };
 
 type RegisterInput = {
   email: string;
   password: string;
   name: string;
+  username?: string;
   birthYear: number;
   gender: string;
   characterClass: string;
@@ -156,6 +159,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             id: profile.user.id,
             email: profile.user.email,
             name: profile.user.name,
+            username: profile.user.username ?? null,
+            friend_id: profile.user.friend_id ?? null,
           });
         }
       } catch {
@@ -204,6 +209,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           email: input.email,
           password: input.password,
           name: input.name,
+          username: input.username,
           birth_year: input.birthYear,
           gender: input.gender,
           character_class: input.characterClass,

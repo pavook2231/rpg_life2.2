@@ -1,6 +1,6 @@
 ﻿from datetime import datetime, date, timedelta
 from sqlalchemy.orm import Session, joinedload, selectinload
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from .models import User, UserClassProgress, Quest, CompletedQuest, Achievement, UserAchievement, DailyBonus, DailySteps, Challenge, ChallengeParticipant
 from .auth import verify_password, get_password_hash
 from .config import CLASS_GROWTH, STAT_EFFECTS, XP_BASE, XP_MULTIPLIER, MAX_CUSTOM_QUESTS_PER_DAY
@@ -15,7 +15,11 @@ from .goals import GOALS, get_goal_quests, get_goal_info
 from .config import get_xp_for_level
 from .services import health_service, progression_service
 from .text_utils import normalize_nested_strings, repair_mojibake
+from .user_identity import USERNAME_MAX_LENGTH, build_public_user_id, normalize_username, username_matches_rules
 logger = logging.getLogger(__name__)
+
+CUSTOM_QUEST_XP_REWARD = 40
+CUSTOM_QUEST_CRYSTAL_REWARD = max(1, CUSTOM_QUEST_XP_REWARD // 10)
 
 OBJECTIVE_LABELS = {
     "steps": "Шаги",
@@ -67,6 +71,92 @@ OBJECTIVE_LABELS = {
     "reading": "Страницы",
     "meditation": "Минуты медитации",
 }
+
+
+def user_friend_id(user: User | None) -> str | None:
+    return build_public_user_id(getattr(user, "id", None))
+
+
+def _username_exists(db: Session, username: str, exclude_user_id: int | None = None) -> bool:
+    query = db.query(User).filter(func.lower(User.username) == username.lower())
+    if exclude_user_id is not None:
+        query = query.filter(User.id != exclude_user_id)
+    return db.query(query.exists()).scalar()
+
+
+def generate_unique_username(
+    db: Session,
+    seed: str | None,
+    *,
+    exclude_user_id: int | None = None,
+    fallback_user_id: int | None = None,
+) -> str:
+    base = normalize_username(seed) or normalize_username(f"hero_{fallback_user_id or 'user'}") or "hero_user"
+    if len(base) < 3:
+        base = "hero_user"
+    if not _username_exists(db, base, exclude_user_id=exclude_user_id):
+        return base
+
+    suffix = 2
+    while True:
+        suffix_text = f"_{suffix}"
+        trimmed_base = base[: max(1, USERNAME_MAX_LENGTH - len(suffix_text))]
+        candidate = f"{trimmed_base}{suffix_text}"
+        if username_matches_rules(candidate) and not _username_exists(db, candidate, exclude_user_id=exclude_user_id):
+            return candidate
+        suffix += 1
+
+
+def ensure_user_identity(db: Session, user: User, preferred_username: str | None = None, *, commit: bool = False) -> User:
+    changed = False
+    normalized_username = normalize_username(preferred_username or user.username or user.name or (user.email.split("@")[0] if user.email else None))
+    if not user.username or normalize_username(user.username) != user.username:
+        user.username = generate_unique_username(
+            db,
+            normalized_username,
+            exclude_user_id=user.id,
+            fallback_user_id=user.id,
+        )
+        changed = True
+    elif preferred_username and user.username != normalized_username:
+        user.username = generate_unique_username(
+            db,
+            normalized_username,
+            exclude_user_id=user.id,
+            fallback_user_id=user.id,
+        )
+        changed = True
+
+    if changed and commit:
+        db.commit()
+        db.refresh(user)
+    return user
+
+
+def assign_requested_username(db: Session, user: User, requested_username: str) -> User:
+    normalized = normalize_username(requested_username)
+    if not normalized or not username_matches_rules(normalized):
+        raise ValueError("Username must be 3-24 characters long, start with a letter, and contain only lowercase letters, digits, or underscores")
+    if _username_exists(db, normalized, exclude_user_id=user.id):
+        raise ValueError("Username is already taken")
+    user.username = normalized
+    return user
+
+
+def backfill_missing_usernames(db: Session) -> int:
+    users = (
+        db.query(User)
+        .filter(or_(User.username == None, User.username == ""))
+        .order_by(User.id.asc())
+        .all()
+    )
+    if not users:
+        return 0
+
+    for user in users:
+        ensure_user_identity(db, user)
+    db.commit()
+    return len(users)
 
 TRACKED_OBJECTIVES = {"steps", "quests_completed", "xp_gained"}
 
@@ -519,6 +609,7 @@ def create_user(
     password: str,
     start_class: str,
     name: str | None = None,
+    username: str | None = None,
     birth_year: int | None = None,
     gender: str = "unspecified",
     goal_type: str = "personal_development",
@@ -531,6 +622,7 @@ def create_user(
         email=email,
         hashed_password=hashed_password,
         name=name,
+        username=None,
         birth_year=birth_year,
         gender=gender,
         selected_goal_type=normalized_goal_type,
@@ -546,6 +638,7 @@ def create_user(
     db.add(db_user)
     db.commit()
     db.refresh(db_user)
+    ensure_user_identity(db, db_user, preferred_username=username, commit=True)
     get_or_create_class_progress(db, db_user.id, start_class, is_start=True)
     if name:
         update_character_name(db, db_user.id, name)
@@ -802,7 +895,8 @@ def create_custom_quest(db: Session, user_id: int, class_progress_id: int, quest
     if today_custom >= MAX_CUSTOM_QUESTS_PER_DAY:
         raise ValueError(f"Р”РѕСЃС‚РёРіРЅСѓС‚ Р»РёРјРёС‚ СЃРѕР·РґР°РЅРёСЏ РєРІРµСЃС‚РѕРІ ({MAX_CUSTOM_QUESTS_PER_DAY} РІ РґРµРЅСЊ)")
 
-    xp = quest_data.xp_reward if hasattr(quest_data, 'xp_reward') else quest_data.get('xp_reward', 50)
+    # Custom quest rewards are assigned by the server so crafted clients cannot boost XP arbitrarily.
+    xp = CUSTOM_QUEST_XP_REWARD
     if xp < 30:
         rarity = "common"
     elif xp < 60:
@@ -822,7 +916,7 @@ def create_custom_quest(db: Session, user_id: int, class_progress_id: int, quest
         title=quest_data.title if hasattr(quest_data, 'title') else quest_data.get('title'),
         description=quest_data.description if hasattr(quest_data, 'description') else quest_data.get('description', ''),
         xp_reward=xp,
-        crystal_reward=max(1, xp // 10),
+        crystal_reward=CUSTOM_QUEST_CRYSTAL_REWARD,
         rarity=rarity,
         is_custom=True,
         is_completed=False,
@@ -852,9 +946,12 @@ def update_user_profile(db: Session, user_id: int, profile_data: dict):
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         return None
+    requested_username = profile_data.pop("username", None) if "username" in profile_data else None
     for key, value in profile_data.items():
         if hasattr(user, key) and value is not None:
             setattr(user, key, value)
+    if requested_username is not None:
+        assign_requested_username(db, user, requested_username)
     db.commit()
     db.refresh(user)
     return user

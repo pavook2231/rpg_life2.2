@@ -78,6 +78,16 @@ def cache_delete_prefix(prefix: str):
         cache_client.delete_prefix(prefix)
 
 
+def invalidate_leaderboard_cache():
+    # Leaderboard payloads depend on both rendered leaderboard pages and cached aggregated user stats.
+    cache_delete_prefix("leaderboard:")
+    cache_delete_prefix("user_stats:")
+
+
+def invalidate_profile_cache():
+    cache_delete_prefix("profile:")
+
+
 def set_temporary_event_state(event_key: str, payload, ttl: int = 3600):
     cache_set_json(f"event:{event_key}", payload, ttl)
 
