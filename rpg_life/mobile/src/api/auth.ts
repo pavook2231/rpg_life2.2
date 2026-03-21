@@ -14,6 +14,7 @@ export type AuthPayload = {
     token_type: string;
     expires_in: number;
   };
+  needs_goal_setup?: boolean;
 };
 
 export type SocialAuthProvider = {
@@ -58,11 +59,11 @@ export function register(payload: {
   password: string;
   name: string;
   username?: string;
-  birth_year: number;
-  gender: string;
-  character_class: string;
-  goal_type: string;
-  goal_term_months: number;
+  birth_year?: number;
+  gender?: string;
+  character_class?: string;
+  goal_type?: string;
+  goal_term_months?: number;
 }) {
   return apiRequest<AuthPayload>("/auth/register", {
     authenticated: false,

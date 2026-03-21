@@ -1,9 +1,9 @@
 import { useMemo } from "react";
 
-import { useGame } from "./GameContext";
+import { useGameProgress } from "./GameContext";
 
 export function useRpgLifeSystem() {
-  const { profile, hero } = useGame();
+  const { profile, hero } = useGameProgress();
 
   return useMemo(
     () => ({

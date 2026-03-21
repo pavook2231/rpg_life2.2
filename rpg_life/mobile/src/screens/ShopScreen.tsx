@@ -5,7 +5,7 @@ import { buyShopItem, fetchShop, type ShopItemPayload, type ShopPayload } from "
 import { Screen } from "../components/Screen";
 import { StateBlock } from "../components/StateBlock";
 import { useFeedback } from "../context/FeedbackContext";
-import { useGame } from "../context/GameContext";
+import { useGameInventoryEquipment, useGameProgress } from "../context/GameContext";
 import { useLocalization, useTranslation } from "../context/LocalizationContext";
 import { buildItemComparison } from "../lib/itemComparison";
 import { buildItemStatEntries, type ItemStatEntry } from "../lib/equipment";
@@ -71,7 +71,8 @@ export function ShopScreen() {
   const { language } = useLocalization();
   const t = useTranslation();
   const { pushToast } = useFeedback();
-  const { hero, equipment, refreshGame } = useGame();
+  const { hero } = useGameProgress();
+  const { equipment, refreshGame } = useGameInventoryEquipment();
   const { width } = useWindowDimensions();
   const colors = useThemeColors();
   const themeMode = useThemeMode();

@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Animated, StyleSheet, View } from "react-native";
 
 import { useAuth } from "../context/AuthContext";
-import { useGame } from "../context/GameContext";
+import { useGameInventoryEquipment, useGameProgress } from "../context/GameContext";
 import { useTranslation } from "../context/LocalizationContext";
 import { AchievementsScreen } from "../screens/AchievementsScreen";
 import { CharacterScreen } from "../screens/CharacterScreen";
@@ -23,20 +23,23 @@ import { SettingsScreen } from "../screens/SettingsScreen";
 import { ShopScreen } from "../screens/ShopScreen";
 import { getNavigationUnlockState } from "../lib/navigationUnlocks";
 import { fetchChallengeInvitations } from "../api/social";
+import { getGoalSetupPending } from "../storage/beginnerOnboardingStorage";
 import { GameIcon } from "../ui";
 import { radii, useThemeColors, useThemeMode } from "../ui/theme";
 
 const Stack = createNativeStackNavigator();
 const Tabs = createBottomTabNavigator();
 
-function MainTabs() {
+function MainTabs({ navigation }: { navigation: { navigate: (name: string) => void } }) {
   const t = useTranslation();
   const colors = useThemeColors();
   const themeMode = useThemeMode();
-  const { profile, hero, equipment, inventory, rewards } = useGame();
+  const { profile, hero, rewards } = useGameProgress();
+  const { equipment, inventory } = useGameInventoryEquipment();
   const styles = useMemo(() => createStyles(colors, themeMode), [colors, themeMode]);
   const [pendingCoopInvitationCount, setPendingCoopInvitationCount] = useState(0);
   const [tabBounceSeed, setTabBounceSeed] = useState<Record<string, number>>({});
+  const handledGoalRedirectUserRef = useRef<number | null>(null);
   const unlockState = useMemo(
     () =>
       getNavigationUnlockState({
@@ -49,16 +52,46 @@ function MainTabs() {
     [equipment, hero, inventory, profile, rewards],
   );
 
-  const rewardBadgeCount = useMemo(() => {
+  const homeBadgeCount = useMemo(() => {
     let count = 0;
     if (rewards?.daily_bonus?.can_claim) count += 1;
     if (rewards?.weekly_goal?.claimable) count += 1;
     if (rewards?.seasonal_goal?.claimable) count += 1;
-    count += rewards?.available_achievements?.length ?? 0;
     return count;
-  }, [rewards?.available_achievements?.length, rewards?.daily_bonus?.can_claim, rewards?.seasonal_goal?.claimable, rewards?.weekly_goal?.claimable]);
+  }, [rewards?.daily_bonus?.can_claim, rewards?.seasonal_goal?.claimable, rewards?.weekly_goal?.claimable]);
 
   const invitationBadgeCount = (rewards?.social_pulse?.pending_friend_requests ?? 0) + (rewards?.social_pulse?.pending_challenge_invitations ?? 0);
+
+  useEffect(() => {
+    let active = true;
+    const userId = profile?.user?.id ?? null;
+
+    if (!userId || handledGoalRedirectUserRef.current === userId) {
+      return () => {
+        active = false;
+      };
+    }
+
+    getGoalSetupPending(userId)
+      .then((pending) => {
+        if (!active) {
+          return;
+        }
+        handledGoalRedirectUserRef.current = userId;
+        if (pending) {
+          navigation.navigate("GoalSelect");
+        }
+      })
+      .catch(() => {
+        if (active) {
+          handledGoalRedirectUserRef.current = userId;
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [navigation, profile?.user?.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -134,7 +167,7 @@ function MainTabs() {
         listeners={buildTabListeners("Home")}
         options={{
           title: t("navigation.home"),
-          tabBarBadge: rewardBadgeCount > 0 ? String(rewardBadgeCount) : undefined,
+          tabBarBadge: homeBadgeCount > 0 ? String(homeBadgeCount) : undefined,
           tabBarIcon: ({ focused }) => <TabIcon name="home-variant" focused={focused} trigger={tabBounceSeed.Home ?? 0} />,
         }}
       />
@@ -167,6 +200,16 @@ function MainTabs() {
           }}
         />
       ) : null}
+      <Tabs.Screen
+        name="FriendsTab"
+        component={FriendsScreen}
+        listeners={buildTabListeners("FriendsTab")}
+        options={{
+          title: t("screens.friends.title"),
+          tabBarBadge: invitationBadgeCount > 0 ? String(invitationBadgeCount) : undefined,
+          tabBarIcon: ({ focused }) => <TabIcon name="account-multiple-outline" focused={focused} trigger={tabBounceSeed.FriendsTab ?? 0} />,
+        }}
+      />
       {unlockState.coopUnlocked ? (
         <Tabs.Screen
           name="CoopQuests"
@@ -185,7 +228,6 @@ function MainTabs() {
         listeners={buildTabListeners("Profile")}
         options={{
           title: t("navigation.profile"),
-          tabBarBadge: invitationBadgeCount > 0 ? String(invitationBadgeCount) : undefined,
           tabBarIcon: ({ focused }) => <TabIcon name="account-circle-outline" focused={focused} trigger={tabBounceSeed.Profile ?? 0} />,
         }}
       />

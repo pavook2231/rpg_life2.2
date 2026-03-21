@@ -7,6 +7,7 @@ import html
 import hashlib
 import hmac
 import json
+import logging
 import time
 
 from app import auth
@@ -54,6 +55,7 @@ from app.services import auth_service, character_service, mobile_service, multip
 router = APIRouter(prefix="/api/v1", tags=["РњРѕР±РёР»СЊРЅРѕРµ API"])
 GOOGLE_OAUTH_COOKIE_NAME = "google_oauth_flow"
 VK_OAUTH_COOKIE_NAME = "vk_oauth_flow"
+logger = logging.getLogger(__name__)
 
 
 def _sign_bridge_cookie(payload: dict) -> str:
@@ -659,6 +661,7 @@ async def auth_vk_callback(
         )
         response = RedirectResponse(url=f"{target_base}?ticket={quote(ticket, safe='')}", status_code=302)
     except Exception as error_obj:
+        logger.exception("VK ID callback failed")
         message = getattr(error_obj, "detail", "vk_auth_failed")
         response = RedirectResponse(url=f"{target_base}?error={quote(str(message), safe='')}", status_code=302)
 

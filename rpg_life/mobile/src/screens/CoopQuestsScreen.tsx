@@ -13,7 +13,7 @@ import { Card } from "../components/Card";
 import { Screen } from "../components/Screen";
 import { StateBlock } from "../components/StateBlock";
 import { useTranslation } from "../context/LocalizationContext";
-import { useGame } from "../context/GameContext";
+import { useGameProgress } from "../context/GameContext";
 import { useThemeColors } from "../ui/theme";
 
 function translateOrFallback(
@@ -31,7 +31,7 @@ export function CoopQuestsScreen() {
   const t = useTranslation();
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const { refreshGame } = useGame();
+  const { refreshGame } = useGameProgress();
   const scrollRef = useRef<ScrollView | null>(null);
   const scrollToTopRef = useRef({
     scrollToTop: () => {
@@ -161,7 +161,7 @@ export function CoopQuestsScreen() {
               title={t("screens.coopTasks.empty.pendingTitle")}
               description={t("screens.coopTasks.empty.pendingDescription")}
               actionLabel={t("common.findFriends")}
-              onAction={() => navigation.navigate("Friends")}
+              onAction={() => navigation.navigate("FriendsTab", { initialTab: "friends", focusSearch: true, requestedAt: Date.now() })}
             />
           ) : null}
           {pendingInvitations.map((invitation) => {
@@ -208,7 +208,7 @@ export function CoopQuestsScreen() {
               title={t("screens.coopTasks.empty.activeTitle")}
               description={pendingInvitations.length > 0 ? t("screens.coopTasks.empty.activeDescriptionPending") : t("screens.coopTasks.empty.activeDescription")}
               actionLabel={pendingInvitations.length > 0 ? t("common.acceptInvite") : t("common.findFriends")}
-              onAction={pendingInvitations.length > 0 ? scrollToPendingInvitations : () => navigation.navigate("Friends")}
+              onAction={pendingInvitations.length > 0 ? scrollToPendingInvitations : () => navigation.navigate("FriendsTab", { initialTab: "friends", focusSearch: true, requestedAt: Date.now() })}
             />
           ) : null}
           {coopQuests.map((quest) => (

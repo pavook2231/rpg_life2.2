@@ -12,7 +12,7 @@ import {
 import { Screen } from "../components/Screen";
 import { useFeedback } from "../context/FeedbackContext";
 import { useTranslation } from "../context/LocalizationContext";
-import { useGame } from "../context/GameContext";
+import { useGameProgress } from "../context/GameContext";
 import { Button, Card, ProfileHeroCard, QuestCard, radii, useThemeColors, useThemeMode } from "../ui";
 
 type StatusTab = "active" | "completed";
@@ -26,7 +26,7 @@ function questKindLabel(quest: QuestItem, t: (key: string, params?: Record<strin
 
 export function QuestsScreen() {
   const t = useTranslation();
-  const { hero, applyQuestResult, todaySteps, stepSourceLabel } = useGame();
+  const { hero, applyQuestResult, todaySteps, stepSourceLabel } = useGameProgress();
   const { pushToast } = useFeedback();
   const colors = useThemeColors();
   const themeMode = useThemeMode();

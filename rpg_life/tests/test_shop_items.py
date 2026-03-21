@@ -210,6 +210,32 @@ def test_shop_item_stats_stay_consistent_after_purchase_and_equip(db_session) ->
     assert equipped_main_hand["weapon_stats"].damage_max == shop_item["weapon_stats"]["damage_max"]
 
 
+def test_inventory_list_payload_keeps_top_level_item_stats_consistent(db_session) -> None:
+    user = _create_user(db_session, "shop-inventory-payload@example.com")
+    progress = _create_progress(db_session, user.id, crystals=2_000)
+    progress.class_name = "warrior"
+    progress.display_name = "Warrior"
+    progress.level = 12
+    db_session.commit()
+
+    context = inventory_service.get_shop_context(db_session, user)
+    shop_item = next(item for item in context["items"] if item.get("id") == 205)
+    purchase_result = inventory_service.buy_shop_item(db_session, user, shop_item["id"])
+
+    assert purchase_result["ok"] is True
+
+    inventory_payload = inventory_service.get_inventory_payload(db_session, user)
+    inventory_entry = inventory_payload["inventory"][0]
+    detail_payload = inventory_service.get_inventory_item_detail(db_session, user, inventory_entry["id"])
+
+    assert inventory_entry["item"]["strength_bonus"] == shop_item["stats"]["strength_bonus"]
+    assert inventory_entry["item"]["stamina_bonus"] == shop_item["stats"]["stamina_bonus"]
+    assert inventory_entry["weapon_stats"]["damage_min"] == shop_item["weapon_stats"]["damage_min"]
+    assert inventory_entry["weapon_stats"]["damage_max"] == shop_item["weapon_stats"]["damage_max"]
+    assert inventory_entry["weapon_stats"]["damage_min"] == detail_payload["weapon_stats"]["damage_min"]
+    assert inventory_entry["weapon_stats"]["damage_max"] == detail_payload["weapon_stats"]["damage_max"]
+
+
 def test_equipping_two_hand_weapon_clears_off_hand_and_returns_item_to_bag(db_session) -> None:
     user = _create_user(db_session, "shop-two-hand@example.com")
     progress = _create_progress(db_session, user.id, crystals=2_000)

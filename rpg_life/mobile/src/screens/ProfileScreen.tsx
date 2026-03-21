@@ -7,9 +7,10 @@ import { Screen } from "../components/Screen";
 import { LanguageSwitcher } from "../components/LanguageSwitcher";
 import { useAuth } from "../context/AuthContext";
 import { useFeedback } from "../context/FeedbackContext";
-import { useGame } from "../context/GameContext";
+import { useGameAchievements, useGameProgress } from "../context/GameContext";
 import { useLocalization, useTranslation } from "../context/LocalizationContext";
 import { getClassLabel, getRarityColor, normalizeDisplayText } from "../lib/gameUi";
+import { clearGoalSetupPending } from "../storage/beginnerOnboardingStorage";
 import { Button, Card, GameIcon, Modal, ProfileHeroCard, radii, useThemeColors, useThemeMode } from "../ui";
 
 function getFallbackGoals(t: (key: string, params?: Record<string, string | number>) => string): GoalTemplatePayload["goals"] {
@@ -127,7 +128,8 @@ export function ProfileScreen() {
   const { language } = useLocalization();
   const t = useTranslation();
   const fallbackGoals = useMemo(() => getFallbackGoals(t), [t]);
-  const { profile, hero, achievements, refreshGame } = useGame();
+  const { profile, hero, refreshGame } = useGameProgress();
+  const { achievements } = useGameAchievements();
   const { signOut } = useAuth();
   const { pushToast } = useFeedback();
   const colors = useThemeColors();
@@ -229,6 +231,9 @@ export function ProfileScreen() {
         goal_term_months: goalTermMonths,
         start_new_goal_cycle: false,
       });
+      if (profile?.user?.id) {
+        await clearGoalSetupPending(profile.user.id);
+      }
       await refreshGame();
       await pushToast(
         {
@@ -259,6 +264,9 @@ export function ProfileScreen() {
         goal_term_months: goalTermMonths,
         start_new_goal_cycle: true,
       });
+      if (profile?.user?.id) {
+        await clearGoalSetupPending(profile.user.id);
+      }
       await refreshGame();
       await pushToast(
         {
@@ -420,9 +428,14 @@ export function ProfileScreen() {
           />
           <QuickActionRow
             icon="account-multiple-outline"
-            label={t("screens.friends.title")}
-            subtitle={t("screens.friends.subtitle")}
-            onPress={() => navigation.navigate("Friends")}
+            label={t("common.findFriends")}
+            subtitle={t("screens.friends.searchHint")}
+            onPress={() =>
+              navigation.navigate("FriendsTab", {
+                initialTab: "friends",
+                focusSearch: true,
+                requestedAt: Date.now(),
+              })}
             styles={styles}
             colors={colors}
           />

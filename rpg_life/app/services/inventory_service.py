@@ -155,6 +155,62 @@ def _get_shop_meta(next_rotation_at: datetime) -> dict:
     }
 
 
+def _serialize_inventory_item_entry(inv: UserInventory, *, is_equipped: bool) -> dict:
+    item = normalize_item_model(inv.item)
+    return normalize_nested_strings(
+        {
+            "id": inv.id,
+            "item_id": inv.item_id,
+            "quantity": inv.quantity,
+            "is_equipped": is_equipped,
+            "acquired_at": inv.acquired_at.isoformat() if inv.acquired_at else None,
+            "item": {
+                "id": item.id,
+                "name": item.name,
+                "description": item.description,
+                "type": item.type,
+                "subclass": item.subclass,
+                "slot": item.slot,
+                "rarity": item.rarity,
+                "icon": item.icon,
+                "strength_bonus": item.strength_bonus,
+                "agility_bonus": item.agility_bonus,
+                "intellect_bonus": item.intellect_bonus,
+                "stamina_bonus": item.stamina_bonus,
+                "xp_bonus": item.xp_bonus,
+                "crystal_bonus": item.crystal_bonus,
+                "health_bonus": item.health_bonus,
+                "set_name": item.set_name,
+                "required_level": item.required_level,
+                "required_class": item.required_class,
+            },
+            "weapon_stats": {
+                "weapon_type": item.weapon_stats.weapon_type,
+                "weapon_category": item.weapon_stats.weapon_category,
+                "damage_min": item.weapon_stats.damage_min,
+                "damage_max": item.weapon_stats.damage_max,
+                "speed": item.weapon_stats.speed,
+                "dps": item.weapon_stats.dps,
+                "critical_strike_chance": item.weapon_stats.critical_strike_chance,
+                "required_strength": item.weapon_stats.required_strength,
+                "required_agility": item.weapon_stats.required_agility,
+                "required_intellect": item.weapon_stats.required_intellect,
+            }
+            if item.weapon_stats
+            else None,
+            "armor_stats": {
+                "armor_type": item.armor_stats.armor_type,
+                "armor_value": item.armor_stats.armor_value,
+                "slot": item.armor_stats.slot,
+                "dodge_chance": item.armor_stats.dodge_chance,
+                "block_chance": item.armor_stats.block_chance,
+            }
+            if item.armor_stats
+            else None,
+        }
+    )
+
+
 def build_character_inventory_context(db: Session, current_user: User, request) -> dict:
     classes = crud.get_all_unlocked_classes(db, current_user.id)
     if not classes:
@@ -322,50 +378,7 @@ def get_inventory_payload(db: Session, current_user: User) -> dict:
 
     result = []
     for inv in inventory:
-        normalize_item_model(inv.item)
-        item_data = {
-            "id": inv.id,
-            "item_id": inv.item_id,
-            "quantity": inv.quantity,
-            "is_equipped": inv.id in equipped_ids,
-            "acquired_at": inv.acquired_at.isoformat() if inv.acquired_at else None,
-            "item": {
-                "id": inv.item.id,
-                "name": inv.item.name,
-                "description": inv.item.description,
-                "type": inv.item.type,
-                "subclass": inv.item.subclass,
-                "slot": inv.item.slot,
-                "rarity": inv.item.rarity,
-                "icon": inv.item.icon,
-                "strength_bonus": inv.item.strength_bonus,
-                "agility_bonus": inv.item.agility_bonus,
-                "intellect_bonus": inv.item.intellect_bonus,
-                "stamina_bonus": inv.item.stamina_bonus,
-                "xp_bonus": inv.item.xp_bonus,
-                "crystal_bonus": inv.item.crystal_bonus,
-                "set_name": inv.item.set_name,
-                "required_level": inv.item.required_level,
-                "required_class": inv.item.required_class,
-            },
-        }
-        if inv.item.weapon_stats:
-            item_data["item"]["weapon_stats"] = {
-                "weapon_type": inv.item.weapon_stats.weapon_type,
-                "weapon_category": inv.item.weapon_stats.weapon_category,
-                "damage_min": inv.item.weapon_stats.damage_min,
-                "damage_max": inv.item.weapon_stats.damage_max,
-                "speed": inv.item.weapon_stats.speed,
-                "dps": inv.item.weapon_stats.dps,
-                "critical_strike_chance": inv.item.weapon_stats.critical_strike_chance,
-            }
-        if inv.item.armor_stats:
-            item_data["item"]["armor_stats"] = {
-                "armor_type": inv.item.armor_stats.armor_type,
-                "armor_value": inv.item.armor_stats.armor_value,
-                "slot": inv.item.armor_stats.slot,
-            }
-        result.append(normalize_nested_strings(item_data))
+        result.append(_serialize_inventory_item_entry(inv, is_equipped=inv.id in equipped_ids))
 
     return {"inventory": result}
 
@@ -419,60 +432,12 @@ def get_inventory_item_detail(db: Session, current_user: User, inventory_id: int
     if not inventory_item:
         raise HTTPException(status_code=404, detail="Предмет не найден")
 
-    item = inventory_item.item
-    normalize_item_model(item)
+    item = normalize_item_model(inventory_item.item)
     equipped_ids = get_equipped_inventory_ids(db, current_user.id)
-
-    return normalize_nested_strings(
-        {
-            "inventory_id": inventory_item.id,
-            "is_equipped": inventory_item.id in equipped_ids,
-            "sell_price": max(1, int((item.price_crystals or 0) * 0.5)),
-            "item": {
-                "id": item.id,
-                "name": item.name,
-                "description": item.description,
-                "type": item.type,
-                "subclass": item.subclass,
-                "slot": item.slot,
-                "icon": item.icon,
-                "rarity": item.rarity,
-                "strength_bonus": item.strength_bonus,
-                "agility_bonus": item.agility_bonus,
-                "intellect_bonus": item.intellect_bonus,
-                "stamina_bonus": item.stamina_bonus,
-                "xp_bonus": item.xp_bonus,
-                "crystal_bonus": item.crystal_bonus,
-                "health_bonus": item.health_bonus,
-                "required_level": item.required_level,
-                "required_class": item.required_class,
-                "set_name": item.set_name,
-            },
-            "weapon_stats": {
-                "weapon_type": item.weapon_stats.weapon_type,
-                "weapon_category": item.weapon_stats.weapon_category,
-                "damage_min": item.weapon_stats.damage_min,
-                "damage_max": item.weapon_stats.damage_max,
-                "speed": item.weapon_stats.speed,
-                "dps": item.weapon_stats.dps,
-                "critical_strike_chance": item.weapon_stats.critical_strike_chance,
-                "required_strength": item.weapon_stats.required_strength,
-                "required_agility": item.weapon_stats.required_agility,
-                "required_intellect": item.weapon_stats.required_intellect,
-            }
-            if item.weapon_stats
-            else None,
-            "armor_stats": {
-                "armor_type": item.armor_stats.armor_type,
-                "armor_value": item.armor_stats.armor_value,
-                "slot": item.armor_stats.slot,
-                "dodge_chance": item.armor_stats.dodge_chance,
-                "block_chance": item.armor_stats.block_chance,
-            }
-            if item.armor_stats
-            else None,
-        }
-    )
+    payload = _serialize_inventory_item_entry(inventory_item, is_equipped=inventory_item.id in equipped_ids)
+    payload["inventory_id"] = payload.pop("id")
+    payload["sell_price"] = max(1, int((item.price_crystals or 0) * 0.5))
+    return payload
 
 
 def equip_character_item(db: Session, current_user: User, inventory_id: int, class_progress_id: int, slot: str) -> dict:

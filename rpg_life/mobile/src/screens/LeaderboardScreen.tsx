@@ -1,5 +1,5 @@
-import { useRoute } from "@react-navigation/native";
-import React, { useEffect, useMemo, useState } from "react";
+import { useFocusEffect, useRoute } from "@react-navigation/native";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import { fetchLeaderboard, type LeaderboardEntry, type LeaderboardPeriod, type LeaderboardResponse } from "../api/game";
@@ -50,7 +50,7 @@ export function LeaderboardScreen() {
 
   useEffect(() => {
     setPayload(null);
-    fetchLeaderboard(metric, "global", 1, 20, period)
+    fetchLeaderboard(metric, "global", 1, 20, period, { forceRefresh: true })
       .then((nextPayload) => {
         setPayload(nextPayload);
         setItems(nextPayload.items);
@@ -62,6 +62,12 @@ export function LeaderboardScreen() {
         setError(loadError instanceof Error ? loadError.message : t("screens.friends.errors.loadLeaderboard"));
       });
   }, [metric, period, reloadSeed, t]);
+
+  useFocusEffect(
+    useCallback(() => {
+      setReloadSeed((value) => value + 1);
+    }, []),
+  );
 
   function getMetricLabel(value: (typeof metrics)[number]) {
     const key = `screens.leaderboard.metrics.${value}`;

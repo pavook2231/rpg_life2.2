@@ -2,6 +2,7 @@ import json
 import base64
 import hashlib
 import hmac
+import logging
 from datetime import datetime, timezone
 from secrets import token_urlsafe
 from threading import Lock
@@ -48,6 +49,7 @@ import app.services.goal_service as goal_service
 
 _SOCIAL_BRIDGE_TICKETS: dict[str, tuple[float, dict]] = {}
 _SOCIAL_BRIDGE_TICKETS_LOCK = Lock()
+logger = logging.getLogger(__name__)
 
 
 def _ensure_user_quest_content(db: Session, user_id: int) -> None:
@@ -80,7 +82,7 @@ def _issue_refresh_token(db: Session, user: User) -> str:
     return encoded_refresh
 
 
-def _build_auth_payload_for_user(db: Session, user: User) -> dict:
+def _build_auth_payload_for_user(db: Session, user: User, *, needs_goal_setup: bool = False) -> dict:
     user = crud.ensure_user_identity(db, user, commit=True)
     access_token = auth.create_access_token(data={"sub": user.email}, expires_delta=ACCESS_TOKEN_EXPIRE_DELTA)
     refresh_token = _issue_refresh_token(db, user)
@@ -99,6 +101,7 @@ def _build_auth_payload_for_user(db: Session, user: User) -> dict:
             "token_type": "bearer",
             "expires_in": int(ACCESS_TOKEN_EXPIRE_DELTA.total_seconds()),
         },
+        "needs_goal_setup": needs_goal_setup,
     }
 
 
@@ -146,12 +149,13 @@ def _resolve_or_create_social_user(
     display_name: str | None,
     username: str | None = None,
     avatar_url: str | None = None,
-) -> User:
+) -> tuple[User, bool]:
     link = (
         db.query(UserSocialAccount)
         .filter(UserSocialAccount.provider == provider, UserSocialAccount.provider_user_id == provider_user_id)
         .first()
     )
+    is_new_user = False
     if link:
         user = db.query(User).filter(User.id == link.user_id).first()
         if not user:
@@ -172,6 +176,7 @@ def _resolve_or_create_social_user(
                 goal_type="personal_development",
                 goal_term_months=6,
             )
+            is_new_user = True
 
         link = UserSocialAccount(
             user_id=user.id,
@@ -196,7 +201,7 @@ def _resolve_or_create_social_user(
 
     db.commit()
     db.refresh(user)
-    return crud.ensure_user_identity(db, user, preferred_username=username, commit=True)
+    return crud.ensure_user_identity(db, user, preferred_username=username, commit=True), is_new_user
 
 
 def _verify_google_id_token(id_token: str) -> dict:
@@ -322,7 +327,7 @@ def complete_google_browser_login(db: Session, *, code: str, redirect_uri: str) 
         raise HTTPException(status_code=401, detail="Google response has no id_token")
 
     verified = _verify_google_id_token(id_token)
-    user = _resolve_or_create_social_user(
+    user, is_new_user = _resolve_or_create_social_user(
         db,
         provider="google",
         provider_user_id=str(verified["sub"]),
@@ -332,7 +337,7 @@ def complete_google_browser_login(db: Session, *, code: str, redirect_uri: str) 
         avatar_url=verified.get("picture"),
     )
     _ensure_user_quest_content(db, user.id)
-    return issue_social_bridge_ticket(_build_auth_payload_for_user(db, user))
+    return issue_social_bridge_ticket(_build_auth_payload_for_user(db, user, needs_goal_setup=is_new_user))
 
 
 def _base64url_encode(data: bytes) -> str:
@@ -366,12 +371,15 @@ def _vk_post_form(path: str, *, query_params: dict[str, str | int | None], form_
             detail = error_payload.get("error_description") or error_payload.get("error") or detail
         except Exception:
             pass
+        logger.warning("VK ID request rejected: path=%s detail=%s", path, detail)
         raise HTTPException(status_code=401, detail=f"VK ID request rejected: {detail}") from error
     except URLError as error:
+        logger.exception("Could not reach VK ID service: path=%s", path)
         raise HTTPException(status_code=503, detail="Could not reach VK ID service") from error
 
     if isinstance(payload, dict) and payload.get("error"):
         detail = payload.get("error_description") or payload.get("error")
+        logger.warning("VK ID payload error: path=%s detail=%s", path, detail)
         raise HTTPException(status_code=401, detail=f"VK ID request rejected: {detail}")
 
     return payload
@@ -503,7 +511,7 @@ def complete_vk_browser_login(
         raise HTTPException(status_code=401, detail="VK ID response has no access_token")
 
     verified = _normalize_vk_user_payload(access_token)
-    user = _resolve_or_create_social_user(
+    user, is_new_user = _resolve_or_create_social_user(
         db,
         provider="vk",
         provider_user_id=verified["vk_user_id"],
@@ -513,7 +521,7 @@ def complete_vk_browser_login(
         avatar_url=verified["avatar_url"],
     )
     _ensure_user_quest_content(db, user.id)
-    return issue_social_bridge_ticket(_build_auth_payload_for_user(db, user))
+    return issue_social_bridge_ticket(_build_auth_payload_for_user(db, user, needs_goal_setup=is_new_user))
 
 
 def _verify_telegram_init_data(init_data: str) -> dict:
@@ -660,7 +668,7 @@ def register_user_tokens(db: Session, user_data: UserCreate) -> dict:
         goal_term_months=user_data.goal_term_months,
     )
     _ensure_user_quest_content(db, user.id)
-    return _build_auth_payload_for_user(db, user)
+    return _build_auth_payload_for_user(db, user, needs_goal_setup=True)
 
 
 def refresh_access_token(db: Session, refresh_token: str) -> dict:
@@ -813,7 +821,7 @@ def authenticate_social_mobile(
             raise HTTPException(status_code=400, detail="Google sign-in requires bridge_ticket or id_token")
 
         verified = _verify_google_id_token(id_token)
-        user = _resolve_or_create_social_user(
+        user, is_new_user = _resolve_or_create_social_user(
             db,
             provider="google",
             provider_user_id=str(verified["sub"]),
@@ -823,14 +831,14 @@ def authenticate_social_mobile(
             avatar_url=verified.get("picture"),
         )
         _ensure_user_quest_content(db, user.id)
-        return _build_auth_payload_for_user(db, user)
+        return _build_auth_payload_for_user(db, user, needs_goal_setup=is_new_user)
 
     if provider == "telegram":
         if not init_data:
             raise HTTPException(status_code=400, detail="Telegram sign-in requires init_data")
 
         verified = _verify_telegram_init_data(init_data)
-        user = _resolve_or_create_social_user(
+        user, is_new_user = _resolve_or_create_social_user(
             db,
             provider="telegram",
             provider_user_id=verified["telegram_user_id"],
@@ -840,7 +848,7 @@ def authenticate_social_mobile(
             avatar_url=verified["avatar_url"],
         )
         _ensure_user_quest_content(db, user.id)
-        return _build_auth_payload_for_user(db, user)
+        return _build_auth_payload_for_user(db, user, needs_goal_setup=is_new_user)
 
     if provider == "vk":
         if bridge_ticket:
@@ -853,7 +861,7 @@ def authenticate_social_mobile(
             raise HTTPException(status_code=400, detail="VK ID sign-in requires bridge_ticket or access_token")
 
         verified = _normalize_vk_user_payload(access_token)
-        user = _resolve_or_create_social_user(
+        user, is_new_user = _resolve_or_create_social_user(
             db,
             provider="vk",
             provider_user_id=verified["vk_user_id"],
@@ -863,7 +871,7 @@ def authenticate_social_mobile(
             avatar_url=verified["avatar_url"],
         )
         _ensure_user_quest_content(db, user.id)
-        return _build_auth_payload_for_user(db, user)
+        return _build_auth_payload_for_user(db, user, needs_goal_setup=is_new_user)
 
     raise HTTPException(status_code=501, detail=f"{provider_config['label']} sign-in will be connected next.")
 

@@ -1,6 +1,6 @@
-import { useNavigation, useRoute } from "@react-navigation/native";
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { useFocusEffect, useNavigation, useRoute } from "@react-navigation/native";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Pressable, RefreshControl, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { fetchLeaderboard, type LeaderboardEntry, type LeaderboardPeriod, type LeaderboardResponse } from "../api/game";
 import {
@@ -17,6 +17,7 @@ import {
 import { Card } from "../components/Card";
 import { Screen } from "../components/Screen";
 import { StateBlock } from "../components/StateBlock";
+import { useGameProgress } from "../context/GameContext";
 import { useTranslation } from "../context/LocalizationContext";
 import { useThemeColors } from "../ui/theme";
 
@@ -39,6 +40,7 @@ type LeaderboardMeta = Pick<
 type FriendsRouteParams = {
   initialTab?: (typeof tabs)[number];
   initialPeriod?: LeaderboardPeriod;
+  focusSearch?: boolean;
   requestedAt?: number;
 };
 
@@ -60,6 +62,7 @@ function formatIdentityLabel(username?: string | null, friendId?: string | null)
 export function FriendsScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
+  const { profile, refreshGame } = useGameProgress();
   const friendsScrollRef = useRef<ScrollView | null>(null);
   const searchInputRef = useRef<TextInput | null>(null);
   const searchSectionYRef = useRef(0);
@@ -108,21 +111,19 @@ export function FriendsScreen() {
   const [leaderboardRefreshing, setLeaderboardRefreshing] = useState(false);
   const [shouldRevealSearch, setShouldRevealSearch] = useState(false);
 
-  useEffect(() => {
-    if (activeTab === "friends") {
-      void Promise.all([
-        loadFriends({ page: 1, refresh: false, append: false }),
-        loadFriendRequests(),
-        loadLeaderboard({ page: 1, append: false, scope: "leaderboard" }),
-      ]);
-    }
-  }, [activeTab]);
-
-  useEffect(() => {
-    if (activeTab === "leaderboard" || activeTab === "global") {
-      void loadLeaderboard({ page: 1, append: false, scope: activeTab });
-    }
-  }, [activeTab, leaderboardMetric, leaderboardPeriod]);
+  useFocusEffect(
+    useCallback(() => {
+      if (activeTab === "friends") {
+        void Promise.all([
+          loadFriends({ page: 1, refresh: false, append: false }),
+          loadFriendRequests(),
+          loadLeaderboard({ page: 1, append: false, scope: "leaderboard" }),
+        ]);
+      } else {
+        void loadLeaderboard({ page: 1, append: false, scope: activeTab });
+      }
+    }, [activeTab, leaderboardMetric, leaderboardPeriod]),
+  );
 
   useEffect(() => {
     const params = route.params as FriendsRouteParams | undefined;
@@ -135,7 +136,13 @@ export function FriendsScreen() {
     if (params.initialPeriod && periods.includes(params.initialPeriod)) {
       setLeaderboardPeriod(params.initialPeriod);
     }
-  }, [route.params?.requestedAt, route.params?.initialTab, route.params?.initialPeriod]);
+    if (params.focusSearch) {
+      setShouldRevealSearch(true);
+      if (!params.initialTab || params.initialTab === "friends") {
+        setActiveTab("friends");
+      }
+    }
+  }, [route.params?.requestedAt, route.params?.initialTab, route.params?.initialPeriod, route.params?.focusSearch]);
 
   useEffect(() => {
     if (!shouldRevealSearch || activeTab !== "friends") {
@@ -370,7 +377,7 @@ export function FriendsScreen() {
           ? { ...user, status: "outgoing_pending", request_id: payload.request.id }
           : user
       )));
-      await loadFriendRequests();
+      await Promise.all([loadFriendRequests(), refreshGame(true)]);
     } catch (error) {
       setSearchError(error instanceof Error ? error.message : t("screens.friends.errors.sendRequest"));
     } finally {
@@ -397,12 +404,15 @@ export function FriendsScreen() {
         }
         return [{ ...user, status: "none", request_id: undefined }];
       }));
-      if (action === "accept") {
-        await Promise.all([
-          loadFriends({ page: 1, refresh: false, append: false }),
-          loadLeaderboard({ page: 1, append: false, scope: "leaderboard" }),
-        ]);
-      }
+      await Promise.all([
+        refreshGame(true),
+        ...(action === "accept"
+          ? [
+              loadFriends({ page: 1, refresh: false, append: false }),
+              loadLeaderboard({ page: 1, append: false, scope: "leaderboard" }),
+            ]
+          : []),
+      ]);
     } catch (error) {
       setSearchError(error instanceof Error ? error.message : t("screens.friends.errors.sendRequest"));
     } finally {
@@ -434,6 +444,25 @@ export function FriendsScreen() {
     }
   }
 
+  async function handleShareIdentity() {
+    if (!currentUserIdentityLabel) {
+      return;
+    }
+
+    try {
+      await Share.share({
+        message: translateOrFallback(
+          t,
+          "screens.friends.shareIdentityMessage",
+          `Мой код в RPG Life: ${currentUserIdentityLabel}. Добавь меня в друзья через поиск по нику или RPG-ID.`,
+          { identity: currentUserIdentityLabel },
+        ),
+      });
+    } catch {
+      // Best-effort native share: ignore cancellation/system share-sheet issues.
+    }
+  }
+
   const currentLeaderboardItems = activeTab === "leaderboard" ? leaderboardItems : globalLeaderboardItems;
   const currentLeaderboardMeta = activeTab === "leaderboard" ? leaderboardMeta : globalLeaderboardMeta;
   const incomingRequests = friendRequests.filter((request) => request.direction === "incoming");
@@ -451,6 +480,7 @@ export function FriendsScreen() {
   const handleLeaderboardEmptyAction = activeTab === "leaderboard"
     ? () => setActiveTab("global")
     : () => navigation.navigate("GoalSelect");
+  const currentUserIdentityLabel = formatIdentityLabel(profile?.user?.username, profile?.user?.friend_id);
   const socialPulse = friends.length === 0
     ? {
         title: translateOrFallback(t, "screens.friends.quick.pulseNoFriendsTitle", "Добавь первых союзников"),
@@ -553,6 +583,29 @@ export function FriendsScreen() {
             <Text style={styles.sectionTitle}>
               {translateOrFallback(t, "screens.friends.findFriendsTitle", "Найти друзей")}
             </Text>
+            <Text style={styles.searchHint}>
+              {translateOrFallback(
+                t,
+                "screens.friends.searchHint",
+                "Ищи людей по нику или по публичному ID формата RPG-000123.",
+              )}
+            </Text>
+            {currentUserIdentityLabel ? (
+              <View style={styles.identityCard}>
+                <Text style={styles.identityLabel}>
+                  {translateOrFallback(t, "screens.friends.shareIdentityLabel", "Твой код для друзей")}
+                </Text>
+                <Text style={styles.identityValue}>{currentUserIdentityLabel}</Text>
+                <Pressable style={styles.identityActionButton} onPress={handleShareIdentity}>
+                  <Text style={styles.identityActionText}>
+                    {translateOrFallback(t, "screens.friends.shareIdentityAction", "Поделиться кодом")}
+                  </Text>
+                </Pressable>
+              </View>
+            ) : null}
+            <Text style={styles.sectionTitleHidden}>
+              {translateOrFallback(t, "screens.friends.findFriendsTitle", "Найти друзей")}
+            </Text>
             <View style={styles.searchContainer}>
               <TextInput
                 ref={searchInputRef}
@@ -566,6 +619,9 @@ export function FriendsScreen() {
                   }
                 }}
                 onSubmitEditing={handleSearch}
+                returnKeyType="search"
+                autoCapitalize="none"
+                autoCorrect={false}
               />
               <Pressable style={styles.searchButton} onPress={handleSearch} disabled={searchLoading}>
                 <Text style={styles.searchButtonText}>{searchLoading ? t("common.loading") : t("common.search")}</Text>
@@ -990,6 +1046,47 @@ function createStyles(colors: ReturnType<typeof useThemeColors>) {
       fontSize: 13,
       marginBottom: 12,
     },
+    searchHint: {
+      color: colors.textDim,
+      fontSize: 14,
+      lineHeight: 20,
+      marginBottom: 12,
+    },
+    identityCard: {
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 10,
+      backgroundColor: colors.backgroundRaised,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      gap: 4,
+      marginBottom: 12,
+    },
+    identityLabel: {
+      fontSize: 12,
+      color: colors.textDim,
+      fontWeight: "700",
+    },
+    identityValue: {
+      fontSize: 15,
+      color: colors.text,
+      fontWeight: "800",
+    },
+    identityActionButton: {
+      alignSelf: "flex-start",
+      marginTop: 4,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: colors.primary,
+      backgroundColor: colors.background,
+    },
+    identityActionText: {
+      color: colors.primary,
+      fontSize: 13,
+      fontWeight: "700",
+    },
     searchContainer: {
       flexDirection: "row",
       marginBottom: 16,
@@ -1048,6 +1145,12 @@ function createStyles(colors: ReturnType<typeof useThemeColors>) {
       fontWeight: "bold",
       color: colors.text,
       marginBottom: 8,
+    },
+    sectionTitleHidden: {
+      fontSize: 0,
+      lineHeight: 0,
+      color: "transparent",
+      marginBottom: 0,
     },
     userRow: {
       flexDirection: "row",

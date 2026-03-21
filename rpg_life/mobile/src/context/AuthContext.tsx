@@ -5,6 +5,7 @@ import { getSocialAuthProviders, login, register, socialLogin, type SocialAuthPr
 import { fetchProfile } from "../api/game";
 import { unregisterStoredPushDevice } from "../api/notifications";
 import { SOCIAL_AUTH_REDIRECT_SCHEME } from "../config/env";
+import { markGoalSetupPending } from "../storage/beginnerOnboardingStorage";
 import { clearTokens, getAccessToken, getRefreshToken, saveTokens } from "../storage/tokenStorage";
 
 type AuthUser = {
@@ -20,11 +21,11 @@ type RegisterInput = {
   password: string;
   name: string;
   username?: string;
-  birthYear: number;
-  gender: string;
-  characterClass: string;
-  goalType: string;
-  goalTermMonths: number;
+  birthYear?: number;
+  gender?: string;
+  characterClass?: string;
+  goalType?: string;
+  goalTermMonths?: number;
 };
 
 type AuthContextValue = {
@@ -33,7 +34,7 @@ type AuthContextValue = {
   socialProviders: SocialAuthProvider[];
   authFlowNotice: string | null;
   signIn: (email: string, password: string) => Promise<void>;
-  signUp: (input: RegisterInput) => Promise<void>;
+  signUp: (input: RegisterInput) => Promise<AuthUser>;
   signInWithProvider: (
     provider: SocialAuthProvider["id"],
     payload?: {
@@ -83,6 +84,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [authFlowNotice, setAuthFlowNotice] = useState<string | null>(null);
   const lastHandledSocialUrlRef = useRef<string | null>(null);
 
+  async function applyAuthPayload(authPayload: Awaited<ReturnType<typeof login>>) {
+    await saveTokens(authPayload.tokens.access_token, authPayload.tokens.refresh_token);
+    if (authPayload.needs_goal_setup) {
+      await markGoalSetupPending(authPayload.user.id);
+    }
+    setAuthFlowNotice(null);
+    setUser(authPayload.user);
+  }
+
   async function completeSocialSignInFromUrl(url: string): Promise<boolean> {
     if (!url.toLowerCase().startsWith(`${SOCIAL_AUTH_REDIRECT_SCHEME.toLowerCase()}://`)) {
       return false;
@@ -121,16 +131,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         provider === "telegram"
           ? await socialLogin({ provider, init_data: parsed.searchParams.get("init_data") || undefined })
           : await socialLogin({ provider, bridge_ticket: parsed.searchParams.get("ticket") || undefined });
-      await saveTokens(authPayload.tokens.access_token, authPayload.tokens.refresh_token);
-      setUser(authPayload.user);
-
-      if (provider === "telegram") {
-        setAuthFlowNotice("Telegram sign-in completed.");
-      } else if (provider === "vk") {
-        setAuthFlowNotice("VK ID sign-in completed.");
-      } else {
-        setAuthFlowNotice("Google sign-in completed.");
-      }
+      await applyAuthPayload(authPayload);
     } catch (error) {
       if (error instanceof Error) {
         setAuthFlowNotice(error.message);
@@ -155,6 +156,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const refreshToken = await getRefreshToken();
         if (accessToken && refreshToken) {
           const profile = await fetchProfile();
+          setAuthFlowNotice(null);
           setUser({
             id: profile.user.id,
             email: profile.user.email,
@@ -201,8 +203,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       authFlowNotice,
       signIn: async (email, password) => {
         const payload = await login(email, password);
-        await saveTokens(payload.tokens.access_token, payload.tokens.refresh_token);
-        setUser(payload.user);
+        await applyAuthPayload(payload);
       },
       signUp: async (input) => {
         const payload = await register({
@@ -216,13 +217,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           goal_type: input.goalType,
           goal_term_months: input.goalTermMonths,
         });
-        await saveTokens(payload.tokens.access_token, payload.tokens.refresh_token);
-        setUser(payload.user);
+        await applyAuthPayload(payload);
+        return payload.user;
       },
       signInWithProvider: async (provider, providerPayload = {}) => {
         const authPayload = await socialLogin({ provider, ...providerPayload });
-        await saveTokens(authPayload.tokens.access_token, authPayload.tokens.refresh_token);
-        setUser(authPayload.user);
+        await applyAuthPayload(authPayload);
       },
       reloadSocialProviders: async () => {
         const payload = await getSocialAuthProviders();
@@ -238,6 +238,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } catch {
           // Best-effort cleanup; auth state should still be cleared locally.
         }
+        lastHandledSocialUrlRef.current = null;
+        setAuthFlowNotice(null);
         await clearTokens();
         setUser(null);
       },

@@ -739,15 +739,25 @@ export function mapPayloadItemToCatalog<T extends AnyItemPayload>(payloadItem: T
   } as T;
 }
 
-export function mapInventoryEntryToCatalog<T extends { item: AnyItemPayload; item_id?: number; weapon_stats?: { damage_min?: number; damage_max?: number } | null; armor_stats?: { armor_value?: number } | null }>(entry: T): T {
+export function mapInventoryEntryToCatalog<
+  T extends {
+    item: AnyItemPayload & {
+      weapon_stats?: { damage_min?: number; damage_max?: number } | null;
+      armor_stats?: { armor_value?: number } | null;
+    };
+    item_id?: number;
+    weapon_stats?: { damage_min?: number; damage_max?: number } | null;
+    armor_stats?: { armor_value?: number } | null;
+  },
+>(entry: T): T {
   const item = mapPayloadItemToCatalog({
     ...entry.item,
     id: entry.item.id ?? entry.item_id,
   });
   const catalog = findUnifiedItemById(item.id) ?? findUnifiedItemByIcon(item.icon);
 
-  const weaponStats = entry.weapon_stats ?? catalog?.weaponStats ?? null;
-  const armorStats = entry.armor_stats ?? catalog?.armorStats ?? null;
+  const weaponStats = entry.weapon_stats ?? entry.item.weapon_stats ?? catalog?.weaponStats ?? null;
+  const armorStats = entry.armor_stats ?? entry.item.armor_stats ?? catalog?.armorStats ?? null;
 
   return {
     ...entry,

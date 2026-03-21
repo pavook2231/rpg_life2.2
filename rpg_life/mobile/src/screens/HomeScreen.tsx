@@ -1,17 +1,18 @@
 import { useNavigation } from "@react-navigation/native";
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Modal, Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 
 import { claimDailyBonus, claimSeasonalGoalReward, claimWeeklyGoalReward } from "../api/game";
 import { Screen } from "../components/Screen";
 import { StateBlock } from "../components/StateBlock";
 import { useFeedback } from "../context/FeedbackContext";
-import { useGame } from "../context/GameContext";
+import { useGameInventoryEquipment, useGameProgress } from "../context/GameContext";
 import { useLocalization, useTranslation } from "../context/LocalizationContext";
 import { useOffline } from "../context/OfflineContext";
 import { buildDerivedStats } from "../lib/gameRules";
 import { getNextHealthDecayLabel } from "../lib/healthUi";
 import { getNavigationUnlockState } from "../lib/navigationUnlocks";
+import { clearGoalSetupPending, getGoalSetupPending } from "../storage/beginnerOnboardingStorage";
 import { getLastDailyBonusPromptDay, saveLastDailyBonusPromptDay } from "../storage/dailyBonusPromptStorage";
 import { Button, Card, GameIcon, LoadingAnimation, ProfileHeroCard, radii, useThemeColors, useThemeMode } from "../ui";
 
@@ -62,7 +63,8 @@ export function HomeScreen() {
   const { width } = useWindowDimensions();
   const t = useTranslation();
   const { language } = useLocalization();
-  const { hero, profile, equipment, inventory, rewards, refreshGame, isRefreshing, todaySteps, stepSourceLabel } = useGame();
+  const { hero, profile, rewards, refreshGame, isRefreshing, todaySteps, stepSourceLabel, stepTrackingStatus } = useGameProgress();
+  const { equipment, inventory } = useGameInventoryEquipment();
   const { pushToast } = useFeedback();
   const { isOnline, pendingActionsCount } = useOffline();
   const colors = useThemeColors();
@@ -73,6 +75,7 @@ export function HomeScreen() {
   const [isClaimingWeeklyReward, setIsClaimingWeeklyReward] = useState(false);
   const [isClaimingSeasonalReward, setIsClaimingSeasonalReward] = useState(false);
   const [showDailyBonusModal, setShowDailyBonusModal] = useState(false);
+  const [goalSetupPending, setGoalSetupPending] = useState<boolean | null>(null);
   const dailyBonus = rewards?.daily_bonus ?? null;
   const weeklyGoal = rewards?.weekly_goal ?? null;
   const seasonalGoal = rewards?.seasonal_goal ?? null;
@@ -103,7 +106,45 @@ export function HomeScreen() {
   const systemCap = dailyLimits?.system_cap ?? derivedStats.systemDailyCap;
   const totalCompleted = dailyLimits?.completed_total ?? 0;
   const totalCap = dailyLimits?.total_cap ?? 20;
-  const contextAction = !unlockState.hasGoal
+  const needsGoalSetup = goalSetupPending === true || !goal;
+
+  useEffect(() => {
+    let active = true;
+
+    if (!profile?.user?.id) {
+      setGoalSetupPending(null);
+      return () => {
+        active = false;
+      };
+    }
+
+    getGoalSetupPending(profile.user.id)
+      .then((pending) => {
+        if (active) {
+          setGoalSetupPending(pending);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setGoalSetupPending(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [profile?.user?.id]);
+
+  useEffect(() => {
+    if (!profile?.user?.id || goalSetupPending !== true || !unlockState.hasQuestProgress) {
+      return;
+    }
+
+    clearGoalSetupPending(profile.user.id)
+      .then(() => setGoalSetupPending(false))
+      .catch(() => undefined);
+  }, [goalSetupPending, profile?.user?.id, unlockState.hasQuestProgress]);
+  const contextAction = needsGoalSetup
     ? {
         label: t("common.createGoal"),
         icon: "flag-checkered",
@@ -141,11 +182,69 @@ export function HomeScreen() {
             }
           : null;
   const socialSurfaceUnlocked = unlockState.hasEquippedItems || unlockState.hasFriends;
+  const firstWeekProgram = [
+    {
+      title: translateOrFallback(t, "screens.home.quick.programDayOneTitle", "Определи направление"),
+      description: translateOrFallback(
+        t,
+        "screens.home.quick.programDayOneDescription",
+        "Выбери цель, чтобы приложение собрало понятный план и первые задания под нее.",
+      ),
+    },
+    {
+      title: translateOrFallback(t, "screens.home.quick.programDayTwoTitle", "Сделай первый шаг"),
+      description: translateOrFallback(
+        t,
+        "screens.home.quick.programDayTwoDescription",
+        "Закрой хотя бы один квест, чтобы запустить реальный прогресс по цели.",
+      ),
+    },
+    {
+      title: translateOrFallback(t, "screens.home.quick.programDayThreeTitle", "Забери первую награду"),
+      description: translateOrFallback(
+        t,
+        "screens.home.quick.programDayThreeDescription",
+        "Первая награда должна ощущаться как маленькая победа, а не просто как цифра.",
+      ),
+    },
+    {
+      title: translateOrFallback(t, "screens.home.quick.programDayFourTitle", "Открой первое улучшение"),
+      description: translateOrFallback(
+        t,
+        "screens.home.quick.programDayFourDescription",
+        "Покупка первого предмета связывает задания с ростом героя.",
+      ),
+    },
+    {
+      title: translateOrFallback(t, "screens.home.quick.programDayFiveTitle", "Экипируй усиление"),
+      description: translateOrFallback(
+        t,
+        "screens.home.quick.programDayFiveDescription",
+        "После экипировки прогресс становится наглядным: растут статы и отдача от действий.",
+      ),
+    },
+    {
+      title: translateOrFallback(t, "screens.home.quick.programDaySixTitle", "Добавь поддержку"),
+      description: translateOrFallback(
+        t,
+        "screens.home.quick.programDaySixDescription",
+        "Один друг делает ритм заметнее: проще держать темп и возвращаться в приложение.",
+      ),
+    },
+    {
+      title: translateOrFallback(t, "screens.home.quick.programDaySevenTitle", "Собери свой ритм"),
+      description: translateOrFallback(
+        t,
+        "screens.home.quick.programDaySevenDescription",
+        "На седьмой день уже должно быть понятно, что двигает цель именно у тебя.",
+      ),
+    },
+  ];
   const onboardingSteps = [
     {
       key: "goal",
       icon: "flag-checkered",
-      done: unlockState.hasGoal,
+      done: !needsGoalSetup,
       title: translateOrFallback(t, "screens.home.quick.onboardingGoalTitle", "Choose a goal"),
       description: translateOrFallback(
         t,
@@ -211,7 +310,50 @@ export function HomeScreen() {
   const onboardingCompletedCount = onboardingSteps.filter((step) => step.done).length;
   const nextOnboardingStep = onboardingSteps.find((step) => !step.done) ?? null;
   const showOnboardingRoadmap = onboardingCompletedCount < onboardingSteps.length;
-  const todayPlan = !goal
+  const showAdvancedHome = !showOnboardingRoadmap && unlockState.hasQuestProgress;
+  const currentProgramDay = Math.min(firstWeekProgram.length, Math.max(1, onboardingCompletedCount + 1));
+  const currentProgramFocus = firstWeekProgram[currentProgramDay - 1];
+  const stepStatusDetails =
+    stepTrackingStatus === "connected"
+      ? {
+          icon: "shoe-print",
+          title: translateOrFallback(t, "screens.home.quick.stepStatusConnectedTitle", "Шаги подключены"),
+          description: translateOrFallback(
+            t,
+            "screens.home.quick.stepStatusConnectedDescription",
+            "Шагомер работает и обновляет прогресс в течение дня.",
+          ),
+        }
+      : stepTrackingStatus === "sync_deferred"
+        ? {
+            icon: "cloud-sync-outline",
+            title: translateOrFallback(t, "screens.home.quick.stepStatusDeferredTitle", "Синк отложен"),
+            description: translateOrFallback(
+              t,
+              "screens.home.quick.stepStatusDeferredDescription",
+              "Шаги считаются локально и отправятся на сервер, когда соединение стабилизируется.",
+            ),
+          }
+        : stepTrackingStatus === "permission_required"
+          ? {
+              icon: "shield-alert-outline",
+              title: translateOrFallback(t, "screens.home.quick.stepStatusPermissionTitle", "Нужен доступ к шагам"),
+              description: translateOrFallback(
+                t,
+                "screens.home.quick.stepStatusPermissionDescription",
+                "Разреши доступ к активности на устройстве, чтобы шаги влияли на задания и прогресс.",
+              ),
+            }
+          : {
+              icon: "alert-circle-outline",
+              title: translateOrFallback(t, "screens.home.quick.stepStatusUnavailableTitle", "Шаги пока недоступны"),
+              description: translateOrFallback(
+                t,
+                "screens.home.quick.stepStatusUnavailableDescription",
+                "Источник шагов временно недоступен. Базовый прогресс все равно можно вести через задания.",
+              ),
+            };
+  const todayPlan = needsGoalSetup
     ? {
         title: translateOrFallback(t, "screens.home.quick.todayPlanNoGoalTitle", "Сначала выбери цель"),
         description: translateOrFallback(
@@ -312,14 +454,18 @@ export function HomeScreen() {
             };
 
   function handleSocialAction(action?: string | null) {
-    if (!unlockState.socialUnlocked) {
-      navigation.navigate("Character");
+    if (action === "friends" || !unlockState.socialUnlocked) {
+      navigation.navigate("FriendsTab", {
+        initialTab: "friends",
+        focusSearch: true,
+        requestedAt: Date.now(),
+      });
       return;
     }
 
     switch (action) {
       case "leaderboard":
-        navigation.navigate("Friends", {
+        navigation.navigate("FriendsTab", {
           initialTab: "leaderboard",
           initialPeriod: "weekly",
           requestedAt: Date.now(),
@@ -327,8 +473,9 @@ export function HomeScreen() {
         return;
       case "coop":
         if (!unlockState.coopUnlocked) {
-          navigation.navigate("Friends", {
+          navigation.navigate("FriendsTab", {
             initialTab: "friends",
+            focusSearch: true,
             requestedAt: Date.now(),
           });
           return;
@@ -337,8 +484,9 @@ export function HomeScreen() {
         return;
       case "friends":
       default:
-        navigation.navigate("Friends", {
+        navigation.navigate("FriendsTab", {
           initialTab: "friends",
+          focusSearch: true,
           requestedAt: Date.now(),
         });
     }
@@ -580,28 +728,7 @@ export function HomeScreen() {
         />
       ) : null}
 
-      <Card style={styles.overviewCard} animated={false}>
-        <Text style={styles.eyebrow}>TODAY</Text>
-        <View style={styles.overviewRow}>
-          <View style={styles.overviewChip}>
-            <Text style={styles.overviewLabel}>{t("screens.home.quick.overview.progress")}</Text>
-            <Text style={styles.overviewValue}>
-              {totalCompleted}/{totalCap}
-            </Text>
-          </View>
-          <View style={styles.overviewChip}>
-            <Text style={styles.overviewLabel}>{t("screens.home.quick.overview.streak")}</Text>
-            <Text style={styles.overviewValue}>{hero?.streak ?? 0}</Text>
-          </View>
-          <View style={styles.overviewChip}>
-            <Text style={styles.overviewLabel}>{t("screens.home.quick.overview.status")}</Text>
-            <Text style={styles.overviewValue}>
-              {isOnline ? t("screens.home.quick.overview.online") : t("screens.home.quick.overview.offline")}
-            </Text>
-          </View>
-        </View>
-      </Card>
-
+      {showAdvancedHome ? (
       <Card tone="subtle">
         <View style={styles.stepsCardHeader}>
           <View style={styles.stepsTitleWrap}>
@@ -637,6 +764,7 @@ export function HomeScreen() {
           onPress={() => navigation.navigate("Quests")}
         />
       </Card>
+      ) : null}
 
       <ProfileHeroCard
         name={hero?.name ?? t("screens.home.heroName")}
@@ -658,9 +786,19 @@ export function HomeScreen() {
         <View style={styles.goalHeader}>
           <View style={styles.goalCopy}>
             <Text style={styles.cardTitle}>{t("screens.home.quick.goalTitle")}</Text>
-            <Text style={styles.goalTitle}>{goal?.goal_title ?? t("screens.home.quick.goalEmptyTitle")}</Text>
+            <Text style={styles.goalTitle}>
+              {needsGoalSetup
+                ? translateOrFallback(t, "screens.home.quick.goalSetupTitle", "Выбери первую цель")
+                : goal?.goal_title ?? t("screens.home.quick.goalEmptyTitle")}
+            </Text>
             <Text style={styles.goalText}>
-              {goal
+              {needsGoalSetup
+                ? translateOrFallback(
+                    t,
+                    "screens.home.quick.goalSetupDescription",
+                    "С этого начнется понятный маршрут: приложение соберет первые задания и покажет, как ты двигаешься вперед.",
+                  )
+                : goal
                 ? t("screens.home.quick.goalSummary", {
                     progress: goal.goal_progress_percent,
                     days: goal.goal_days_remaining,
@@ -672,9 +810,13 @@ export function HomeScreen() {
           </View>
 
           <View style={styles.goalMetaPanel}>
-            <Text style={styles.goalMetaLabel}>{t("screens.home.quick.dailyTasks")}</Text>
+            <Text style={styles.goalMetaLabel}>
+              {needsGoalSetup
+                ? translateOrFallback(t, "screens.home.quick.programLabel", "Первые 7 дней")
+                : t("screens.home.quick.dailyTasks")}
+            </Text>
             <Text style={styles.goalMetaValue}>
-              {systemCompleted}/{systemCap}
+              {needsGoalSetup ? `${currentProgramDay}/7` : `${systemCompleted}/${systemCap}`}
             </Text>
           </View>
         </View>
@@ -696,6 +838,9 @@ export function HomeScreen() {
 
       {showOnboardingRoadmap ? (
         <Card tone={nextOnboardingStep ? "accent" : "subtle"}>
+          <Text style={styles.eyebrow}>
+            {translateOrFallback(t, "screens.home.quick.programLabel", "Первые 7 дней")}
+          </Text>
           <Text style={styles.cardTitle}>{translateOrFallback(t, "screens.home.quick.onboardingTitle", "Hero path")}</Text>
           <Text style={styles.bonusText}>
             {translateOrFallback(
@@ -704,6 +849,8 @@ export function HomeScreen() {
               "Finish the base loop first, then the app opens the full social and co-op layer at the right moment.",
             )}
           </Text>
+          <InfoItem icon="calendar-star" title={`День ${currentProgramDay}: ${currentProgramFocus.title}`} description={currentProgramFocus.description} />
+          <InfoItem icon={stepStatusDetails.icon} title={stepStatusDetails.title} description={stepStatusDetails.description} />
           <Text style={styles.rewardMeta}>
             {translateOrFallback(
               t,
@@ -750,23 +897,26 @@ export function HomeScreen() {
         </Card>
       ) : null}
 
-      {!goal ? (
-        <StateBlock
-          icon="flag-checkered"
-          title={t("screens.home.quick.goalCtaTitle")}
-          description={t("screens.home.quick.goalCtaDescription")}
-          actionLabel={t("common.createGoal")}
-          onAction={() => navigation.navigate("GoalSelect")}
-        />
-      ) : null}
-
-      <Card tone="subtle">
+      {!showOnboardingRoadmap ? (
+        <Card tone="subtle">
+        <Text style={styles.eyebrow}>
+          {translateOrFallback(t, "screens.home.quick.dailyCheckinLabel", "Ежедневный фокус")}
+        </Text>
+        <Text style={styles.bonusText}>
+          {translateOrFallback(
+            t,
+            "screens.home.quick.dailyCheckinPrompt",
+            "Что сегодня реально двигает твою цель вперед?",
+          )}
+        </Text>
         <Text style={styles.cardTitle}>{translateOrFallback(t, "screens.home.quick.todayPlanTitle", "Что сделать дальше")}</Text>
         <InfoItem icon={todayPlan.icon} title={todayPlan.title} description={todayPlan.description} />
+        <InfoItem icon={stepStatusDetails.icon} title={stepStatusDetails.title} description={stepStatusDetails.description} />
         <Button label={todayPlan.actionLabel} icon={todayPlan.icon} onPress={todayPlan.onPress} variant="secondary" />
-      </Card>
+        </Card>
+      ) : null}
 
-      {socialSurfaceUnlocked && socialPulse ? (
+      {showAdvancedHome && socialSurfaceUnlocked && socialPulse ? (
         <Card tone={socialPulse.pending_challenge_invitations > 0 ? "accent" : "subtle"}>
           <Text style={styles.cardTitle}>{socialPulse.title}</Text>
           <Text style={styles.bonusText}>{socialPulse.description}</Text>
@@ -811,7 +961,7 @@ export function HomeScreen() {
         </Card>
       ) : null}
 
-      {socialSurfaceUnlocked && socialFeedItems.length > 0 ? (
+      {showAdvancedHome && socialSurfaceUnlocked && socialFeedItems.length > 0 ? (
         <Card tone="subtle">
           <Text style={styles.cardTitle}>{translateOrFallback(t, "screens.home.quick.socialFeedTitle", "Лента друзей")}</Text>
           <View style={styles.feedList}>
@@ -832,7 +982,7 @@ export function HomeScreen() {
         </Card>
       ) : null}
 
-      {weeklyGoal ? (
+      {showAdvancedHome && weeklyGoal ? (
         <Card tone={weeklyGoal.claimable ? "accent" : "subtle"}>
           <Text style={styles.cardTitle}>{t("screens.home.weeklyRewardTitle")}</Text>
           <Text style={styles.bonusText}>{weeklyGoal.title}</Text>
@@ -856,53 +1006,7 @@ export function HomeScreen() {
         </Card>
       ) : null}
 
-      <Card>
-        <Text style={styles.cardTitle}>{t("screens.home.statsTitle")}</Text>
-        <View style={styles.statsGrid}>
-          {statItems.map((item) => (
-            <View key={item.key} style={styles.statCard}>
-              <View style={styles.statHeader}>
-                <View style={styles.statIconWrap}>
-                  <GameIcon name={item.icon} size={18} color={colors.primary} />
-                </View>
-                <Text style={styles.statName}>{item.title}</Text>
-              </View>
-              <Text style={styles.statText}>{item.description}</Text>
-            </View>
-          ))}
-        </View>
-      </Card>
-
-      <Card tone="subtle">
-        <Text style={styles.cardTitle}>{t("screens.home.quick.itemsTitle")}</Text>
-        <InfoItem
-          icon="shield-sword"
-          title={t("screens.home.quick.itemsBoostTitle")}
-          description={t("screens.home.quick.itemsBoostDescription")}
-        />
-        <InfoItem
-          icon="treasure-chest"
-          title={t("screens.home.quick.itemsSourceTitle")}
-          description={t("screens.home.quick.itemsSourceDescription")}
-        />
-      </Card>
-
-      <Card tone={healthState?.is_wounded ? "danger" : "subtle"}>
-        <Text style={styles.cardTitle}>{t("screens.home.quick.healthTitle")}</Text>
-        <InfoItem icon="heart-plus" title={t("screens.home.quick.healthDecayTitle")} description={nextDecayLabel} />
-        <InfoItem
-          icon="alert-circle"
-          title={t("screens.home.quick.healthZeroTitle")}
-          description={t("screens.home.quick.healthZeroDescription")}
-        />
-        <InfoItem
-          icon="shield-half-full"
-          title={t("screens.home.quick.healthRecoverTitle")}
-          description={t("screens.home.quick.healthRecoverDescription")}
-        />
-      </Card>
-
-      {seasonalGoal ? (
+      {showAdvancedHome && seasonalGoal ? (
         <Card tone={seasonalGoal.claimable ? "accent" : "subtle"}>
           <Text style={styles.cardTitle}>{t("screens.home.quick.seasonalRewardTitle")}</Text>
           <Text style={styles.bonusText}>{seasonalGoal.title}</Text>

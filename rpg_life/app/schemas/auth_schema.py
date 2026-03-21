@@ -13,7 +13,7 @@ class UserCreate(BaseModel):
     password: str
     name: str
     username: Optional[str] = None
-    birth_year: int
+    birth_year: Optional[int] = None
     gender: str = "unspecified"
     character_class: str = "mage"
     language_preference: str = "ru"
@@ -51,7 +51,9 @@ class UserCreate(BaseModel):
 
     @field_validator("birth_year")
     @classmethod
-    def validate_birth_year(cls, value: int) -> int:
+    def validate_birth_year(cls, value: Optional[int]) -> Optional[int]:
+        if value is None:
+            return value
         current_year = datetime.now().year
         if value < 1950 or value > current_year - 10:
             raise ValueError(f"Год должен быть от 1950 до {current_year - 10}")

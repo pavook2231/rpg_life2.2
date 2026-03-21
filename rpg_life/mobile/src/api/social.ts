@@ -167,7 +167,7 @@ export function fetchFriendsLeaderboard(
   period: LeaderboardPeriod = "all_time",
 ) {
   return apiRequest<LeaderboardResponse>(
-    `/social/leaderboard/friends?metric=${encodeURIComponent(metric)}&period=${encodeURIComponent(period)}&page=${page}&page_size=${pageSize}`
+    `/leaderboard?metric=${encodeURIComponent(metric)}&scope=friends&period=${encodeURIComponent(period)}&page=${page}&limit=${pageSize}`
   );
 }
 

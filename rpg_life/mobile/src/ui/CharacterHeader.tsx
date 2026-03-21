@@ -1,7 +1,7 @@
 import React, { useMemo } from "react";
 import { StyleProp, StyleSheet, Text, View, ViewStyle } from "react-native";
 
-import { useGame } from "../context/GameContext";
+import { useGameInventoryEquipment, useGameProgress } from "../context/GameContext";
 import { useTranslation } from "../context/LocalizationContext";
 import { buildDerivedStats } from "../lib/gameRules";
 import { getClassIcon, getClassLabel, normalizeDisplayText } from "../lib/gameUi";
@@ -41,7 +41,8 @@ function MetricPill({ icon, label, value, compact = false }: MetricProps) {
 
 export function CharacterHeader({ compact = false, style }: CharacterHeaderProps) {
   const t = useTranslation();
-  const { hero, equipment, profile } = useGame();
+  const { hero, profile } = useGameProgress();
+  const { equipment } = useGameInventoryEquipment();
   const colors = useThemeColors();
   const themeMode = useThemeMode();
   const styles = useMemo(() => createStyles(colors, themeMode), [colors, themeMode]);

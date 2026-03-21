@@ -11,7 +11,7 @@ import {
 import { CharacterView, type Equipment as LayeredEquipment } from "../components/CharacterView";
 import { Screen } from "../components/Screen";
 import { useFeedback } from "../context/FeedbackContext";
-import { useGame } from "../context/GameContext";
+import { useGameInventoryEquipment, useGameProgress } from "../context/GameContext";
 import { useLocalization, useTranslation } from "../context/LocalizationContext";
 import { buildItemStatEntries, pickEquipSlot } from "../lib/equipment";
 import { buildItemComparison } from "../lib/itemComparison";
@@ -64,7 +64,8 @@ export function CharacterScreen() {
   const t = useTranslation();
   const { language } = useLocalization();
   const { width } = useWindowDimensions();
-  const { hero, equipment, inventory, refreshGame } = useGame();
+  const { hero } = useGameProgress();
+  const { equipment, inventory, refreshGame } = useGameInventoryEquipment();
   const { pushToast } = useFeedback();
   const colors = useThemeColors();
   const themeMode = useThemeMode();
@@ -80,8 +81,12 @@ export function CharacterScreen() {
   const bagColumns = width >= 480 ? 6 : 5;
   const bagGap = 8;
   const bagCellWidth = Math.max((width - 56 - bagGap * (bagColumns - 1)) / bagColumns, 56);
+  const heroLevel = hero?.level ?? equipment?.class_info?.level ?? 1;
 
-  const bagItems = useMemo(() => inventory.filter((entry) => !entry.is_equipped), [inventory]);
+  const bagItems = useMemo(
+    () => equipment?.bag_items ?? inventory.filter((entry) => !entry.is_equipped),
+    [equipment?.bag_items, inventory],
+  );
   const equippedCount = equipment?.equipment?.length ?? 0;
   const layeredEquipment = useMemo(() => mapEquipmentToLayers(equipment?.equipment ?? []), [equipment?.equipment]);
   const equipmentMap = useMemo(() => {
@@ -111,6 +116,17 @@ export function CharacterScreen() {
     healthState?.is_wounded ? "Ранен" : healthPercent <= 35 ? "Критично" : healthPercent <= 70 ? "Ослаблен" : "В строю";
   const woundedPenaltyPercent = Math.max(0, Math.round(healthState?.reward_penalty_percent ?? 0));
   const nextDecayLabel = getNextHealthDecayLabel(healthState?.last_health_decay_at, language);
+
+  function getItemRequiredLevel(entry: { item?: { required_level?: number | null } | null } | null | undefined) {
+    return Math.max(1, entry?.item?.required_level ?? 1);
+  }
+
+  function isItemLevelLocked(entry: { item?: { required_level?: number | null; type?: string | null } | null } | null | undefined) {
+    if (!entry?.item || entry.item.type === "chest") {
+      return false;
+    }
+    return getItemRequiredLevel(entry) > heroLevel;
+  }
 
   const statHints: StatHint[] = useMemo(
     () => [
@@ -189,6 +205,8 @@ export function CharacterScreen() {
     ),
     [currentHealth, derivedStats, equipment?.equipment_totals, healthState?.is_wounded, healthState?.penalty_quests_remaining, maxHealth, t],
   );
+  const selectedItemRequiredLevel = getItemRequiredLevel(selectedItem);
+  const selectedItemLocked = isItemLevelLocked(selectedItem);
 
   async function openItemByInventoryId(inventoryId: number) {
     try {
@@ -206,6 +224,16 @@ export function CharacterScreen() {
 
   async function handleEquip() {
     if (!selectedItem) return;
+    const requiredLevel = getItemRequiredLevel(selectedItem);
+    if (isItemLevelLocked(selectedItem)) {
+      await pushToast({
+        title: t("screens.character.levelLocked"),
+        description: t("screens.character.unlockAtLevel", { level: requiredLevel }),
+        icon: "lock",
+        tone: "warning",
+      });
+      return;
+    }
     try {
       const targetSlot = pickEquipSlot(selectedItem, equipment?.equipment ?? []);
       await equipInventoryItem(selectedItem.inventory_id, targetSlot, equipment?.class_info?.id);
@@ -453,6 +481,8 @@ export function CharacterScreen() {
         <View style={styles.bagGrid}>
           {bagItems.map((item, index) => {
             const surface = getRaritySurface(item.item.rarity, themeMode);
+            const requiredLevel = getItemRequiredLevel(item);
+            const isLocked = isItemLevelLocked(item);
             return (
               <Pressable
                 key={`${item.id}-${index}`}
@@ -461,12 +491,31 @@ export function CharacterScreen() {
                   styles.bagCell,
                   {
                     width: bagCellWidth,
-                    borderColor: surface.border,
-                    backgroundColor: surface.background,
+                    borderColor: isLocked ? colors.borderSoft : surface.border,
+                    backgroundColor: isLocked
+                      ? themeMode === "light"
+                        ? "rgba(226,232,240,0.92)"
+                        : "rgba(30,41,59,0.82)"
+                      : surface.background,
                   },
                 ]}
               >
-                <View style={[styles.bagInner, { borderColor: surface.trim, backgroundColor: surface.panel }]}>
+                <View style={styles.bagLevelBadge}>
+                  <Text style={styles.bagLevelBadgeText}>{t("screens.character.levelBadge", { level: requiredLevel })}</Text>
+                </View>
+                <View
+                  style={[
+                    styles.bagInner,
+                    {
+                      borderColor: isLocked ? colors.borderSoft : surface.trim,
+                      backgroundColor: isLocked
+                        ? themeMode === "light"
+                          ? "rgba(255,255,255,0.72)"
+                          : "rgba(15,23,42,0.72)"
+                        : surface.panel,
+                    },
+                  ]}
+                >
                   <GameIcon
                     itemId={item.item.id ?? item.item_id}
                     itemType={item.item.type}
@@ -475,9 +524,19 @@ export function CharacterScreen() {
                     rarity={item.item.rarity}
                     name={item.item.icon}
                     size={42}
-                    color={surface.accent}
+                    color={isLocked ? colors.textDim : surface.accent}
                   />
+                  {isLocked ? (
+                    <View style={styles.bagLockOverlay}>
+                      <GameIcon name="lock" size={18} color={colors.text} />
+                    </View>
+                  ) : null}
                 </View>
+                {isLocked ? (
+                  <Text style={styles.bagLockedLabel} numberOfLines={1}>
+                    {t("screens.character.unlockAtLevelCompact", { level: requiredLevel })}
+                  </Text>
+                ) : null}
               </Pressable>
             );
           })}
@@ -495,7 +554,17 @@ export function CharacterScreen() {
         rarity={selectedItem?.item?.rarity}
         subtitle={selectedItem ? getRarityLabel(selectedItem.item.rarity, t) : undefined}
         description={normalizeItemText(selectedItem?.item?.description)}
-        metaRows={selectedItem ? [{ label: t("screens.character.sellPrice"), value: `${selectedItem.sell_price} ${t("common.gold")}` }] : []}
+        metaRows={
+          selectedItem
+            ? [
+                { label: t("screens.character.requiredLevel"), value: t("screens.character.levelBadge", { level: selectedItemRequiredLevel }) },
+                ...(selectedItemLocked
+                  ? [{ label: t("screens.character.levelLocked"), value: t("screens.character.unlockAtLevel", { level: selectedItemRequiredLevel }) }]
+                  : []),
+                { label: t("screens.character.sellPrice"), value: `${selectedItem.sell_price} ${t("common.gold")}` },
+              ]
+            : []
+        }
         statEntries={selectedItem ? buildItemStatEntries(selectedItem, t) : []}
         comparisonTitle={selectedComparison?.comparisonTitle}
         comparisonIntro={selectedComparison?.comparisonIntro}
@@ -507,7 +576,15 @@ export function CharacterScreen() {
                   ? [{ label: "Открыть сундук", icon: "treasure-chest", onPress: handleOpenChest as () => void, variant: "gold" as const }]
                   : selectedItem.is_equipped
                     ? [{ label: t("inventory.unequipItem"), icon: "shield-off-outline", onPress: handleUnequip as () => void, variant: "secondary" as const }]
-                    : [{ label: t("screens.character.equip"), icon: "shield-sword", onPress: handleEquip as () => void }]),
+                    : selectedItemLocked
+                      ? [{
+                          label: t("screens.character.unlockAtLevelAction", { level: selectedItemRequiredLevel }),
+                          icon: "lock",
+                          onPress: () => undefined,
+                          variant: "secondary" as const,
+                          disabled: true,
+                        }]
+                      : [{ label: t("screens.character.equip"), icon: "shield-sword", onPress: handleEquip as () => void }]),
                 { label: t("screens.character.sell"), icon: "cash-remove", onPress: handleSell as () => void, variant: "danger" as const },
               ]
             : []
@@ -760,6 +837,22 @@ function createStyles(colors: ReturnType<typeof useThemeColors>, themeMode: Retu
     borderRadius: 12,
     borderWidth: 1,
     padding: 6,
+    gap: 6,
+    position: "relative",
+  },
+  bagLevelBadge: {
+    alignSelf: "flex-end",
+    borderRadius: radii.pill,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    backgroundColor: themeMode === "light" ? "rgba(255,250,240,0.96)" : "rgba(15,23,42,0.92)",
+    borderWidth: 1,
+    borderColor: themeMode === "light" ? "rgba(183,121,31,0.28)" : "rgba(245,158,11,0.18)",
+  },
+  bagLevelBadgeText: {
+    color: colors.text,
+    fontSize: 10,
+    fontWeight: "900",
   },
   bagInner: {
     borderRadius: 10,
@@ -768,6 +861,24 @@ function createStyles(colors: ReturnType<typeof useThemeColors>, themeMode: Retu
     justifyContent: "center",
     padding: 4,
     minHeight: 56,
+    position: "relative",
+    overflow: "hidden",
+  },
+  bagLockOverlay: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: themeMode === "light" ? "rgba(255,248,235,0.62)" : "rgba(2,6,23,0.52)",
+  },
+  bagLockedLabel: {
+    color: colors.textMuted,
+    fontSize: 10,
+    fontWeight: "700",
+    textAlign: "center",
   },
   });
 }

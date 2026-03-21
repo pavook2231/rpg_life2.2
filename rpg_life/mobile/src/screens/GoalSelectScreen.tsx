@@ -4,8 +4,9 @@ import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
 import { fetchGoalTemplates, selectGoal, type GoalTemplatePayload } from "../api/game";
 import { Screen } from "../components/Screen";
 import { useFeedback } from "../context/FeedbackContext";
-import { useGame } from "../context/GameContext";
+import { useGameProgress } from "../context/GameContext";
 import { useTranslation } from "../context/LocalizationContext";
+import { clearGoalSetupPending } from "../storage/beginnerOnboardingStorage";
 import { Button, Card, GameIcon, radii, useThemeColors, useThemeMode } from "../ui";
 
 const GOAL_TERMS = [3, 6, 9] as const;
@@ -65,9 +66,19 @@ function getFallbackGoals(t: (key: string, params?: Record<string, string | numb
   ];
 }
 
+function translateOrFallback(
+  t: (key: string, params?: Record<string, string | number>) => string,
+  key: string,
+  fallback: string,
+  params?: Record<string, string | number>,
+) {
+  const translated = t(key, params);
+  return translated === key ? fallback : translated;
+}
+
 export function GoalSelectScreen({ navigation }: { navigation: { goBack: () => void } }) {
   const t = useTranslation();
-  const { profile, refreshGame } = useGame();
+  const { profile, refreshGame } = useGameProgress();
   const { pushToast } = useFeedback();
   const colors = useThemeColors();
   const themeMode = useThemeMode();
@@ -123,6 +134,9 @@ export function GoalSelectScreen({ navigation }: { navigation: { goBack: () => v
         goal_term_months: goalTermMonths,
         start_new_cycle: true,
       });
+      if (profile?.user?.id) {
+        await clearGoalSetupPending(profile.user.id);
+      }
       await refreshGame();
       await pushToast(
         {
@@ -147,7 +161,14 @@ export function GoalSelectScreen({ navigation }: { navigation: { goBack: () => v
   }
 
   return (
-    <Screen title={t("screens.home.quick.goalCtaTitle")} subtitle={t("screens.home.quick.goalCtaDescription")}>
+    <Screen
+      title={translateOrFallback(t, "screens.home.quick.goalCtaTitle", "Выбери цель")}
+      subtitle={translateOrFallback(
+        t,
+        "screens.home.quick.goalCtaDescription",
+        "С этого начинается понятный план: по цели приложение соберет первые задания и покажет прогресс.",
+      )}
+    >
       <Card>
         <Text style={styles.sectionTitle}>{t("screens.profile.quick.goalsTitle")}</Text>
         <Text style={styles.sectionSubtitle}>{selectedGoal?.description ?? t("screens.profile.quick.goalsSubtitle")}</Text>
