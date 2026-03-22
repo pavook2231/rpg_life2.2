@@ -12,6 +12,7 @@ import {
 } from "../features/items/itemService";
 import type { InventoryItem } from "../features/items/types";
 import { Screen } from "../components/Screen";
+import { StateBlock } from "../components/StateBlock";
 import { useGameProgress } from "../context/GameContext";
 import { useGameInventoryEquipment } from "../context/GameContext";
 import { useFeedback } from "../context/FeedbackContext";
@@ -36,7 +37,7 @@ const rarityWeight: Record<string, number> = {
 export function InventoryScreen() {
   const t = useTranslation();
   const { hero } = useGameProgress();
-  const { equipment, refreshGame } = useGameInventoryEquipment();
+  const { equipment, refreshGame, isDataConsistent, dataConsistencyError } = useGameInventoryEquipment();
   const { pushToast } = useFeedback();
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -236,6 +237,17 @@ export function InventoryScreen() {
 
   return (
     <Screen title={t("screens.inventory.title")} subtitle={t("screens.inventory.subtitle")}>
+      {!isDataConsistent && dataConsistencyError ? (
+        <StateBlock
+          tone="warning"
+          icon="alert-circle"
+          title={t("common.warning")}
+          description={dataConsistencyError}
+          actionLabel={t("common.retry")}
+          onAction={() => void refreshGame(true)}
+        />
+      ) : null}
+
       <Card tone="accent">
         <Text style={styles.sectionTitle}>{t("screens.inventory.bagTitle")}</Text>
         <View style={[styles.summaryRow, isPhoneLayout ? styles.summaryRowCompact : null]}>

@@ -79,9 +79,12 @@ export type LeaderboardEntry = {
   class_name?: string | null;
   class_level?: number | null;
   goal_type?: string | null;
+  goal_title?: string | null;
   goal_progress_percent?: number | null;
   goal_cycle_xp?: number | null;
   goal_target_xp?: number | null;
+  presence_status?: "online" | "offline";
+  last_active_at?: string | null;
   is_current_user?: boolean;
 };
 

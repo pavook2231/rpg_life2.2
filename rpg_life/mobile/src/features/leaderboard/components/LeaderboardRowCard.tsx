@@ -1,24 +1,24 @@
 import React, { useMemo } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 
-import type { LeaderboardEntry } from "../types";
-import { formatIdentityLabel, formatRankLabel, formatScore, translateOrFallback } from "../utils";
 import { getClassIcon, getClassLabel, normalizeDisplayText } from "../../../lib/gameUi";
 import { Avatar, Card, useThemeColors, useThemeMode } from "../../../ui";
+import type { LeaderboardEntry } from "../types";
+import { formatIdentityLabel, formatRankLabel, formatScore, translateOrFallback } from "../utils";
 
 type Props = {
   entry: LeaderboardEntry;
   t: (key: string, params?: Record<string, string | number>) => string;
   isCurrentUser?: boolean;
+  onPress?: () => void;
 };
 
-export function LeaderboardRowCard({ entry, t, isCurrentUser = false }: Props) {
+export function LeaderboardRowCard({ entry, t, isCurrentUser = false, onPress }: Props) {
   const colors = useThemeColors();
   const themeMode = useThemeMode();
   const styles = useMemo(() => createStyles(colors, themeMode), [colors, themeMode]);
   const identityLabel = formatIdentityLabel(entry.username, entry.friend_id);
-
-  return (
+  const content = (
     <Card style={[styles.card, isCurrentUser ? styles.cardCurrent : null]} tone={isCurrentUser ? "accent" : "default"}>
       <View style={styles.row}>
         <View style={[styles.rankPill, isCurrentUser ? styles.rankPillCurrent : null]}>
@@ -42,15 +42,28 @@ export function LeaderboardRowCard({ entry, t, isCurrentUser = false }: Props) {
           <Text style={styles.meta} numberOfLines={1}>
             {getClassLabel(entry.class_name, t)} | {translateOrFallback(t, "screens.leaderboard.fields.level", "Уровень")} {entry.class_level ?? entry.level}
           </Text>
+          {entry.goal_title ? (
+            <Text style={styles.goal} numberOfLines={1}>
+              {entry.goal_title}
+              {typeof entry.goal_progress_percent === "number" ? ` • ${entry.goal_progress_percent}%` : ""}
+            </Text>
+          ) : null}
         </View>
 
         <View style={styles.scoreWrap}>
           <Text style={styles.scoreValue}>{formatScore(entry.score)}</Text>
           <Text style={styles.scoreLabel}>{translateOrFallback(t, "screens.profile.rating", "Рейтинг")}</Text>
+          {onPress ? <Text style={styles.inspectHint}>Осмотреть</Text> : null}
         </View>
       </View>
     </Card>
   );
+
+  if (!onPress) {
+    return content;
+  }
+
+  return <Pressable onPress={onPress}>{content}</Pressable>;
 }
 
 function createStyles(colors: ReturnType<typeof useThemeColors>, themeMode: ReturnType<typeof useThemeMode>) {
@@ -116,9 +129,14 @@ function createStyles(colors: ReturnType<typeof useThemeColors>, themeMode: Retu
       color: colors.textMuted,
       fontSize: 12,
     },
+    goal: {
+      color: colors.textDim,
+      fontSize: 12,
+      fontWeight: "700",
+    },
     scoreWrap: {
       alignItems: "flex-end",
-      minWidth: 74,
+      minWidth: 84,
       gap: 2,
     },
     scoreValue: {
@@ -131,6 +149,11 @@ function createStyles(colors: ReturnType<typeof useThemeColors>, themeMode: Retu
       fontSize: 11,
       fontWeight: "700",
       textTransform: "uppercase",
+    },
+    inspectHint: {
+      color: colors.primary,
+      fontSize: 11,
+      fontWeight: "800",
     },
   });
 }

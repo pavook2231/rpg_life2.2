@@ -57,8 +57,8 @@ const METRIC_ORDER: Record<string, number> = {
   intellect: 4,
   stamina: 5,
   health: 6,
-  critical_bonus: 7,
-  luck_bonus: 8,
+  crit: 7,
+  luck: 8,
   xp_bonus: 9,
   crystal_bonus: 10,
 };

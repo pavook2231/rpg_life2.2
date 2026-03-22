@@ -7,6 +7,7 @@ from app import crud
 from app.achievements import ACHIEVEMENTS
 from app.core.cache import cache_get_json, cache_set_json, invalidate_leaderboard_cache
 from app.core.dates import utc_now
+from app.goals import get_goal_info
 from app.item_service import calculate_set_bonus, sync_catalog_items
 from app.models import DailyBonus, DailySteps, Item, User, UserClassProgress, UserInventory
 from app.stat_effects import StatEffects
@@ -15,6 +16,83 @@ from app.text_utils import normalize_item_model, normalize_nested_strings
 
 MAX_SYNCABLE_STEPS_PER_DAY = 70_000
 MAX_STEP_SYNC_INCREMENT = 30_000
+
+
+def _serialize_equipment_overview_payload(db: Session, user: User, *, include_bag_items: bool) -> dict:
+    context = inventory_service.build_character_inventory_context(db, user, None)
+    equipment = []
+    for slot, entry in context["equipment"].items():
+        item = normalize_item_model(entry["item"])
+        equipment.append(
+            normalize_nested_strings(
+                {
+                    "slot": slot,
+                    "inventory_id": entry["inventory_id"],
+                    "item": inventory_service.serialize_item_payload(item),
+                    "weapon_stats": inventory_service.serialize_weapon_stats_payload(entry.get("weapon_stats")),
+                    "armor_stats": inventory_service.serialize_armor_stats_payload(entry.get("armor_stats")),
+                }
+            )
+        )
+
+    bag_items = []
+    if include_bag_items:
+        for inv in context["bag_items"]:
+            bag_items.append(inventory_service.serialize_inventory_item_entry(inv, is_equipped=False))
+
+    class_info = context["class_info"]
+    set_bonuses_map = calculate_set_bonus(db, user.id)
+    set_bonuses = []
+    for set_name, entry in set_bonuses_map.items():
+        set_bonuses.append(
+            normalize_nested_strings(
+                {
+                    "set_name": set_name,
+                    "name": entry.get("name"),
+                    "description": entry.get("description"),
+                    "active_pieces": entry.get("active_pieces", 0),
+                    "bonus": entry.get("bonus", {}),
+                }
+            )
+        )
+    reward_effects_raw = StatEffects.build_reward_effects(db, user.id)
+    reward_effects = StatEffects.serialize_reward_effects(reward_effects_raw)
+    return normalize_nested_strings(
+        {
+            "class_info": {
+                "id": class_info.id,
+                "class_name": class_info.class_name,
+                "display_name": class_info.display_name,
+                "level": class_info.level,
+                "current_xp": class_info.current_xp,
+                "crystals": class_info.crystals,
+                "strength": class_info.strength,
+                "agility": class_info.agility,
+                "intellect": class_info.intellect,
+                "stamina": getattr(class_info, "stamina", 0),
+            },
+            "equipment_totals": context["equipment_totals"],
+            "reward_effects": reward_effects,
+            "equipment": equipment,
+            "bag_items": bag_items,
+            "set_bonuses": set_bonuses,
+        }
+    )
+
+
+def _serialize_public_goal_summary(user: User) -> dict:
+    goal_info = get_goal_info(getattr(user, "selected_goal_type", None))
+    return {
+        "goal_type": getattr(user, "selected_goal_type", None),
+        "goal_title": goal_info.get("title"),
+        "goal_description": goal_info.get("description"),
+        "goal_icon": goal_info.get("icon"),
+        "goal_accent_color": goal_info.get("accent_color"),
+        "goal_term_months": int(getattr(user, "goal_term_months", 0) or 0),
+        "goal_cycle_xp": int(getattr(user, "goal_cycle_xp", 0) or 0),
+        "goal_target_xp": int(getattr(user, "goal_target_xp", 0) or 0),
+        "goal_progress_percent": int(getattr(user, "goal_progress_percent", 0) or 0),
+    }
 
 
 def get_profile(db: Session, current_user: User) -> dict:
@@ -482,62 +560,66 @@ def unequip_inventory_item(db: Session, current_user: User, inventory_id: int) -
 
 
 def get_equipment_overview(db: Session, current_user: User) -> dict:
-    context = inventory_service.build_character_inventory_context(db, current_user, None)
-    equipment = []
-    for slot, entry in context["equipment"].items():
-        item = normalize_item_model(entry["item"])
-        equipment.append(
-            normalize_nested_strings(
-                {
-                    "slot": slot,
-                    "inventory_id": entry["inventory_id"],
-                    "item": inventory_service.serialize_item_payload(item),
-                    "weapon_stats": inventory_service.serialize_weapon_stats_payload(entry.get("weapon_stats")),
-                    "armor_stats": inventory_service.serialize_armor_stats_payload(entry.get("armor_stats")),
-                }
-            )
+    return _serialize_equipment_overview_payload(db, current_user, include_bag_items=True)
+
+
+def get_public_user_profile(db: Session, current_user: User, user_id: int) -> dict:
+    del current_user
+    crud.backfill_missing_usernames(db)
+    target_user = db.query(User).filter(User.id == user_id, User.is_active == True).first()
+    if target_user is None:
+        raise HTTPException(status_code=404, detail="Player not found")
+
+    goal = _serialize_public_goal_summary(target_user)
+    primary_class_map = social_service._load_primary_class_map(db, [target_user.id])
+    stats_map = social_service._cached_user_stats_map(db, [target_user.id])
+    user_summary = social_service._serialize_social_user(
+        target_user,
+        primary_class_map.get(target_user.id),
+        stats=stats_map.get(target_user.id, {}),
+    )
+
+    classes = crud.get_all_unlocked_classes(db, target_user.id)
+    main_char = classes[0] if classes else None
+    if not main_char:
+        return normalize_nested_strings(
+            {
+                "user": user_summary,
+                "goal": goal,
+                "has_character": False,
+                "character": None,
+                "equipment_overview": None,
+            }
         )
 
-    bag_items = []
-    for inv in context["bag_items"]:
-        bag_items.append(inventory_service.serialize_inventory_item_entry(inv, is_equipped=False))
+    next_level_xp = crud.calculate_next_level_xp(main_char.level)
+    xp_percent = (main_char.current_xp / next_level_xp * 100) if next_level_xp > 0 else 0
+    equipment_overview = _serialize_equipment_overview_payload(db, target_user, include_bag_items=False)
 
-    class_info = context["class_info"]
-    set_bonuses_map = calculate_set_bonus(db, current_user.id)
-    set_bonuses = []
-    for set_name, entry in set_bonuses_map.items():
-        set_bonuses.append(
-            normalize_nested_strings(
-                {
-                    "set_name": set_name,
-                    "name": entry.get("name"),
-                    "description": entry.get("description"),
-                    "active_pieces": entry.get("active_pieces", 0),
-                    "bonus": entry.get("bonus", {}),
-                }
-            )
-        )
-    reward_effects_raw = StatEffects.build_reward_effects(db, current_user.id)
-    reward_effects = StatEffects.serialize_reward_effects(reward_effects_raw)
     return normalize_nested_strings(
         {
-            "class_info": {
-                "id": class_info.id,
-                "class_name": class_info.class_name,
-                "display_name": class_info.display_name,
-                "level": class_info.level,
-                "current_xp": class_info.current_xp,
-                "crystals": class_info.crystals,
-                "strength": class_info.strength,
-                "agility": class_info.agility,
-                "intellect": class_info.intellect,
-                "stamina": getattr(class_info, "stamina", 0),
+            "user": user_summary,
+            "goal": goal,
+            "has_character": True,
+            "character": {
+                "id": main_char.id,
+                "name": getattr(main_char, "display_name", main_char.class_name),
+                "level": main_char.level,
+                "class": main_char.class_name,
+                "streak": main_char.streak,
+                "crystals": main_char.crystals,
+                "goal_cycle_xp": goal["goal_cycle_xp"],
+                "goal_target_xp": goal["goal_target_xp"],
+                "goal_progress_percent": goal["goal_progress_percent"],
+                "strength": main_char.strength,
+                "agility": main_char.agility,
+                "intellect": main_char.intellect,
+                "stamina": getattr(main_char, "stamina", 0),
+                "current_xp": main_char.current_xp,
+                "next_level_xp": next_level_xp,
+                "xp_percent": xp_percent,
             },
-            "equipment_totals": context["equipment_totals"],
-            "reward_effects": reward_effects,
-            "equipment": equipment,
-            "bag_items": bag_items,
-            "set_bonuses": set_bonuses,
+            "equipment_overview": equipment_overview,
         }
     )
 

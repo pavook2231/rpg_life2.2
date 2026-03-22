@@ -31,6 +31,10 @@ def test_leaderboard_me_endpoint_requires_authenticated_user() -> None:
     assert auth.get_current_user in dependency_calls_for(router, "/api/v1/leaderboard/me")
 
 
+def test_public_user_profile_endpoint_requires_authenticated_user() -> None:
+    assert auth.get_current_user in dependency_calls_for(router, "/api/v1/users/{user_id}/profile")
+
+
 def test_items_catalog_endpoint_requires_authenticated_user() -> None:
     assert auth.get_current_user in dependency_calls_for(router, "/api/v1/items")
 
@@ -160,6 +164,37 @@ def test_leaderboard_me_route_forwards_scope_to_service(monkeypatch) -> None:
         "period": "all_time",
     }
     assert body["data"]["item"]["rank"] == 9
+
+
+def test_public_user_profile_route_forwards_user_id_to_service(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_get_public_user_profile(db, current_user, user_id):
+        captured.update({
+            "db": db,
+            "current_user": current_user,
+            "user_id": user_id,
+        })
+        return {"user": {"id": user_id}, "has_character": True}
+
+    monkeypatch.setattr(mobile_routes.mobile_service, "get_public_user_profile", fake_get_public_user_profile)
+
+    response = asyncio.run(
+        mobile_routes.get_public_user_profile(
+            user_id=42,
+            db="demo-db",
+            current_user="demo-user",
+        )
+    )
+    body = json.loads(response.body.decode("utf-8"))
+
+    assert response.status_code == 200
+    assert captured == {
+        "db": "demo-db",
+        "current_user": "demo-user",
+        "user_id": 42,
+    }
+    assert body["data"]["user"]["id"] == 42
 
 
 def test_items_catalog_route_forwards_to_mobile_service(monkeypatch) -> None:

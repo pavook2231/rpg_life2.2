@@ -52,8 +52,15 @@ export function LeaderboardScreen() {
   const emptyDescription = translateOrFallback(
     t,
     "screens.friends.empty.leaderboardDescription",
-    "Когда у игроков появится прогресс, сервер начнет возвращать актуальный рейтинг без локальных вычислений.",
+    "Когда у игроков появится прогресс, сервер начнёт возвращать актуальный рейтинг без локальных вычислений.",
   );
+
+  function openPlayerProfile(userId: number, userName?: string | null) {
+    navigation.navigate("PlayerProfile", {
+      userId,
+      userName,
+    });
+  }
 
   return (
     <Screen
@@ -109,7 +116,7 @@ export function LeaderboardScreen() {
           <>
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>{translateOrFallback(t, "screens.leaderboard.topThree", "Топ-3")}</Text>
-              <LeaderboardPodium items={topPlayers} t={t} />
+              <LeaderboardPodium items={topPlayers} t={t} onSelect={(entry) => openPlayerProfile(entry.user_id, entry.name)} />
             </View>
 
             {rankedPlayers.length > 0 ? (
@@ -123,6 +130,7 @@ export function LeaderboardScreen() {
                     entry={entry}
                     t={t}
                     isCurrentUser={Boolean(entry.is_current_user || entry.user_id === currentUserId)}
+                    onPress={() => openPlayerProfile(entry.user_id, entry.name)}
                   />
                 ))}
               </View>

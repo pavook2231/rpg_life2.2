@@ -759,6 +759,15 @@ async def get_profile(db: Session = Depends(get_db), current_user: User = Depend
     return success_response(mobile_service.get_profile(db, current_user))
 
 
+@router.get("/users/{user_id}/profile", summary="Public player profile")
+async def get_public_user_profile(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(auth.get_current_user),
+):
+    return success_response(mobile_service.get_public_user_profile(db, current_user, user_id))
+
+
 @router.get("/bootstrap", summary="Core bootstrap payload for mobile app")
 async def get_bootstrap(db: Session = Depends(get_db), current_user: User = Depends(auth.get_current_user)):
     return success_response(mobile_service.get_bootstrap_payload(db, current_user))

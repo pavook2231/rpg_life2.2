@@ -1,5 +1,5 @@
 import React, { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { InteractionManager, Platform } from "react-native";
+import { Platform } from "react-native";
 
 import {
   type BootstrapPayload,
@@ -24,6 +24,14 @@ import { useTranslation } from "./LocalizationContext";
 type EquipmentOverview = Awaited<ReturnType<typeof fetchEquipmentOverview>>;
 type RewardsSummary = BootstrapPayload["rewards_summary"];
 type HeroState = CharacterProfilePayload["character"] | null;
+type GameSnapshot = {
+  profile: ProfilePayload | null;
+  hero: HeroState;
+  equipment: EquipmentOverview | null;
+  inventory: InventoryItem[];
+  achievements: AchievementItem[];
+  rewards: RewardsSummary | null;
+};
 
 type QuestRewardItem = {
   name?: string | null;
@@ -64,6 +72,8 @@ type GameContextValue = {
   inventory: InventoryItem[];
   achievements: AchievementItem[];
   rewards: RewardsSummary | null;
+  isDataConsistent: boolean;
+  dataConsistencyError: string | null;
   todaySteps: number | null;
   stepSourceLabel: string | null;
   stepTrackingStatus: StepTrackingState | "sync_deferred" | null;
@@ -77,6 +87,8 @@ type GameProgressContextValue = Pick<
   | "profile"
   | "hero"
   | "rewards"
+  | "isDataConsistent"
+  | "dataConsistencyError"
   | "todaySteps"
   | "stepSourceLabel"
   | "stepTrackingStatus"
@@ -85,7 +97,10 @@ type GameProgressContextValue = Pick<
   | "applyQuestResult"
 >;
 
-type GameInventoryContextValue = Pick<GameContextValue, "equipment" | "inventory" | "refreshGame">;
+type GameInventoryContextValue = Pick<
+  GameContextValue,
+  "equipment" | "inventory" | "isDataConsistent" | "dataConsistencyError" | "refreshGame"
+>;
 type GameAchievementsContextValue = Pick<GameContextValue, "achievements">;
 
 const GameContext = createContext<GameContextValue | undefined>(undefined);
@@ -93,6 +108,14 @@ const GameProgressContext = createContext<GameProgressContextValue | undefined>(
 const GameInventoryContext = createContext<GameInventoryContextValue | undefined>(undefined);
 const GameAchievementsContext = createContext<GameAchievementsContextValue | undefined>(undefined);
 const INVENTORY_PAGE_SIZE = 100;
+const EMPTY_GAME_SNAPSHOT: GameSnapshot = {
+  profile: null,
+  hero: null,
+  equipment: null,
+  inventory: [],
+  achievements: [],
+  rewards: null,
+};
 
 async function fetchAllInventory(forceRefresh = false): Promise<InventoryItem[]> {
   const firstPage = await fetchInventory(1, INVENTORY_PAGE_SIZE, { forceRefresh });
@@ -122,14 +145,29 @@ function localDayStartedAt(date: Date) {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0).toISOString();
 }
 
+async function fetchGameSnapshot(forceRefresh = false): Promise<GameSnapshot> {
+  const [bootstrapPayload, equipmentPayload, achievementsPayload, inventoryPayload] = await Promise.all([
+    fetchBootstrap({ forceRefresh }),
+    fetchEquipmentOverview({ forceRefresh }),
+    fetchAchievements({ forceRefresh }),
+    fetchAllInventory(forceRefresh),
+  ]);
+
+  return {
+    profile: bootstrapPayload.profile,
+    hero: bootstrapPayload.character_profile.character ?? null,
+    equipment: equipmentPayload,
+    inventory: inventoryPayload,
+    achievements: achievementsPayload.achievements ?? [],
+    rewards: bootstrapPayload.rewards_summary ?? null,
+  };
+}
+
 export function GameProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
-  const [profile, setProfile] = useState<ProfilePayload | null>(null);
-  const [hero, setHero] = useState<HeroState>(null);
-  const [equipment, setEquipment] = useState<EquipmentOverview | null>(null);
-  const [achievements, setAchievements] = useState<AchievementItem[]>([]);
-  const [rewards, setRewards] = useState<RewardsSummary | null>(null);
-  const [inventory, setInventory] = useState<InventoryItem[]>([]);
+  const [gameSnapshot, setGameSnapshot] = useState<GameSnapshot>(EMPTY_GAME_SNAPSHOT);
+  const [isDataConsistent, setIsDataConsistent] = useState(true);
+  const [dataConsistencyError, setDataConsistencyError] = useState<string | null>(null);
   const [todaySteps, setTodaySteps] = useState<number | null>(null);
   const [stepSourceLabel, setStepSourceLabel] = useState<string | null>(null);
   const [stepTrackingStatus, setStepTrackingStatus] = useState<StepTrackingState | "sync_deferred" | null>(null);
@@ -137,73 +175,108 @@ export function GameProvider({ children }: { children: ReactNode }) {
   const { pushToast } = useFeedback();
   const { isOnline } = useOffline();
   const wasOnlineRef = useRef(isOnline);
-  const backgroundLoadVersionRef = useRef(0);
+  const snapshotLoadVersionRef = useRef(0);
+  const activeRefreshCountRef = useRef(0);
   const t = useTranslation();
+  const { profile, hero, equipment, achievements, rewards, inventory } = gameSnapshot;
 
-  const loadCoreGame = useCallback(async (forceRefresh = false) => {
-    const bootstrapPayload = await fetchBootstrap({ forceRefresh });
-    setProfile(bootstrapPayload.profile);
-    setHero(bootstrapPayload.character_profile.character ?? null);
-    setRewards(bootstrapPayload.rewards_summary ?? null);
+  const applyGameSnapshot = useCallback((nextSnapshot: GameSnapshot) => {
+    setGameSnapshot(nextSnapshot);
+    setIsDataConsistent(true);
+    setDataConsistencyError(null);
   }, []);
 
-  const loadExtendedGame = useCallback(async (forceRefresh = false) => {
-    const loadVersion = ++backgroundLoadVersionRef.current;
-    const [equipmentPayload, achievementsPayload, inventoryItems] = await Promise.all([
-      fetchEquipmentOverview({ forceRefresh }),
-      fetchAchievements({ forceRefresh }),
-      fetchAllInventory(forceRefresh),
-    ]);
-
-    if (backgroundLoadVersionRef.current !== loadVersion) {
-      return;
-    }
-
-    setEquipment(equipmentPayload);
-    setAchievements(achievementsPayload.achievements ?? []);
-    setInventory(inventoryItems);
-  }, []);
-
-  const refreshGame = useCallback(async (forceRefresh = true) => {
+  const beginRefresh = useCallback(() => {
+    activeRefreshCountRef.current += 1;
     setIsRefreshing(true);
-    try {
-      await Promise.all([loadCoreGame(forceRefresh), loadExtendedGame(forceRefresh)]);
-    } finally {
+  }, []);
+
+  const endRefresh = useCallback(() => {
+    activeRefreshCountRef.current = Math.max(0, activeRefreshCountRef.current - 1);
+    if (activeRefreshCountRef.current === 0) {
       setIsRefreshing(false);
     }
-  }, [loadCoreGame, loadExtendedGame]);
+  }, []);
+
+  const resolveSnapshotError = useCallback(
+    (error: unknown) => (error instanceof Error && error.message ? error.message : t("errors.unknownError")),
+    [t],
+  );
+
+  const loadGameSnapshot = useCallback(
+    async (forceRefresh = false, options?: { showErrorToast?: boolean }) => {
+      const loadVersion = ++snapshotLoadVersionRef.current;
+
+      try {
+        const nextSnapshot = await fetchGameSnapshot(forceRefresh);
+        if (snapshotLoadVersionRef.current !== loadVersion) {
+          return;
+        }
+
+        applyGameSnapshot(nextSnapshot);
+      } catch (error) {
+        if (snapshotLoadVersionRef.current !== loadVersion) {
+          return;
+        }
+
+        const message = resolveSnapshotError(error);
+        console.warn("[game-context] Failed to load atomic game snapshot", error);
+        setIsDataConsistent(false);
+        setDataConsistencyError(message);
+
+        if (options?.showErrorToast) {
+          void pushToast({
+            title: "Данные героя не синхронизированы",
+            description: message,
+            icon: "alert-circle",
+            tone: "warning",
+          });
+        }
+
+        throw error instanceof Error ? error : new Error(message);
+      }
+    },
+    [applyGameSnapshot, pushToast, resolveSnapshotError],
+  );
+
+  const performRefresh = useCallback(
+    async (forceRefresh = true, showErrorToast = true) => {
+      beginRefresh();
+      try {
+        await loadGameSnapshot(forceRefresh, { showErrorToast });
+      } finally {
+        endRefresh();
+      }
+    },
+    [beginRefresh, endRefresh, loadGameSnapshot],
+  );
+
+  const refreshGame = useCallback((forceRefresh = true) => performRefresh(forceRefresh, true), [performRefresh]);
 
   useEffect(() => {
     if (!user) {
-      setProfile(null);
-      setHero(null);
-      setEquipment(null);
-      setAchievements([]);
-      setRewards(null);
-      setInventory([]);
+      setGameSnapshot(EMPTY_GAME_SNAPSHOT);
+      setIsDataConsistent(true);
+      setDataConsistencyError(null);
       setTodaySteps(null);
       setStepSourceLabel(null);
       setStepTrackingStatus(null);
-      backgroundLoadVersionRef.current += 1;
+      snapshotLoadVersionRef.current += 1;
+      activeRefreshCountRef.current = 0;
+      setIsRefreshing(false);
       return;
     }
-    loadCoreGame(false)
-      .then(() => {
-        InteractionManager.runAfterInteractions(() => {
-          void loadExtendedGame(false);
-        });
-      })
-      .catch(() => undefined);
-  }, [loadCoreGame, loadExtendedGame, user]);
+    performRefresh(false, false).catch(() => undefined);
+  }, [performRefresh, user]);
 
   useEffect(() => {
     const cameBackOnline = !wasOnlineRef.current && isOnline;
     wasOnlineRef.current = isOnline;
 
     if (user && cameBackOnline) {
-      refreshGame(true).catch(() => undefined);
+      performRefresh(true, false).catch(() => undefined);
     }
-  }, [isOnline, refreshGame, user]);
+  }, [isOnline, performRefresh, user]);
 
   useEffect(() => {
     if (!user) {
@@ -277,6 +350,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
   }, [isOnline, user]);
 
   const applyQuestResult = useCallback(async (result: QuestCompletionResult) => {
+    const wasHeroWounded = hero?.health?.is_wounded ?? false;
     const queueToast = (toast: Parameters<typeof pushToast>[0], options?: Parameters<typeof pushToast>[1]) => {
       void pushToast(toast, options);
     };
@@ -287,27 +361,11 @@ export function GameProvider({ children }: { children: ReactNode }) {
         icon: "cloud-upload-outline",
         tone: "info",
       });
-      await refreshGame(true);
+      await refreshGame(true).catch(() => undefined);
       return;
     }
 
-    setHero((current) =>
-      current
-        ? {
-            ...current,
-            level: result?.new_level ?? current.level,
-            current_xp: result?.new_xp ?? current.current_xp,
-            next_level_xp: result?.next_level_xp ?? current.next_level_xp,
-            xp_percent: result?.xp_percentage ?? current.xp_percent,
-            crystals: result?.new_crystals ?? current.crystals,
-          }
-        : current,
-    );
-
-    await loadCoreGame(true);
-    InteractionManager.runAfterInteractions(() => {
-      void loadExtendedGame(true);
-    });
+    await performRefresh(true, false).catch(() => undefined);
 
     queueToast({
       title: t("game.reward.questCompleted"),
@@ -328,7 +386,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
       });
     }
 
-    if (!hero?.health?.is_wounded && result?.health?.is_wounded) {
+    if (!wasHeroWounded && result?.health?.is_wounded) {
       queueToast({
         title: "Герой ранен",
         description: "После долгого отсутствия персонаж получил урон. Следи за HP на главной странице.",
@@ -337,7 +395,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
       });
     }
 
-    if (hero?.health?.is_wounded && result?.health && !result.health.is_wounded) {
+    if (wasHeroWounded && result?.health && !result.health.is_wounded) {
       queueToast({
         title: "Герой восстановился",
         description: "Штраф к наградам снят. Можно снова фармить без потерь.",
@@ -388,7 +446,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
       }, { sound: "level", haptic: "level", durationMs: 2500 });
     }
 
-  }, [hero?.health?.is_wounded, loadCoreGame, loadExtendedGame, pushToast, refreshGame, t]);
+  }, [hero?.health?.is_wounded, performRefresh, pushToast, refreshGame, t]);
 
   const value = useMemo(
     () => ({
@@ -398,6 +456,8 @@ export function GameProvider({ children }: { children: ReactNode }) {
       inventory,
       achievements,
       rewards,
+      isDataConsistent,
+      dataConsistencyError,
       todaySteps,
       stepSourceLabel,
       stepTrackingStatus,
@@ -408,9 +468,11 @@ export function GameProvider({ children }: { children: ReactNode }) {
     [
       achievements,
       applyQuestResult,
+      dataConsistencyError,
       equipment,
       hero,
       inventory,
+      isDataConsistent,
       isRefreshing,
       profile,
       refreshGame,
@@ -426,6 +488,8 @@ export function GameProvider({ children }: { children: ReactNode }) {
       profile,
       hero,
       rewards,
+      isDataConsistent,
+      dataConsistencyError,
       todaySteps,
       stepSourceLabel,
       stepTrackingStatus,
@@ -433,16 +497,30 @@ export function GameProvider({ children }: { children: ReactNode }) {
       refreshGame,
       applyQuestResult,
     }),
-    [applyQuestResult, hero, isRefreshing, profile, refreshGame, rewards, stepSourceLabel, stepTrackingStatus, todaySteps],
+    [
+      applyQuestResult,
+      dataConsistencyError,
+      hero,
+      isDataConsistent,
+      isRefreshing,
+      profile,
+      refreshGame,
+      rewards,
+      stepSourceLabel,
+      stepTrackingStatus,
+      todaySteps,
+    ],
   );
 
   const inventoryValue = useMemo(
     () => ({
       equipment,
       inventory,
+      isDataConsistent,
+      dataConsistencyError,
       refreshGame,
     }),
-    [equipment, inventory, refreshGame],
+    [dataConsistencyError, equipment, inventory, isDataConsistent, refreshGame],
   );
 
   const achievementsValue = useMemo(

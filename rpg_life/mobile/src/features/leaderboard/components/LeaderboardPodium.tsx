@@ -1,14 +1,15 @@
 import React, { useMemo } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 
-import type { LeaderboardEntry } from "../types";
-import { formatIdentityLabel, formatRankLabel, formatScore, translateOrFallback } from "../utils";
 import { getClassIcon, getClassLabel, normalizeDisplayText } from "../../../lib/gameUi";
 import { Avatar, Card, useThemeColors, useThemeMode } from "../../../ui";
+import type { LeaderboardEntry } from "../types";
+import { formatIdentityLabel, formatRankLabel, formatScore, translateOrFallback } from "../utils";
 
 type Props = {
   items: LeaderboardEntry[];
   t: (key: string, params?: Record<string, string | number>) => string;
+  onSelect?: (item: LeaderboardEntry) => void;
 };
 
 const PODIUM_COLORS = [
@@ -17,7 +18,7 @@ const PODIUM_COLORS = [
   { border: "#c97316", backgroundDark: "rgba(73,38,17,0.72)", backgroundLight: "rgba(252,239,226,0.96)" },
 ];
 
-export function LeaderboardPodium({ items, t }: Props) {
+export function LeaderboardPodium({ items, t, onSelect }: Props) {
   const colors = useThemeColors();
   const themeMode = useThemeMode();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -31,7 +32,7 @@ export function LeaderboardPodium({ items, t }: Props) {
     <View style={styles.grid}>
       {topItems.map((item, index) => {
         const surface = PODIUM_COLORS[index] ?? PODIUM_COLORS[2];
-        return (
+        const card = (
           <Card
             key={item.user_id}
             style={[
@@ -57,11 +58,28 @@ export function LeaderboardPodium({ items, t }: Props) {
             <Text style={styles.meta} numberOfLines={1}>
               {getClassLabel(item.class_name, t)} | {translateOrFallback(t, "screens.leaderboard.fields.level", "Уровень")} {item.class_level ?? item.level}
             </Text>
+            {item.goal_title ? (
+              <Text style={styles.goal} numberOfLines={2}>
+                {item.goal_title}
+                {typeof item.goal_progress_percent === "number" ? ` • ${item.goal_progress_percent}%` : ""}
+              </Text>
+            ) : null}
             <Text style={styles.score}>
               {translateOrFallback(t, "screens.profile.rating", "Рейтинг")}: {formatScore(item.score)}
             </Text>
             {item.is_current_user ? <Text style={styles.currentUser}>Вы</Text> : null}
+            {onSelect ? <Text style={styles.inspectHint}>Осмотреть</Text> : null}
           </Card>
+        );
+
+        if (!onSelect) {
+          return card;
+        }
+
+        return (
+          <Pressable key={item.user_id} style={styles.pressable} onPress={() => onSelect(item)}>
+            {card}
+          </Pressable>
         );
       })}
     </View>
@@ -75,12 +93,17 @@ function createStyles(colors: ReturnType<typeof useThemeColors>) {
       flexWrap: "wrap",
       gap: 12,
     },
+    pressable: {
+      flexGrow: 1,
+      flexBasis: 150,
+    },
     card: {
       flexGrow: 1,
       flexBasis: 150,
       alignItems: "center",
       gap: 8,
       paddingTop: 18,
+      minHeight: 248,
     },
     rankBadge: {
       position: "absolute",
@@ -112,6 +135,12 @@ function createStyles(colors: ReturnType<typeof useThemeColors>) {
       fontSize: 12,
       textAlign: "center",
     },
+    goal: {
+      color: colors.textDim,
+      fontSize: 12,
+      textAlign: "center",
+      fontWeight: "700",
+    },
     score: {
       color: colors.text,
       fontSize: 14,
@@ -122,6 +151,12 @@ function createStyles(colors: ReturnType<typeof useThemeColors>) {
       color: colors.primary,
       fontSize: 12,
       fontWeight: "900",
+      textTransform: "uppercase",
+    },
+    inspectHint: {
+      color: colors.primary,
+      fontSize: 11,
+      fontWeight: "800",
       textTransform: "uppercase",
     },
   });

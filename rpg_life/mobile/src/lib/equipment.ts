@@ -67,6 +67,24 @@ const STAT_ICONS: Record<string, string> = {
   crystal_bonus: "cash",
 };
 
+const DUPLICATE_CANONICAL_STAT_KEYS = new Set([
+  "attack",
+  "defense",
+  "hp",
+  "damage_min",
+  "damage_max",
+  "armor_value",
+  "strength_bonus",
+  "agility_bonus",
+  "intellect_bonus",
+  "stamina_bonus",
+  "critical_bonus",
+  "luck_bonus",
+  "health_bonus",
+  "xp_bonus",
+  "crystal_bonus",
+]);
+
 function getItemPayload(detail: ItemDetail) {
   return detail.item ?? detail;
 }
@@ -75,6 +93,23 @@ function translateOrFallback(t: TranslateFn | undefined, key: string, fallback: 
   if (!t) return fallback;
   const translated = t(key);
   return translated === key ? fallback : translated;
+}
+
+function normalizeStatKey(key: string) {
+  const baseKey = key
+    .toLowerCase()
+    .replace(/_bonus$/, "")
+    .replace(/^bonus_/, "")
+    .replace(/^stat_/, "");
+
+  if (baseKey === "critical") return "crit";
+  if (baseKey === "hp" || baseKey === "health") return "health";
+  if (baseKey === "attack" || baseKey === "damage_min" || baseKey === "damage_max" || baseKey === "damage") return "damage";
+  if (baseKey === "defense" || baseKey === "armor_value" || baseKey === "armor") return "armor";
+  if (baseKey === "xp") return "xp_bonus";
+  if (baseKey === "gold" || baseKey === "crystal" || baseKey === "gold_bonus") return "crystal_bonus";
+
+  return baseKey;
 }
 
 export function getAvailableSlots(detail: ItemDetail) {
@@ -118,12 +153,7 @@ export function pickEquipSlot(detail: ItemDetail, equipped: EquipmentEntry[] = [
 }
 
 function getStatLabel(key: string, t?: TranslateFn) {
-  const baseKey = key
-    .toLowerCase()
-    .replace(/_bonus$/, "")
-    .replace(/^bonus_/, "")
-    .replace(/^stat_/, "");
-  const normalizedKey = baseKey === "critical" ? "crit" : baseKey;
+  const normalizedKey = normalizeStatKey(key);
   const labels: Record<string, string> = {
     strength: translateOrFallback(t, "game.itemStats.strength", "Сила"),
     agility: translateOrFallback(t, "game.itemStats.agility", "Ловкость"),
@@ -145,28 +175,33 @@ function getStatLabel(key: string, t?: TranslateFn) {
 }
 
 function getStatIcon(key: string) {
-  const baseKey = key
-    .toLowerCase()
-    .replace(/_bonus$/, "")
-    .replace(/^bonus_/, "")
-    .replace(/^stat_/, "");
-  const normalizedKey = baseKey === "critical" ? "crit" : baseKey;
+  const normalizedKey = normalizeStatKey(key);
   return STAT_ICONS[normalizedKey] ?? STAT_ICONS[key] ?? "sparkles";
 }
 
 function buildEntry(key: string, value: number, t?: TranslateFn, displayValue?: string): ItemStatEntry {
+  const normalizedKey = normalizeStatKey(key);
   return {
-    key,
-    label: getStatLabel(key, t),
+    key: normalizedKey,
+    label: getStatLabel(normalizedKey, t),
     value,
     displayValue: displayValue ?? `+${value}`,
-    icon: getStatIcon(key),
+    icon: getStatIcon(normalizedKey),
   };
+}
+
+function markCoveredStat(covered: Set<string>, ...keys: string[]) {
+  for (const key of keys) {
+    covered.add(key.toLowerCase());
+    covered.add(normalizeStatKey(key));
+  }
 }
 
 export function buildItemStatEntries(detail: ItemDetail, t?: TranslateFn) {
   const item = getItemPayload(detail);
+  const rawStats = detail.stats ?? null;
   const stats = new Map<string, ItemStatEntry>();
+  const coveredStatKeys = new Set<string>();
 
   const upsertEntry = (entry: ItemStatEntry) => {
     if (!stats.has(entry.key)) {
@@ -183,23 +218,67 @@ export function buildItemStatEntries(detail: ItemDetail, t?: TranslateFn) {
         `${detail.weapon_stats.damage_min}-${detail.weapon_stats.damage_max}`,
       ),
     );
+    markCoveredStat(coveredStatKeys, "damage", "attack", "damage_min", "damage_max");
+  } else if (rawStats && typeof rawStats.damage_min === "number" && typeof rawStats.damage_max === "number") {
+    upsertEntry(buildEntry("damage", rawStats.damage_max, t, `${rawStats.damage_min}-${rawStats.damage_max}`));
+    markCoveredStat(coveredStatKeys, "damage", "attack", "damage_min", "damage_max");
   }
-  if (detail.armor_stats?.armor_value) upsertEntry(buildEntry("armor", detail.armor_stats.armor_value, t));
-  if (item.strength_bonus) upsertEntry(buildEntry("strength", item.strength_bonus, t));
-  if (item.agility_bonus) upsertEntry(buildEntry("agility", item.agility_bonus, t));
-  if (item.intellect_bonus) upsertEntry(buildEntry("intellect", item.intellect_bonus, t));
-  if (item.stamina_bonus) upsertEntry(buildEntry("stamina", item.stamina_bonus, t));
-  if (item.critical_bonus) upsertEntry(buildEntry("critical_bonus", item.critical_bonus, t));
-  if (item.luck_bonus) upsertEntry(buildEntry("luck_bonus", item.luck_bonus, t));
-  if (item.health_bonus) upsertEntry(buildEntry("health", item.health_bonus, t));
-  if (item.xp_bonus) upsertEntry(buildEntry("xp_bonus", item.xp_bonus, t));
-  if (item.crystal_bonus) upsertEntry(buildEntry("crystal_bonus", item.crystal_bonus, t));
+  if (detail.armor_stats?.armor_value) {
+    upsertEntry(buildEntry("armor", detail.armor_stats.armor_value, t));
+    markCoveredStat(coveredStatKeys, "armor", "defense", "armor_value");
+  } else if (rawStats && typeof (rawStats.armor_value ?? rawStats.defense) === "number") {
+    upsertEntry(buildEntry("armor", Number(rawStats.armor_value ?? rawStats.defense), t));
+    markCoveredStat(coveredStatKeys, "armor", "defense", "armor_value");
+  }
+  if (item.strength_bonus) {
+    upsertEntry(buildEntry("strength", item.strength_bonus, t));
+    markCoveredStat(coveredStatKeys, "strength", "strength_bonus");
+  }
+  if (item.agility_bonus) {
+    upsertEntry(buildEntry("agility", item.agility_bonus, t));
+    markCoveredStat(coveredStatKeys, "agility", "agility_bonus");
+  }
+  if (item.intellect_bonus) {
+    upsertEntry(buildEntry("intellect", item.intellect_bonus, t));
+    markCoveredStat(coveredStatKeys, "intellect", "intellect_bonus");
+  }
+  if (item.stamina_bonus) {
+    upsertEntry(buildEntry("stamina", item.stamina_bonus, t));
+    markCoveredStat(coveredStatKeys, "stamina", "stamina_bonus");
+  }
+  if (item.critical_bonus) {
+    upsertEntry(buildEntry("critical_bonus", item.critical_bonus, t));
+    markCoveredStat(coveredStatKeys, "crit", "critical_bonus");
+  }
+  if (item.luck_bonus) {
+    upsertEntry(buildEntry("luck_bonus", item.luck_bonus, t));
+    markCoveredStat(coveredStatKeys, "luck", "luck_bonus");
+  }
+  if (item.health_bonus) {
+    upsertEntry(buildEntry("health", item.health_bonus, t));
+    markCoveredStat(coveredStatKeys, "health", "hp", "health_bonus");
+  } else if (rawStats && typeof (rawStats.health_bonus ?? rawStats.hp) === "number") {
+    upsertEntry(buildEntry("health", Number(rawStats.health_bonus ?? rawStats.hp), t));
+    markCoveredStat(coveredStatKeys, "health", "hp", "health_bonus");
+  }
+  if (item.xp_bonus) {
+    upsertEntry(buildEntry("xp_bonus", item.xp_bonus, t));
+    markCoveredStat(coveredStatKeys, "xp_bonus", "xp");
+  }
+  if (item.crystal_bonus) {
+    upsertEntry(buildEntry("crystal_bonus", item.crystal_bonus, t));
+    markCoveredStat(coveredStatKeys, "crystal_bonus", "crystal", "gold", "gold_bonus");
+  }
 
-  if (detail.stats) {
-    for (const [key, value] of Object.entries(detail.stats)) {
-      if (typeof value === "number") {
-        upsertEntry(buildEntry(key, value, t));
+  if (rawStats) {
+    for (const [key, value] of Object.entries(rawStats)) {
+      if (typeof value !== "number") continue;
+      const rawKey = key.toLowerCase();
+      const normalizedKey = normalizeStatKey(rawKey);
+      if (DUPLICATE_CANONICAL_STAT_KEYS.has(rawKey) && (coveredStatKeys.has(rawKey) || coveredStatKeys.has(normalizedKey))) {
+        continue;
       }
+      upsertEntry(buildEntry(key, value, t));
     }
   }
 

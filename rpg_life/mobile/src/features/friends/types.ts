@@ -8,6 +8,13 @@ export type SocialUserPreview = {
   class_name?: string | null;
   class_display_name?: string | null;
   level?: number | null;
+  current_xp?: number | null;
+  power_rating?: number | null;
+  goal_type?: string | null;
+  goal_title?: string | null;
+  goal_progress_percent?: number | null;
+  goal_cycle_xp?: number | null;
+  goal_target_xp?: number | null;
   presence_status: PresenceStatus;
   last_active_at?: string | null;
 };
@@ -39,6 +46,10 @@ export type FriendSearchStatus = "none" | "friend" | "outgoing_pending" | "incom
 export type UserSearchResult = SocialUserPreview & {
   status: FriendSearchStatus;
   request_id?: number | null;
+  rank?: number | null;
+  rating_rank?: number | null;
+  score?: number | null;
+  is_current_user?: boolean;
 };
 
 export type FriendsTabKey = "friends" | "requests" | "discover";

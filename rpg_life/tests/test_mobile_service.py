@@ -149,6 +149,44 @@ def test_rewards_summary_exposes_social_feed_and_weekly_rank(db_session) -> None
     assert any(item["kind"] == "friend_activity" for item in pulse["feed_items"])
 
 
+def test_get_public_user_profile_returns_goal_and_equipment_overview(db_session) -> None:
+    viewer = _create_user(db_session, "viewer@example.com")
+    target = _create_user(db_session, "public-target@example.com")
+    progress = _create_progress(db_session, target.id, class_name="mage")
+    target.selected_goal_type = "financial_growth"
+    target.goal_progress_percent = 48
+    target.goal_cycle_xp = 960
+    target.goal_target_xp = 2000
+    progress.level = 7
+    progress.current_xp = 350
+    db_session.commit()
+
+    payload = mobile_service.get_public_user_profile(db_session, viewer, target.id)
+
+    assert payload["user"]["id"] == target.id
+    assert payload["user"]["goal_type"] == "financial_growth"
+    assert payload["user"]["goal_title"]
+    assert payload["user"]["power_rating"] > 0
+    assert payload["goal"]["goal_type"] == "financial_growth"
+    assert payload["goal"]["goal_progress_percent"] == 48
+    assert payload["character"]["class"] == "mage"
+    assert payload["character"]["level"] == 7
+    assert payload["equipment_overview"]["class_info"]["class_name"] == "mage"
+    assert payload["equipment_overview"]["bag_items"] == []
+
+
+def test_get_public_user_profile_returns_empty_character_state_when_target_has_no_progress(db_session) -> None:
+    viewer = _create_user(db_session, "viewer-no-character@example.com")
+    target = _create_user(db_session, "target-no-character@example.com")
+
+    payload = mobile_service.get_public_user_profile(db_session, viewer, target.id)
+
+    assert payload["user"]["id"] == target.id
+    assert payload["has_character"] is False
+    assert payload["character"] is None
+    assert payload["equipment_overview"] is None
+
+
 def test_claim_weekly_goal_reward_claims_first_available_tier(db_session) -> None:
     user = _create_user(db_session, "weekly-tier-claim@example.com")
     progress = _create_progress(db_session, user.id, class_name="archer")

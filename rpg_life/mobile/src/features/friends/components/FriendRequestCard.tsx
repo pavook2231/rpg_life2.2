@@ -1,11 +1,11 @@
 import React, { useMemo } from "react";
 import { StyleSheet, Text, View } from "react-native";
 
+import { getClassIcon, normalizeDisplayText } from "../../../lib/gameUi";
 import { Avatar } from "../../../ui/Avatar";
 import { Button } from "../../../ui/Button";
 import { Card } from "../../../ui/Card";
 import { radii, useThemeColors, useThemeMode } from "../../../ui/theme";
-import { getClassIcon, normalizeDisplayText } from "../../../lib/gameUi";
 import type { FriendRequestItem } from "../types";
 import { formatIdentityLabel, formatPresenceLabel } from "../utils";
 
@@ -15,14 +15,18 @@ type Props = {
   loading?: boolean;
   onAccept?: () => void;
   onDecline?: () => void;
+  onInspect?: () => void;
 };
 
-export function FriendRequestCard({ request, t, loading = false, onAccept, onDecline }: Props) {
+export function FriendRequestCard({ request, t, loading = false, onAccept, onDecline, onInspect }: Props) {
   const colors = useThemeColors();
   const themeMode = useThemeMode();
   const styles = useMemo(() => createStyles(colors, themeMode), [colors, themeMode]);
   const isIncoming = request.direction === "incoming";
   const identityLabel = formatIdentityLabel(request.user.username, request.user.friend_id);
+  const goalSummary = request.user.goal_title
+    ? `${request.user.goal_title}${typeof request.user.goal_progress_percent === "number" ? ` • ${request.user.goal_progress_percent}%` : ""}`
+    : null;
 
   return (
     <Card tone={isIncoming ? "accent" : "subtle"}>
@@ -33,6 +37,7 @@ export function FriendRequestCard({ request, t, loading = false, onAccept, onDec
             <Text style={styles.nameText}>{normalizeDisplayText(request.user.name) || "Игрок"}</Text>
             {identityLabel ? <Text style={styles.metaText}>{identityLabel}</Text> : null}
             <Text style={styles.metaText}>{formatPresenceLabel(request.user.presence_status, t)}</Text>
+            {goalSummary ? <Text style={styles.metaText}>{goalSummary}</Text> : null}
           </View>
         </View>
 
@@ -65,6 +70,15 @@ export function FriendRequestCard({ request, t, loading = false, onAccept, onDec
           <Text style={styles.pendingText}>Заявка отправлена. Ждём подтверждение от друга.</Text>
         </View>
       )}
+
+      {onInspect ? (
+        <Button
+          label="Осмотреть аккаунт"
+          icon="account-search-outline"
+          onPress={onInspect}
+          variant="secondary"
+        />
+      ) : null}
     </Card>
   );
 }

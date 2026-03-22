@@ -10,14 +10,14 @@ import {
 } from "../features/items/itemService";
 import {
   CharacterView,
-  CHARACTER_EQUIPMENT_ASSETS,
-  type Equipment as LayeredEquipment,
 } from "../components/CharacterView";
 import { Screen } from "../components/Screen";
+import { StateBlock } from "../components/StateBlock";
 import { useFeedback } from "../context/FeedbackContext";
 import { useGameInventoryEquipment, useGameProgress } from "../context/GameContext";
 import { useLocalization, useTranslation } from "../context/LocalizationContext";
 import { buildItemStatEntries, pickEquipSlot } from "../lib/equipment";
+import { mapEquipmentToLayers } from "../lib/characterEquipmentLayers";
 import { buildItemComparison } from "../lib/itemComparison";
 import { buildDerivedStats } from "../lib/gameRules";
 import { getRarityLabel, getSlotLabel, normalizeItemText } from "../lib/gameUi";
@@ -38,54 +38,6 @@ import {
 
 const LEFT_SLOTS = ["head", "neck", "shoulders", "chest", "waist", "ring1", "trinket1"] as const;
 const RIGHT_SLOTS = ["back", "main_hand", "off_hand", "wrist", "hands", "legs", "feet"] as const;
-
-function mapEquipmentToLayers(
-  entries: Array<{
-    slot: string;
-    item?: { icon?: string | null; subclass?: string | null };
-    weapon_stats?: { weapon_category?: string | null } | null;
-  }> = [],
-): LayeredEquipment {
-  const layered: LayeredEquipment = {};
-
-  function resolveLayerKey(
-    slot: keyof LayeredEquipment,
-    preferredKey: string | null | undefined,
-    fallbackKey: string,
-  ) {
-    if (preferredKey && CHARACTER_EQUIPMENT_ASSETS[slot]?.[preferredKey]) {
-      return preferredKey;
-    }
-    return CHARACTER_EQUIPMENT_ASSETS[slot]?.[fallbackKey] ? fallbackKey : undefined;
-  }
-
-  for (const entry of entries) {
-    const itemIcon = entry.item?.icon;
-
-    if (entry.slot === "head") layered.head = resolveLayerKey("head", itemIcon, "helmet1");
-    if (entry.slot === "shoulders") layered.shoulders = resolveLayerKey("shoulders", itemIcon, "shoulders1");
-    if (entry.slot === "chest") layered.chest = resolveLayerKey("chest", itemIcon, "armor1");
-    if (entry.slot === "wrist" || entry.slot === "hands") layered.wrists = resolveLayerKey("wrists", itemIcon, "wrists1");
-    if (entry.slot === "waist") layered.belt = resolveLayerKey("belt", itemIcon, "belt1");
-    if (entry.slot === "legs") layered.legs = resolveLayerKey("legs", itemIcon, "pants1");
-    if (entry.slot === "feet") layered.boots = resolveLayerKey("boots", itemIcon, "boots1");
-    if (entry.slot === "back") layered.cloak = resolveLayerKey("cloak", itemIcon, "cloak1");
-    if (entry.slot === "main_hand" || entry.slot === "off_hand" || entry.slot === "ranged") {
-      const weaponCategory = entry.weapon_stats?.weapon_category;
-      const subclass = entry.item?.subclass;
-      const hasNoMatchingLayerArt =
-        weaponCategory === "ranged" ||
-        subclass === "bow" ||
-        subclass === "staff" ||
-        subclass === "spellbook";
-      if (!hasNoMatchingLayerArt) {
-        layered.weapon = resolveLayerKey("weapon", itemIcon, "sword1");
-      }
-    }
-  }
-
-  return layered;
-}
 
 type StatHint = {
   key: string;
@@ -110,7 +62,7 @@ export function CharacterScreen() {
   const { language } = useLocalization();
   const { width } = useWindowDimensions();
   const { hero } = useGameProgress();
-  const { equipment, inventory, refreshGame } = useGameInventoryEquipment();
+  const { equipment, inventory, refreshGame, isDataConsistent, dataConsistencyError } = useGameInventoryEquipment();
   const { pushToast } = useFeedback();
   const colors = useThemeColors();
   const themeMode = useThemeMode();
@@ -424,6 +376,17 @@ export function CharacterScreen() {
           </View>
         </View>
       </Card>
+
+      {!isDataConsistent && dataConsistencyError ? (
+        <StateBlock
+          tone="warning"
+          icon="alert-circle"
+          title={translateOrFallback(t, "screens.character.dataConsistencyError", "Экипировка и характеристики не синхронизированы")}
+          description={dataConsistencyError}
+          actionLabel={t("common.retry")}
+          onAction={() => void refreshGame(true)}
+        />
+      ) : null}
 
       <ProfileHeroCard
         name={hero?.name ?? equipment?.class_info?.display_name ?? "Герой"}

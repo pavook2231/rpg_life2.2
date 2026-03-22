@@ -1,6 +1,7 @@
 import { useFocusEffect } from "@react-navigation/native";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { fetchLeaderboard, type LeaderboardEntry } from "../../api/game";
 import {
   acceptFriendRequest,
   declineFriendRequest,
@@ -18,6 +19,8 @@ import type {
   UserSearchResult,
 } from "./types";
 
+const DISCOVER_VISIBLE_LIMIT = 10;
+const DISCOVER_PAGE_SIZE = 25;
 const FRIENDS_PAGE_SIZE = 50;
 const SEARCH_PAGE_SIZE = 20;
 
@@ -28,24 +31,108 @@ type UseFriendsScreenStateArgs = {
   routeParams?: FriendsRouteParams;
 };
 
+type SocialGraphSnapshot = {
+  friends: FriendItem[];
+  requests: FriendRequestItem[];
+};
+
+function toDiscoverUser(entry: LeaderboardEntry): UserSearchResult {
+  return {
+    id: entry.user_id,
+    name: entry.name,
+    username: entry.username,
+    friend_id: entry.friend_id,
+    class_name: entry.class_name,
+    class_display_name: entry.class_display_name,
+    level: entry.class_level ?? entry.level,
+    current_xp: entry.current_xp,
+    power_rating: entry.power_rating ?? entry.score,
+    goal_type: entry.goal_type,
+    goal_title: entry.goal_title,
+    goal_progress_percent: entry.goal_progress_percent,
+    goal_cycle_xp: entry.goal_cycle_xp,
+    goal_target_xp: entry.goal_target_xp,
+    presence_status: entry.presence_status ?? "offline",
+    last_active_at: entry.last_active_at,
+    status: "none",
+    request_id: null,
+    rank: entry.rank,
+    rating_rank: entry.rank,
+    score: entry.score,
+    is_current_user: entry.is_current_user,
+  };
+}
+
+function attachRelationshipState(
+  users: UserSearchResult[],
+  friends: FriendItem[],
+  requests: FriendRequestItem[],
+) {
+  const friendIds = new Set(friends.map((friend) => friend.id));
+  const outgoingByUserId = new Map<number, number>();
+  const incomingByUserId = new Map<number, number>();
+
+  for (const request of requests) {
+    if (request.direction === "outgoing") {
+      outgoingByUserId.set(request.user.id, request.id);
+    } else {
+      incomingByUserId.set(request.user.id, request.id);
+    }
+  }
+
+  return users
+    .filter((user) => (
+      !user.is_current_user &&
+      !friendIds.has(user.id) &&
+      !incomingByUserId.has(user.id) &&
+      !outgoingByUserId.has(user.id)
+    ))
+    .map((user) => {
+      return {
+        ...user,
+        status: "none" as const,
+        request_id: null,
+      };
+    })
+    .slice(0, DISCOVER_VISIBLE_LIMIT);
+}
+
+function buildDiscoverExcludedUserIds(friends: FriendItem[], requests: FriendRequestItem[]) {
+  const excludedIds = new Set<number>();
+
+  for (const friend of friends) {
+    excludedIds.add(friend.id);
+  }
+
+  for (const request of requests) {
+    excludedIds.add(request.user.id);
+  }
+
+  return excludedIds;
+}
+
 export function useFriendsScreenState({ refreshGame, routeParams }: UseFriendsScreenStateArgs) {
   const t = useTranslation();
-  const friendsRequestRef = useRef(0);
-  const requestsRequestRef = useRef(0);
+  const discoverRequestRef = useRef(0);
+  const socialGraphRequestRef = useRef(0);
   const searchRequestRef = useRef(0);
 
   const [activeTab, setActiveTab] = useState<FriendsTabKey>("friends");
   const [friends, setFriends] = useState<FriendItem[]>([]);
   const [requests, setRequests] = useState<FriendRequestItem[]>([]);
+  const [discoverUsers, setDiscoverUsers] = useState<UserSearchResult[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<UserSearchResult[]>([]);
   const [searchSubmitted, setSearchSubmitted] = useState(false);
   const [friendsLoading, setFriendsLoading] = useState(false);
   const [requestsLoading, setRequestsLoading] = useState(false);
+  const [discoverLoading, setDiscoverLoading] = useState(false);
   const [searchLoading, setSearchLoading] = useState(false);
+  const [socialGraphReady, setSocialGraphReady] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [friendsError, setFriendsError] = useState<string | null>(null);
   const [requestsError, setRequestsError] = useState<string | null>(null);
+  const [discoverError, setDiscoverError] = useState<string | null>(null);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [sendingIds, setSendingIds] = useState<number[]>([]);
   const [respondingIds, setRespondingIds] = useState<number[]>([]);
@@ -59,50 +146,131 @@ export function useFriendsScreenState({ refreshGame, routeParams }: UseFriendsSc
     () => requests.filter((request) => request.direction === "outgoing"),
     [requests],
   );
+  const discoverSuggestions = useMemo(
+    () => attachRelationshipState(discoverUsers, friends, requests),
+    [discoverUsers, friends, requests],
+  );
+  const socialGraphLoading = friendsLoading || requestsLoading;
+  const socialGraphError = friendsError ?? requestsError;
+  const discoverActionsReady = socialGraphReady && !socialGraphLoading;
 
-  const loadFriends = useCallback(async () => {
-    const requestId = ++friendsRequestRef.current;
+  const loadSocialGraph = useCallback(async (): Promise<SocialGraphSnapshot | null> => {
+    const requestId = ++socialGraphRequestRef.current;
     setFriendsLoading(true);
-    setFriendsError(null);
-    try {
-      const payload = await fetchFriends(1, FRIENDS_PAGE_SIZE);
-      if (requestId !== friendsRequestRef.current) {
-        return;
-      }
-      setFriends(payload.items ?? []);
-    } catch (error) {
-      if (requestId !== friendsRequestRef.current) {
-        return;
-      }
-      setFriendsError(error instanceof Error ? error.message : t("screens.friends.errors.loadFriends"));
-    } finally {
-      if (requestId === friendsRequestRef.current) {
-        setFriendsLoading(false);
-      }
-    }
-  }, [t]);
-
-  const loadRequests = useCallback(async () => {
-    const requestId = ++requestsRequestRef.current;
     setRequestsLoading(true);
+    setSocialGraphReady(false);
+    setFriendsError(null);
     setRequestsError(null);
+
     try {
-      const payload = await fetchFriendRequests();
-      if (requestId !== requestsRequestRef.current) {
-        return;
+      const [friendsResult, requestsResult] = await Promise.allSettled([
+        fetchFriends(1, FRIENDS_PAGE_SIZE),
+        fetchFriendRequests(),
+      ]);
+
+      if (requestId !== socialGraphRequestRef.current) {
+        return null;
       }
-      setRequests(payload.items ?? []);
-    } catch (error) {
-      if (requestId !== requestsRequestRef.current) {
-        return;
+
+      if (friendsResult.status !== "fulfilled" || requestsResult.status !== "fulfilled") {
+        if (friendsResult.status !== "fulfilled") {
+          setFriendsError(friendsResult.reason instanceof Error ? friendsResult.reason.message : t("screens.friends.errors.loadFriends"));
+        }
+        if (requestsResult.status !== "fulfilled") {
+          setRequestsError(requestsResult.reason instanceof Error ? requestsResult.reason.message : t("screens.friends.errors.loadFriends"));
+        }
+        return null;
       }
-      setRequestsError(error instanceof Error ? error.message : t("screens.friends.errors.loadFriends"));
+
+      const nextSnapshot = {
+        friends: friendsResult.value.items ?? [],
+        requests: requestsResult.value.items ?? [],
+      };
+
+      setFriends(nextSnapshot.friends);
+      setRequests(nextSnapshot.requests);
+      setFriendsError(null);
+      setRequestsError(null);
+      setSocialGraphReady(true);
+      return nextSnapshot;
     } finally {
-      if (requestId === requestsRequestRef.current) {
+      if (requestId === socialGraphRequestRef.current) {
+        setFriendsLoading(false);
         setRequestsLoading(false);
       }
     }
   }, [t]);
+
+  const loadFriends = useCallback(async () => {
+    await loadSocialGraph();
+  }, [loadSocialGraph]);
+
+  const loadRequests = useCallback(async () => {
+    await loadSocialGraph();
+  }, [loadSocialGraph]);
+
+  const loadDiscoverUsers = useCallback(async (options?: {
+    forceRefresh?: boolean;
+    socialGraph?: SocialGraphSnapshot | null;
+  }) => {
+    const requestId = ++discoverRequestRef.current;
+    setDiscoverLoading(true);
+    setDiscoverError(null);
+    try {
+      const socialGraph = options?.socialGraph ?? { friends, requests };
+      const excludedUserIds = buildDiscoverExcludedUserIds(socialGraph.friends, socialGraph.requests);
+      const collectedUsers: UserSearchResult[] = [];
+      const seenUserIds = new Set<number>();
+      let page = 1;
+      let totalPages = 1;
+
+      while (collectedUsers.length < DISCOVER_VISIBLE_LIMIT && page <= totalPages) {
+        const payload = await fetchLeaderboard("power", "global", page, DISCOVER_PAGE_SIZE, "all_time", {
+          forceRefresh: options?.forceRefresh,
+        });
+        totalPages = Math.max(payload.pagination?.total_pages ?? 1, 1);
+
+        for (const entry of payload.items ?? []) {
+          const user = toDiscoverUser(entry);
+          if (seenUserIds.has(user.id)) {
+            continue;
+          }
+
+          seenUserIds.add(user.id);
+          if (user.is_current_user || excludedUserIds.has(user.id)) {
+            continue;
+          }
+
+          collectedUsers.push(user);
+          if (collectedUsers.length >= DISCOVER_VISIBLE_LIMIT) {
+            break;
+          }
+        }
+
+        if ((payload.items ?? []).length === 0) {
+          break;
+        }
+
+        page += 1;
+      }
+
+      if (requestId !== discoverRequestRef.current) {
+        return;
+      }
+
+      setDiscoverUsers(collectedUsers);
+    } catch (error) {
+      if (requestId !== discoverRequestRef.current) {
+        return;
+      }
+      setDiscoverUsers([]);
+      setDiscoverError(error instanceof Error ? error.message : t("screens.friends.errors.loadLeaderboard"));
+    } finally {
+      if (requestId === discoverRequestRef.current) {
+        setDiscoverLoading(false);
+      }
+    }
+  }, [friends, requests, t]);
 
   const runSearch = useCallback(async (rawQuery: string, options?: { silent?: boolean }) => {
     const query = rawQuery.trim();
@@ -149,22 +317,25 @@ export function useFriendsScreenState({ refreshGame, routeParams }: UseFriendsSc
   }, [t]);
 
   const reloadDiscover = useCallback(async () => {
-    if (!searchQuery.trim()) {
-      setSearchResults([]);
-      setSearchSubmitted(false);
-      setSearchError(null);
+    if (searchQuery.trim()) {
+      await runSearch(searchQuery, { silent: false });
       return;
     }
-    await runSearch(searchQuery, { silent: false });
-  }, [runSearch, searchQuery]);
+    const socialGraph = await loadSocialGraph();
+    if (!socialGraph) {
+      return;
+    }
+    await loadDiscoverUsers({ forceRefresh: true, socialGraph });
+  }, [loadDiscoverUsers, loadSocialGraph, runSearch, searchQuery]);
 
   const refreshAll = useCallback(async () => {
+    const socialGraph = await loadSocialGraph();
+
     await Promise.all([
-      loadFriends(),
-      loadRequests(),
+      ...(socialGraph ? [loadDiscoverUsers({ forceRefresh: true, socialGraph })] : []),
       ...(searchSubmitted && searchQuery.trim() ? [runSearch(searchQuery, { silent: true })] : []),
     ]);
-  }, [loadFriends, loadRequests, runSearch, searchQuery, searchSubmitted]);
+  }, [loadDiscoverUsers, loadSocialGraph, runSearch, searchQuery, searchSubmitted]);
 
   useFocusEffect(
     useCallback(() => {
@@ -210,7 +381,9 @@ export function useFriendsScreenState({ refreshGame, routeParams }: UseFriendsSc
     }
 
     const previousResults = searchResults;
+    const previousDiscoverUsers = discoverUsers;
     setSendingIds((current) => [...current, userId]);
+    setDiscoverUsers((current) => current.filter((user) => user.id !== userId));
     setSearchResults((current) =>
       current.map((user) => (
         user.id === userId
@@ -229,14 +402,35 @@ export function useFriendsScreenState({ refreshGame, routeParams }: UseFriendsSc
             : user
         )),
       );
-      await Promise.allSettled([loadRequests(), refreshGame(true)]);
+      setRequests((current) => {
+        if (current.some((request) => request.id === payload.request.id)) {
+          return current;
+        }
+        return [
+          {
+            id: payload.request.id,
+            status: "pending",
+            direction: "outgoing",
+            created_at: payload.request.created_at,
+            responded_at: null,
+            user: payload.request.receiver,
+          },
+          ...current,
+        ];
+      });
+      const socialGraph = await loadSocialGraph();
+      await Promise.allSettled([refreshGame(true)]);
+      if (!searchQuery.trim() && socialGraph) {
+        await loadDiscoverUsers({ forceRefresh: true, socialGraph });
+      }
     } catch (error) {
+      setDiscoverUsers(previousDiscoverUsers);
       setSearchResults(previousResults);
       setSearchError(error instanceof Error ? error.message : t("screens.friends.errors.sendRequest"));
     } finally {
       setSendingIds((current) => current.filter((entry) => entry !== userId));
     }
-  }, [loadRequests, refreshGame, searchResults, sendingIds, t]);
+  }, [discoverUsers, loadDiscoverUsers, loadSocialGraph, refreshGame, searchQuery, searchResults, sendingIds, t]);
 
   const handleRespondToRequest = useCallback(async (
     requestId: number,
@@ -249,8 +443,12 @@ export function useFriendsScreenState({ refreshGame, routeParams }: UseFriendsSc
 
     const previousRequests = requests;
     const previousSearchResults = searchResults;
+    const previousDiscoverUsers = discoverUsers;
     setRespondingIds((current) => [...current, requestId]);
     setRequests((current) => current.filter((request) => request.id !== requestId));
+    if (userId != null) {
+      setDiscoverUsers((current) => current.filter((user) => user.id !== userId));
+    }
     if (userId != null) {
       setSearchResults((current) =>
         current.map((user) => {
@@ -270,23 +468,32 @@ export function useFriendsScreenState({ refreshGame, routeParams }: UseFriendsSc
     try {
       if (action === "accept") {
         await acceptFriendRequest(requestId);
-        await Promise.allSettled([loadFriends(), loadRequests(), refreshGame(true)]);
+        const socialGraph = await loadSocialGraph();
+        await Promise.allSettled([refreshGame(true)]);
+        if (!searchQuery.trim() && socialGraph) {
+          await loadDiscoverUsers({ forceRefresh: true, socialGraph });
+        }
       } else {
         await declineFriendRequest(requestId);
-        await Promise.allSettled([loadRequests(), refreshGame(true)]);
+        const socialGraph = await loadSocialGraph();
+        await Promise.allSettled([refreshGame(true)]);
+        if (!searchQuery.trim() && socialGraph) {
+          await loadDiscoverUsers({ forceRefresh: true, socialGraph });
+        }
       }
 
       if (searchSubmitted && searchQuery.trim()) {
         await runSearch(searchQuery, { silent: true });
       }
     } catch (error) {
+      setDiscoverUsers(previousDiscoverUsers);
       setRequests(previousRequests);
       setSearchResults(previousSearchResults);
       setSearchError(error instanceof Error ? error.message : t("screens.friends.errors.sendRequest"));
     } finally {
       setRespondingIds((current) => current.filter((entry) => entry !== requestId));
     }
-  }, [loadFriends, loadRequests, refreshGame, requests, respondingIds, runSearch, searchQuery, searchResults, searchSubmitted, t]);
+  }, [discoverUsers, loadDiscoverUsers, loadSocialGraph, refreshGame, requests, respondingIds, runSearch, searchQuery, searchResults, searchSubmitted, t]);
 
   return {
     activeTab,
@@ -296,16 +503,22 @@ export function useFriendsScreenState({ refreshGame, routeParams }: UseFriendsSc
     requests,
     incomingRequests,
     outgoingRequests,
+    discoverSuggestions,
     searchQuery,
     setSearchQuery,
     searchResults,
     searchSubmitted,
     friendsLoading,
     requestsLoading,
+    socialGraphLoading,
+    socialGraphError,
+    discoverActionsReady,
+    discoverLoading,
     searchLoading,
     refreshing,
     friendsError,
     requestsError,
+    discoverError,
     searchError,
     sendingIds,
     respondingIds,

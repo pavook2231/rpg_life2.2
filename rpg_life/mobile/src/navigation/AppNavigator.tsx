@@ -21,6 +21,7 @@ import { QuestsScreen } from "../screens/QuestsScreen";
 import { RegisterScreen } from "../screens/RegisterScreen";
 import { SettingsScreen } from "../screens/SettingsScreen";
 import { ShopScreen } from "../screens/ShopScreen";
+import { SocialProfileScreen } from "../screens/SocialProfileScreen";
 import { getNavigationUnlockState } from "../lib/navigationUnlocks";
 import { fetchChallengeInvitations } from "../api/social";
 import { getGoalSetupPending } from "../storage/beginnerOnboardingStorage";
@@ -312,6 +313,7 @@ export function AppNavigator() {
           <Stack.Screen name="Stats" component={CharacterScreen} options={{ title: "Статы" }} />
           <Stack.Screen name="Friends" component={FriendsScreen} options={{ title: t("screens.friends.title") }} />
           <Stack.Screen name="Leaderboard" component={LeaderboardScreen} options={{ title: t("screens.leaderboard.title") }} />
+          <Stack.Screen name="PlayerProfile" component={SocialProfileScreen} options={{ title: "Профиль игрока" }} />
           <Stack.Screen name="Settings" component={SettingsScreen} options={{ title: t("screens.settings.title") }} />
           <Stack.Screen name="Achievements" component={AchievementsScreen} options={{ title: t("screens.profile.achievements") }} />
           <Stack.Screen name="Help" component={HelpScreen} options={{ title: t("screens.help.title") }} />

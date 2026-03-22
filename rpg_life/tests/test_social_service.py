@@ -153,6 +153,8 @@ def test_list_friends_includes_presence_status_and_rating_rank(db_session) -> No
     assert items_by_id[leader.id]["rating_rank"] == 1
     assert items_by_id[sleeper.id]["rating_rank"] == 2
     assert items_by_id[leader.id]["class_name"] == "warrior"
+    assert items_by_id[leader.id]["goal_type"] == "personal_development"
+    assert items_by_id[leader.id]["goal_title"]
 
 
 def test_list_friends_omits_inactive_friend_and_cleans_stale_link(db_session) -> None:
@@ -290,6 +292,7 @@ def test_friends_leaderboard_includes_current_user_without_friends(db_session) -
     assert leaderboard["items"][0]["rank"] == 1
     assert leaderboard["items"][0]["username"] == "solo"
     assert leaderboard["items"][0]["friend_id"] == "RPG-000001"
+    assert leaderboard["items"][0]["goal_title"]
 
 
 def test_power_leaderboard_uses_progress_power_and_shares_rank_for_ties(db_session) -> None:

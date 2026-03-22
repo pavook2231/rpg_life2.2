@@ -10,7 +10,7 @@ import {
   useWindowDimensions,
 } from "react-native";
 
-import { getCachedCatalogItems } from "../features/items/itemStore";
+import { getItemStoreSnapshot } from "../features/items/itemStore";
 import { getRarityColor, getRarityLabel, normalizeItemText } from "../lib/gameUi";
 import { Button } from "./Button";
 import { GameIcon } from "./GameIcon";
@@ -49,9 +49,66 @@ const TILE_GAP = 8;
 const WINNER_INDEX = 22;
 const REEL_SIZE = 28;
 
+const FALLBACK_REEL_POOL: RouletteItem[] = [
+  {
+    id: 101,
+    name: "Rusty Sword",
+    icon: "weapon_101_rusty_sword",
+    rarity: "common",
+    type: "weapon",
+    slot: "main_hand",
+    subclass: "sword",
+  },
+  {
+    id: 1101,
+    name: "Leather Armor",
+    icon: "armor_1101_leather_armor",
+    rarity: "common",
+    type: "armor",
+    slot: "chest",
+    subclass: "light_armor",
+  },
+  {
+    id: 2101,
+    name: "Copper Ring",
+    icon: "accessory_2101_copper_ring",
+    rarity: "common",
+    type: "accessory",
+    slot: "ring1",
+    subclass: "ring",
+  },
+  {
+    id: 205,
+    name: "Greatsword",
+    icon: "weapon_205_greatsword",
+    rarity: "rare",
+    type: "weapon",
+    slot: "main_hand",
+    subclass: "sword",
+  },
+  {
+    id: 1205,
+    name: "Ranger Hood",
+    icon: "armor_1205_ranger_hood",
+    rarity: "rare",
+    type: "armor",
+    slot: "head",
+    subclass: "hood",
+  },
+  {
+    id: 2302,
+    name: "Lucky Amulet",
+    icon: "accessory_2302_lucky_amulet",
+    rarity: "epic",
+    type: "accessory",
+    slot: "neck",
+    subclass: "amulet",
+  },
+];
+
 function buildPool() {
-  const entries = getCachedCatalogItems().filter((item) => item.type !== "chest");
-  return entries.map((item) => ({
+  const entries = Object.values(getItemStoreSnapshot().itemsById).filter((item) => item && item.type !== "chest");
+  const pool = entries.map((item) => ({
     id: item.id,
     name: item.name,
     icon: item.image || item.icon,
@@ -60,6 +117,7 @@ function buildPool() {
     slot: item.slot,
     subclass: item.subclass,
   }));
+  return pool.length ? pool : FALLBACK_REEL_POOL;
 }
 
 function pickRandomItem(pool: RouletteItem[]) {
@@ -193,12 +251,17 @@ export function ChestOpeningModal({
             </Animated.View>
           </View>
 
-          {reward ? (
+          {reward && landed ? (
             <View style={styles.rewardPanel}>
               <Text style={styles.rewardTitle}>{normalizeItemText(reward.item.name)}</Text>
               <Text style={styles.rewardMeta}>
                 {getRarityLabel(reward.rarity ?? reward.item.rarity)} | +{reward.luck_bonus_percent ?? 0}% luck bonus
               </Text>
+            </View>
+          ) : reward ? (
+            <View style={styles.rewardPanel}>
+              <Text style={styles.rewardTitle}>Рулетка крутится...</Text>
+              <Text style={styles.rewardMeta}>Награда откроется после остановки</Text>
             </View>
           ) : null}
 

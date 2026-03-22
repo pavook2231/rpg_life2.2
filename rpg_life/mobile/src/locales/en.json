@@ -336,6 +336,7 @@
       },
       "errors": {
         "failedToSave": "Failed to save",
+        "loadProfile": "Could not load the player profile.",
         "profileUpdated": "Profile updated",
         "changesSaved": "Changes saved."
       }

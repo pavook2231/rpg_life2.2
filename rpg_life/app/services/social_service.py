@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 from app import crud
 from app.core.cache import invalidate_leaderboard_cache
 from app.core.dates import utc_now
+from app.goals import get_goal_info
 from app.models import (
     Challenge,
     ChallengeInvitation,
@@ -273,6 +274,7 @@ def _serialize_social_user(
     last_active_at = primary_class.get("last_active_at") if primary_class else None
     level = primary_class.get("level") if primary_class else stats.get("level")
     current_xp = primary_class.get("current_xp", 0) if primary_class else 0
+    goal_info = get_goal_info(getattr(user, "selected_goal_type", None))
     return {
         "id": user.id,
         "name": _public_search_name(user),
@@ -283,6 +285,11 @@ def _serialize_social_user(
         "level": int(level or 1) if level is not None else None,
         "current_xp": int(current_xp or 0),
         "power_rating": _power_rating_for_progress(level, current_xp),
+        "goal_type": getattr(user, "selected_goal_type", None),
+        "goal_title": goal_info.get("title"),
+        "goal_progress_percent": int(getattr(user, "goal_progress_percent", 0) or 0),
+        "goal_cycle_xp": int(getattr(user, "goal_cycle_xp", 0) or 0),
+        "goal_target_xp": int(getattr(user, "goal_target_xp", 0) or 0),
         "presence_status": _presence_status(last_active_at),
         "last_active_at": last_active_at.isoformat() if last_active_at else None,
     }
@@ -1205,14 +1212,13 @@ def _build_leaderboard_items(
     for user in users:
         stats = stats_map.get(user.id, {})
         character = class_map.get(user.id, {})
-        level = int(character.get("level") or stats.get("level") or 1)
-        current_xp = int(character.get("current_xp") or 0)
-        power_rating = _power_rating_for_progress(level, current_xp)
+        social_preview = _serialize_social_user(user, character, stats=stats)
+        level = int(social_preview.get("level") or 1)
+        current_xp = int(social_preview.get("current_xp") or 0)
+        power_rating = int(social_preview.get("power_rating") or 0)
         item = {
+            **social_preview,
             "user_id": user.id,
-            "name": _public_search_name(user),
-            "username": user.username,
-            "friend_id": crud.user_friend_id(user),
             "level": level,
             "current_xp": current_xp,
             "power_rating": power_rating,
@@ -1222,10 +1228,6 @@ def _build_leaderboard_items(
             "class_name": character.get("class_name"),
             "class_display_name": character.get("class_display_name"),
             "class_level": level,
-            "goal_type": getattr(user, "selected_goal_type", None),
-            "goal_progress_percent": getattr(user, "goal_progress_percent", 0),
-            "goal_cycle_xp": getattr(user, "goal_cycle_xp", 0),
-            "goal_target_xp": getattr(user, "goal_target_xp", 0),
             "is_current_user": user.id == current_user_id,
         }
         item["score"] = power_rating if metric == "power" else _leaderboard_metric_value(item, metric)

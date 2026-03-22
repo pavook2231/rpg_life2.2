@@ -1,9 +1,9 @@
-import { useRoute } from "@react-navigation/native";
+import { useNavigation, useRoute } from "@react-navigation/native";
 import React, { useEffect, useMemo, useRef } from "react";
 import { RefreshControl, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 
-import { StateBlock } from "../components/StateBlock";
 import { Screen } from "../components/Screen";
+import { StateBlock } from "../components/StateBlock";
 import { useGameProgress } from "../context/GameContext";
 import { useTranslation } from "../context/LocalizationContext";
 import { FriendCard } from "../features/friends/components/FriendCard";
@@ -19,12 +19,14 @@ import { Card } from "../ui/Card";
 import { radii, useThemeColors } from "../ui/theme";
 
 export function FriendsScreen() {
+  const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const { profile, refreshGame } = useGameProgress();
   const t = useTranslation();
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const searchInputRef = useRef<TextInput | null>(null);
+  const handledFocusKeyRef = useRef<number | null>(null);
   const routeParams = route.params as FriendsRouteParams | undefined;
   const {
     activeTab,
@@ -33,16 +35,22 @@ export function FriendsScreen() {
     friends,
     incomingRequests,
     outgoingRequests,
+    discoverSuggestions,
     searchQuery,
     setSearchQuery,
     searchResults,
     searchSubmitted,
     friendsLoading,
     requestsLoading,
+    socialGraphLoading,
+    socialGraphError,
+    discoverActionsReady,
+    discoverLoading,
     searchLoading,
     refreshing,
     friendsError,
     requestsError,
+    discoverError,
     searchError,
     sendingIds,
     respondingIds,
@@ -61,11 +69,19 @@ export function FriendsScreen() {
   });
 
   const identityLabel = formatIdentityLabel(profile?.user?.username, profile?.user?.friend_id);
+  const showTopPlayers = !searchQuery.trim();
 
   useEffect(() => {
     if (activeTab !== "discover") {
       return;
     }
+    if (searchFocusKey <= 0) {
+      return;
+    }
+    if (handledFocusKeyRef.current === searchFocusKey) {
+      return;
+    }
+    handledFocusKeyRef.current = searchFocusKey;
 
     const timer = setTimeout(() => {
       searchInputRef.current?.focus();
@@ -92,6 +108,13 @@ export function FriendsScreen() {
     }
   }
 
+  function openPlayerProfile(userId: number, userName?: string | null) {
+    navigation.navigate("PlayerProfile", {
+      userId,
+      userName,
+    });
+  }
+
   return (
     <Screen
       title={t("screens.friends.title")}
@@ -110,7 +133,7 @@ export function FriendsScreen() {
           incomingCount={incomingRequests.length}
           outgoingCount={outgoingRequests.length}
           identityLabel={identityLabel}
-          onFindFriends={() => openDiscoverTab(true)}
+          onFindFriends={() => openDiscoverTab(false)}
           onShareIdentity={identityLabel ? handleShareIdentity : undefined}
         />
 
@@ -133,7 +156,7 @@ export function FriendsScreen() {
               <Button
                 label={translateOrFallback(t, "screens.friends.findFriendsTitle", "Найти друзей")}
                 icon="account-plus-outline"
-                onPress={() => openDiscoverTab(true)}
+                onPress={() => openDiscoverTab(false)}
                 variant="secondary"
                 style={styles.headerButton}
               />
@@ -161,15 +184,20 @@ export function FriendsScreen() {
                 description={translateOrFallback(
                   t,
                   "screens.friends.empty.friendsDescription",
-                  "Добавь союзников по username, чтобы видеть их уровень, рейтинг и статус активности.",
+                  "Добавь союзников по username или из топа игроков, чтобы видеть их уровень, рейтинг и статус активности.",
                 )}
                 actionLabel={translateOrFallback(t, "screens.friends.findFriendsTitle", "Найти друзей")}
-                onAction={() => openDiscoverTab(true)}
+                onAction={() => openDiscoverTab(false)}
               />
             ) : null}
 
             {friends.map((friend) => (
-              <FriendCard key={friend.id} friend={friend} t={t} />
+              <FriendCard
+                key={friend.id}
+                friend={friend}
+                t={t}
+                onInspect={() => openPlayerProfile(friend.id, friend.name)}
+              />
             ))}
           </View>
         ) : null}
@@ -212,6 +240,7 @@ export function FriendsScreen() {
                     loading={respondingIds.includes(request.id)}
                     onAccept={() => void handleRespondToRequest(request.id, "accept", request.user.id)}
                     onDecline={() => void handleRespondToRequest(request.id, "decline", request.user.id)}
+                    onInspect={() => openPlayerProfile(request.user.id, request.user.name)}
                   />
                 ))}
               </View>
@@ -225,6 +254,7 @@ export function FriendsScreen() {
                     key={request.id}
                     request={request}
                     t={t}
+                    onInspect={() => openPlayerProfile(request.user.id, request.user.name)}
                   />
                 ))}
               </View>
@@ -237,7 +267,7 @@ export function FriendsScreen() {
             <Card tone="subtle">
               <Text style={styles.sectionTitle}>{translateOrFallback(t, "screens.friends.findFriendsTitle", "Найти друзей")}</Text>
               <Text style={styles.searchHint}>
-                Ищи по username. Если игрок уже у тебя в друзьях, есть входящая заявка или запрос уже отправлен, нужный статус появится прямо в результатах.
+                Без запроса мы показываем топ-10 игроков приложения по рейтингу. Если ввести username, ниже появятся точные результаты поиска.
               </Text>
               <View style={styles.searchRow}>
                 <TextInput
@@ -272,57 +302,104 @@ export function FriendsScreen() {
               ) : null}
             </Card>
 
-            {!!searchError ? (
-              <StateBlock
-                tone="warning"
-                icon="alert-circle"
-                title={t("screens.friends.errorTitle")}
-                description={searchError}
-                actionLabel={t("common.retry")}
-                onAction={() => void reloadDiscover()}
-              />
+            {showTopPlayers ? (
+              <>
+                {!!(socialGraphError ?? discoverError) ? (
+                  <StateBlock
+                    tone="warning"
+                    icon="alert-circle"
+                    title={t("screens.friends.errorTitle")}
+                    description={socialGraphError ?? discoverError ?? undefined}
+                    actionLabel={t("common.retry")}
+                    onAction={() => void reloadDiscover()}
+                  />
+                ) : null}
+
+                {discoverLoading || ((socialGraphLoading || !discoverActionsReady) && !(socialGraphError ?? discoverError)) ? (
+                  <StateBlock tone="info" icon="timer-sand" title={t("common.loading")} />
+                ) : null}
+
+                {!discoverLoading && !socialGraphLoading && !socialGraphError && !discoverError && discoverSuggestions.length === 0 ? (
+                  <StateBlock
+                    icon="trophy-outline"
+                    title="Топ игроков пока пуст"
+                    description="Когда сервер вернёт рейтинг, здесь появятся лучшие игроки приложения, которых можно добавить в друзья."
+                  />
+                ) : null}
+
+                {!discoverLoading && !socialGraphLoading && discoverActionsReady && discoverSuggestions.length > 0 ? (
+                  <View style={styles.block}>
+                    <Text style={styles.blockTitle}>Топ-10 по рейтингу</Text>
+                    {discoverSuggestions.map((user) => {
+                      const isSending = sendingIds.includes(user.id);
+                      const isResponding = user.request_id != null && respondingIds.includes(user.request_id);
+                      return (
+                        <FriendSearchResultCard
+                          key={`discover-${user.id}`}
+                          user={user}
+                          t={t}
+                          sending={isSending}
+                          responding={isResponding}
+                          onAdd={() => void handleSendRequest(user.id)}
+                          onAccept={user.request_id ? () => void handleRespondToRequest(user.request_id!, "accept", user.id) : undefined}
+                          onDecline={user.request_id ? () => void handleRespondToRequest(user.request_id!, "decline", user.id) : undefined}
+                          onInspect={() => openPlayerProfile(user.id, user.name)}
+                        />
+                      );
+                    })}
+                  </View>
+                ) : null}
+              </>
             ) : null}
 
-            {searchLoading ? (
-              <StateBlock tone="info" icon="timer-sand" title={t("common.loading")} />
-            ) : null}
+            {!showTopPlayers ? (
+              <>
+                {!!searchError ? (
+                  <StateBlock
+                    tone="warning"
+                    icon="alert-circle"
+                    title={t("screens.friends.errorTitle")}
+                    description={searchError}
+                    actionLabel={t("common.retry")}
+                    onAction={() => void reloadDiscover()}
+                  />
+                ) : null}
 
-            {!searchLoading && !searchSubmitted ? (
-              <StateBlock
-                icon="account-search-outline"
-                title="Введите username"
-                description="Поиск работает по нику пользователя. Самого себя добавить не получится, а для уже существующих связей мы покажем корректный статус."
-              />
-            ) : null}
+                {searchLoading ? (
+                  <StateBlock tone="info" icon="timer-sand" title={t("common.loading")} />
+                ) : null}
 
-            {!searchLoading && searchSubmitted && searchResults.length === 0 ? (
-              <StateBlock
-                icon="account-search-outline"
-                title={translateOrFallback(t, "screens.friends.empty.searchTitle", "Никого не нашли")}
-                description={translateOrFallback(
-                  t,
-                  "screens.friends.empty.searchDescription",
-                  "Попробуй другой username. Если пользователь удалён или недоступен, сервер вернёт пустой результат или ошибку.",
-                )}
-              />
-            ) : null}
+                {!searchLoading && searchSubmitted && searchResults.length === 0 ? (
+                  <StateBlock
+                    icon="account-search-outline"
+                    title={translateOrFallback(t, "screens.friends.empty.searchTitle", "Никого не нашли")}
+                    description={translateOrFallback(
+                      t,
+                      "screens.friends.empty.searchDescription",
+                      "Попробуй другой username. Если пользователь удалён или недоступен, сервер вернёт пустой результат или ошибку.",
+                    )}
+                  />
+                ) : null}
 
-            {searchResults.map((user) => {
-              const isSending = sendingIds.includes(user.id);
-              const isResponding = user.request_id != null && respondingIds.includes(user.request_id);
-              return (
-                <FriendSearchResultCard
-                  key={user.id}
-                  user={user}
-                  t={t}
-                  sending={isSending}
-                  responding={isResponding}
-                  onAdd={() => void handleSendRequest(user.id)}
-                  onAccept={user.request_id ? () => void handleRespondToRequest(user.request_id!, "accept", user.id) : undefined}
-                  onDecline={user.request_id ? () => void handleRespondToRequest(user.request_id!, "decline", user.id) : undefined}
-                />
-              );
-            })}
+                {searchResults.map((user) => {
+                  const isSending = sendingIds.includes(user.id);
+                  const isResponding = user.request_id != null && respondingIds.includes(user.request_id);
+                  return (
+                    <FriendSearchResultCard
+                      key={`search-${user.id}`}
+                      user={user}
+                      t={t}
+                      sending={isSending}
+                      responding={isResponding}
+                      onAdd={() => void handleSendRequest(user.id)}
+                      onAccept={user.request_id ? () => void handleRespondToRequest(user.request_id!, "accept", user.id) : undefined}
+                      onDecline={user.request_id ? () => void handleRespondToRequest(user.request_id!, "decline", user.id) : undefined}
+                      onInspect={() => openPlayerProfile(user.id, user.name)}
+                    />
+                  );
+                })}
+              </>
+            ) : null}
           </View>
         ) : null}
       </ScrollView>

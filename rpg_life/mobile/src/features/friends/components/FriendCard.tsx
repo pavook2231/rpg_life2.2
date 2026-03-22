@@ -1,19 +1,25 @@
 import React, { useMemo } from "react";
 import { StyleSheet, Text, View } from "react-native";
 
-import { Card } from "../../../ui/Card";
-import { Avatar } from "../../../ui/Avatar";
-import { radii, useThemeColors, useThemeMode } from "../../../ui/theme";
 import { getClassIcon, normalizeDisplayText } from "../../../lib/gameUi";
+import { Avatar } from "../../../ui/Avatar";
+import { Button } from "../../../ui/Button";
+import { Card } from "../../../ui/Card";
+import { radii, useThemeColors, useThemeMode } from "../../../ui/theme";
 import type { FriendItem } from "../types";
 import { formatIdentityLabel, formatLastActive, formatPresenceLabel, translateOrFallback } from "../utils";
 
 type Props = {
   friend: FriendItem;
   t: (key: string, params?: Record<string, string | number>) => string;
+  onInspect?: () => void;
 };
 
-export function FriendCard({ friend, t }: Props) {
+function formatValue(value?: number | null) {
+  return Math.max(0, Math.trunc(Number(value || 0))).toLocaleString();
+}
+
+export function FriendCard({ friend, t, onInspect }: Props) {
   const colors = useThemeColors();
   const themeMode = useThemeMode();
   const styles = useMemo(() => createStyles(colors, themeMode), [colors, themeMode]);
@@ -22,9 +28,11 @@ export function FriendCard({ friend, t }: Props) {
   const sinceLabel = friend.friends_since ? new Date(friend.friends_since).toLocaleDateString() : null;
   const presenceLabel = formatPresenceLabel(friend.presence_status, t);
   const level = friend.level ?? friend.stats.level ?? 1;
-  const ratingLabel = friend.rating_rank ? `#${friend.rating_rank}` : "—";
-  const questsCompleted = friend.stats.quests_completed ?? 0;
-  const challengeWins = friend.stats.challenge_wins ?? 0;
+  const ratingValue = formatValue(friend.power_rating);
+  const rankLabel = friend.rating_rank ? `#${friend.rating_rank}` : "—";
+  const goalSummary = friend.goal_title
+    ? `${friend.goal_title}${typeof friend.goal_progress_percent === "number" ? ` • ${friend.goal_progress_percent}%` : ""}`
+    : null;
 
   return (
     <Card>
@@ -61,17 +69,20 @@ export function FriendCard({ friend, t }: Props) {
         </View>
         <View style={styles.statChip}>
           <Text style={styles.statLabel}>Рейтинг</Text>
-          <Text style={styles.statValue}>{ratingLabel}</Text>
+          <Text style={styles.statValue}>{ratingValue}</Text>
         </View>
         <View style={styles.statChip}>
-          <Text style={styles.statLabel}>Квесты</Text>
-          <Text style={styles.statValue}>{questsCompleted}</Text>
-        </View>
-        <View style={styles.statChip}>
-          <Text style={styles.statLabel}>Победы</Text>
-          <Text style={styles.statValue}>{challengeWins}</Text>
+          <Text style={styles.statLabel}>Место</Text>
+          <Text style={styles.statValue}>{rankLabel}</Text>
         </View>
       </View>
+
+      {goalSummary ? (
+        <View style={styles.goalPanel}>
+          <Text style={styles.goalLabel}>Цель</Text>
+          <Text style={styles.goalValue}>{goalSummary}</Text>
+        </View>
+      ) : null}
 
       <View style={styles.footerRow}>
         {sinceLabel ? <Text style={styles.footerText}>Друзья с {sinceLabel}</Text> : null}
@@ -79,6 +90,15 @@ export function FriendCard({ friend, t }: Props) {
           <Text style={styles.footerText}>Был: {lastActiveLabel}</Text>
         ) : null}
       </View>
+
+      {onInspect ? (
+        <Button
+          label="Осмотреть аккаунт"
+          icon="account-search-outline"
+          onPress={onInspect}
+          variant="secondary"
+        />
+      ) : null}
     </Card>
   );
 }
@@ -161,6 +181,26 @@ function createStyles(colors: ReturnType<typeof useThemeColors>, themeMode: Retu
       color: colors.text,
       fontSize: 15,
       fontWeight: "900",
+    },
+    goalPanel: {
+      borderRadius: radii.md,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.backgroundRaised,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      gap: 4,
+    },
+    goalLabel: {
+      color: colors.textDim,
+      fontSize: 11,
+      fontWeight: "700",
+      textTransform: "uppercase",
+    },
+    goalValue: {
+      color: colors.text,
+      fontSize: 14,
+      fontWeight: "800",
     },
     footerRow: {
       flexDirection: "row",

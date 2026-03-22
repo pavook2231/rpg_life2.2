@@ -63,7 +63,18 @@ export function HomeScreen() {
   const { width } = useWindowDimensions();
   const t = useTranslation();
   const { language } = useLocalization();
-  const { hero, profile, rewards, refreshGame, isRefreshing, todaySteps, stepSourceLabel, stepTrackingStatus } = useGameProgress();
+  const {
+    hero,
+    profile,
+    rewards,
+    refreshGame,
+    isRefreshing,
+    isDataConsistent,
+    dataConsistencyError,
+    todaySteps,
+    stepSourceLabel,
+    stepTrackingStatus,
+  } = useGameProgress();
   const { equipment, inventory } = useGameInventoryEquipment();
   const { pushToast } = useFeedback();
   const { isOnline, pendingActionsCount } = useOffline();
@@ -710,6 +721,17 @@ export function HomeScreen() {
               ? t("offline.syncingDescription", { count: pendingActionsCount })
               : t("offline.offlineDescription", { count: pendingActionsCount })
           }
+        />
+      ) : null}
+
+      {!isDataConsistent && dataConsistencyError ? (
+        <StateBlock
+          tone="warning"
+          icon="alert-circle"
+          title={translateOrFallback(t, "screens.home.quick.syncDataErrorTitle", "Данные героя требуют повторной синхронизации")}
+          description={dataConsistencyError}
+          actionLabel={t("common.retry")}
+          onAction={() => void refreshGame(true)}
         />
       ) : null}
 
