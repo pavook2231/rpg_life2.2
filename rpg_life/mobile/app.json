@@ -2,7 +2,7 @@
   "expo": {
     "name": "RPG Life",
     "slug": "rpg-life",
-    "version": "1.2",
+    "version": "1.3",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "scheme": "rpglife",
@@ -18,7 +18,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.rpglife.mobile",
-      "buildNumber": "5",
+      "buildNumber": "6",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSHealthShareUsageDescription": "This app uses HealthKit to track your daily steps for fitness goals.",
@@ -27,7 +27,7 @@
     },
     "android": {
       "package": "com.rpglife.mobile",
-      "versionCode": 5,
+      "versionCode": 6,
       "permissions": [
         "android.permission.BODY_SENSORS",
         "com.google.android.gms.permission.ACTIVITY_RECOGNITION"
@@ -56,6 +56,8 @@
     },
     "extra": {
       "apiBaseUrl": "https://rpglife.online/api/v1",
+      "allowCustomApiOverride": false,
+      "requireHttps": true,
       "eas": {
         "projectId": "161a1a7b-1136-4d34-88e1-3e0e6297c89c"
       }

@@ -5,9 +5,11 @@ import { probeApiConnection } from "../api/auth";
 import { SocialAuthSection } from "../components/SocialAuthSection";
 import { Screen } from "../components/Screen";
 import {
+  ALLOW_CUSTOM_API_OVERRIDE,
   DEFAULT_API_BASE_URL,
   isDeprecatedLocalApiBaseUrl,
   normalizeApiBaseUrl,
+  tryNormalizeApiBaseUrl,
 } from "../config/env";
 import { useAuth } from "../context/AuthContext";
 import { useTranslation } from "../context/LocalizationContext";
@@ -47,14 +49,14 @@ export function LoginScreen({ onShowRegister }: Props) {
   const [isCheckingApi, setIsCheckingApi] = useState(false);
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [showApiTools, setShowApiTools] = useState(false);
-  const showDeveloperTools = __DEV__;
+  const showDeveloperTools = ALLOW_CUSTOM_API_OVERRIDE;
 
   useEffect(() => {
     getStoredApiBaseUrl()
       .then((storedValue) => {
         const initialApiBaseUrl =
           storedValue && !isDeprecatedLocalApiBaseUrl(storedValue)
-            ? normalizeApiBaseUrl(storedValue)
+            ? tryNormalizeApiBaseUrl(storedValue) ?? normalizeApiBaseUrl(DEFAULT_API_BASE_URL)
             : normalizeApiBaseUrl(DEFAULT_API_BASE_URL);
         setApiBaseUrl(initialApiBaseUrl);
       })
@@ -100,7 +102,20 @@ export function LoginScreen({ onShowRegister }: Props) {
   async function handleSaveApiUrl() {
     try {
       setIsSavingApi(true);
-      const normalized = normalizeApiBaseUrl(apiBaseUrl);
+      const normalized = tryNormalizeApiBaseUrl(apiBaseUrl);
+      if (!normalized) {
+        await pushToast({
+          title: t("screens.login.connectionFailed"),
+          description: translateOrFallback(
+            t,
+            "screens.login.quick.invalidApiUrl",
+            "Некорректный API URL. Используйте формат https://example.com/api/v1",
+          ),
+          icon: "cloud-alert-outline",
+          tone: "warning",
+        });
+        return;
+      }
       await saveApiBaseUrl(normalized);
       setApiBaseUrl(normalized);
       await pushToast(
@@ -141,7 +156,20 @@ export function LoginScreen({ onShowRegister }: Props) {
   async function handleCheckApi() {
     try {
       setIsCheckingApi(true);
-      const normalized = normalizeApiBaseUrl(apiBaseUrl);
+      const normalized = tryNormalizeApiBaseUrl(apiBaseUrl);
+      if (!normalized) {
+        await pushToast({
+          title: t("screens.login.connectionFailed"),
+          description: translateOrFallback(
+            t,
+            "screens.login.quick.invalidApiUrl",
+            "Некорректный API URL. Используйте формат https://example.com/api/v1",
+          ),
+          icon: "cloud-alert-outline",
+          tone: "warning",
+        });
+        return;
+      }
       await saveApiBaseUrl(normalized);
       setApiBaseUrl(normalized);
       const result = await probeApiConnection();
