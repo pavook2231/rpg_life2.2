@@ -1,8 +1,9 @@
-import { useFocusEffect, useRoute } from "@react-navigation/native";
+import { useFocusEffect, useNavigation, useRoute } from "@react-navigation/native";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
-import { fetchLeaderboard, type LeaderboardEntry, type LeaderboardPeriod, type LeaderboardResponse } from "../api/game";
+import { type LeaderboardEntry, type LeaderboardPeriod, type LeaderboardResponse } from "../api/game";
+import { fetchGlobalLeaderboard } from "../api/social";
 import { Card } from "../components/Card";
 import { Screen } from "../components/Screen";
 import { StateBlock } from "../components/StateBlock";
@@ -30,6 +31,7 @@ function translateOrFallback(
 }
 
 export function LeaderboardScreen() {
+  const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const [metric, setMetric] = useState<(typeof metrics)[number]>("level");
   const [period, setPeriod] = useState<LeaderboardPeriod>("weekly");
@@ -50,7 +52,7 @@ export function LeaderboardScreen() {
 
   useEffect(() => {
     setPayload(null);
-    fetchLeaderboard(metric, "global", 1, 20, period, { forceRefresh: true })
+    fetchGlobalLeaderboard(metric, 1, 20, period)
       .then((nextPayload) => {
         setPayload(nextPayload);
         setItems(nextPayload.items);
@@ -87,6 +89,16 @@ export function LeaderboardScreen() {
   }
 
   const periodEndsLabel = payload?.period_ends_at ? new Date(payload.period_ends_at).toLocaleDateString() : null;
+  const emptyStateTitle = translateOrFallback(
+    t,
+    "screens.leaderboard.emptyTitle",
+    "РџРѕРєР° РЅРµС‚ РґР°РЅРЅС‹С… РґР»СЏ РіР»РѕР±Р°Р»СЊРЅРѕРіРѕ СЂРµР№С‚РёРЅРіР°",
+  );
+  const emptyStateDescription = translateOrFallback(
+    t,
+    "screens.leaderboard.emptyDescription",
+    "РЎРЅР°С‡Р°Р»Р° СЃРґРµР»Р°Р№ РЅРµСЃРєРѕР»СЊРєРѕ С€Р°РіРѕРІ Рє С†РµР»Рё РёР»Рё Р·Р°РєСЂРѕР№ РїРµСЂРІРѕРµ Р·Р°РґР°РЅРёРµ, С‡С‚РѕР±С‹ РїРѕСЏРІРёС‚СЃСЏ РїСЂРѕРіСЂРµСЃСЃ РІ СЂРµР№С‚РёРЅРіРµ.",
+  );
 
   return (
     <Screen title={t("screens.leaderboard.title")} subtitle={t("screens.leaderboard.subtitle")}>
@@ -137,8 +149,10 @@ export function LeaderboardScreen() {
       {!error && payload && items.length === 0 ? (
         <StateBlock
           icon="flag-checkered"
-          title={t("screens.friends.empty.leaderboardTitle")}
-          description={t("screens.friends.empty.leaderboardDescription")}
+          title={emptyStateTitle}
+          description={emptyStateDescription}
+          actionLabel={t("common.createGoal")}
+          onAction={() => navigation.navigate("GoalSelect")}
         />
       ) : null}
       {items.map((item) => (

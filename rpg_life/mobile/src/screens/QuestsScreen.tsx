@@ -1,3 +1,4 @@
+import { useNavigation } from "@react-navigation/native";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert, Modal, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 
@@ -24,7 +25,18 @@ function questKindLabel(quest: QuestItem, t: (key: string, params?: Record<strin
   return t("screens.quests.quick.kind.daily");
 }
 
+function translateOrFallback(
+  t: (key: string, params?: Record<string, string | number>) => string,
+  key: string,
+  fallback: string,
+  params?: Record<string, string | number>,
+) {
+  const translated = t(key, params);
+  return translated === key ? fallback : translated;
+}
+
 export function QuestsScreen() {
+  const navigation = useNavigation<any>();
   const t = useTranslation();
   const { hero, applyQuestResult, todaySteps, stepSourceLabel } = useGameProgress();
   const { pushToast } = useFeedback();
@@ -41,6 +53,12 @@ export function QuestsScreen() {
   const [isCreating, setIsCreating] = useState(false);
   const [isRefreshingList, setIsRefreshingList] = useState(false);
   const [completingQuestId, setCompletingQuestId] = useState<number | null>(null);
+  const [recentQuestReward, setRecentQuestReward] = useState<{
+    title: string;
+    xp: number;
+    gold: number;
+    firstWin: boolean;
+  } | null>(null);
 
   const loadQuests = useCallback(async (forceRefresh = false) => {
     setIsLoading(true);
@@ -77,12 +95,53 @@ export function QuestsScreen() {
         total: limits.completed_total,
       })
     : t("screens.quests.quick.limitsSummaryEmpty");
+  const showFirstQuestGuide =
+    status === "active" &&
+    !isLoading &&
+    filteredQuests.length > 0 &&
+    !quests.some((quest) => quest.is_completed) &&
+    (hero?.level ?? 1) <= 1 &&
+    (hero?.current_xp ?? 0) <= 0;
+  const firstQuestGuideItems = [
+    {
+      title: translateOrFallback(t, "screens.quests.quick.firstGuideChooseTitle", "Выбери самое простое задание"),
+      description: translateOrFallback(
+        t,
+        "screens.quests.quick.firstGuideChooseDescription",
+        "Для старта не нужен идеальный квест. Достаточно закрыть один понятный шаг сегодня.",
+      ),
+    },
+    {
+      title: translateOrFallback(t, "screens.quests.quick.firstGuideCompleteTitle", "Заверши его сегодня"),
+      description: translateOrFallback(
+        t,
+        "screens.quests.quick.firstGuideCompleteDescription",
+        "Первое выполненное задание запускает настоящий цикл прогресса: опыт, награда и рост героя.",
+      ),
+    },
+    {
+      title: translateOrFallback(t, "screens.quests.quick.firstGuideRewardTitle", "Посмотри, что открылось дальше"),
+      description: translateOrFallback(
+        t,
+        "screens.quests.quick.firstGuideRewardDescription",
+        "После первой победы станет понятнее, какие задания, награды и усиления доступны дальше.",
+      ),
+    },
+  ];
 
   async function handleComplete(questId: number) {
     try {
+      const hadCompletedBefore = quests.some((quest) => quest.is_completed);
+      const questTitle = quests.find((quest) => quest.id === questId)?.title ?? t("screens.quests.title");
       setCompletingQuestId(questId);
       setQuests((current) => current.map((quest) => (quest.id === questId ? { ...quest, is_completed: true } : quest)));
       const result = await completeQuest(questId);
+      setRecentQuestReward({
+        title: questTitle,
+        xp: result?.xp_earned ?? 0,
+        gold: result?.crystals_earned ?? 0,
+        firstWin: !hadCompletedBefore,
+      });
       await Promise.all([applyQuestResult(result), loadQuests(true)]);
     } catch (error) {
       await loadQuests(true).catch(() => undefined);
@@ -208,6 +267,84 @@ export function QuestsScreen() {
           />
         </View>
       </Card>
+
+      {showFirstQuestGuide ? (
+        <Card tone="subtle">
+          <Text style={styles.guideTitle}>
+            {translateOrFallback(t, "screens.quests.quick.firstGuideTitle", "Как пройти первый шаг")}
+          </Text>
+          <Text style={styles.guideSubtitle}>
+            {translateOrFallback(
+              t,
+              "screens.quests.quick.firstGuideSubtitle",
+              "Сейчас тебе не нужно делать всё сразу. Достаточно одного закрытого задания, чтобы увидеть первый результат.",
+            )}
+          </Text>
+          <View style={styles.guideList}>
+            {firstQuestGuideItems.map((item, index) => (
+              <View key={item.title} style={styles.guideItem}>
+                <View style={styles.guideBadge}>
+                  <Text style={styles.guideBadgeText}>{index + 1}</Text>
+                </View>
+                <View style={styles.guideCopy}>
+                  <Text style={styles.guideItemTitle}>{item.title}</Text>
+                  <Text style={styles.guideItemDescription}>{item.description}</Text>
+                </View>
+              </View>
+            ))}
+          </View>
+        </Card>
+      ) : null}
+
+      {recentQuestReward ? (
+        <Card tone={recentQuestReward.firstWin ? "accent" : "subtle"}>
+          <Text style={styles.guideTitle}>
+            {recentQuestReward.firstWin
+              ? translateOrFallback(t, "screens.quests.quick.firstRewardTitle", "Первый успех")
+              : translateOrFallback(t, "screens.quests.quick.latestRewardTitle", "Последний результат")}
+          </Text>
+          <Text style={styles.guideSubtitle}>
+            {recentQuestReward.firstWin
+              ? translateOrFallback(
+                  t,
+                  "screens.quests.quick.firstRewardDescription",
+                  `Ты уже закрыл первое задание: ${recentQuestReward.title}. Теперь прогресс реально пошел вперед.`,
+                )
+              : translateOrFallback(
+                  t,
+                  "screens.quests.quick.latestRewardDescription",
+                  `Задание выполнено: ${recentQuestReward.title}. Можно закрепить результат следующим шагом.`,
+                )}
+          </Text>
+          <View style={styles.rewardSummaryRow}>
+            <View style={styles.rewardSummaryChip}>
+              <Text style={styles.rewardSummaryLabel}>XP</Text>
+              <Text style={styles.rewardSummaryValue}>+{recentQuestReward.xp}</Text>
+            </View>
+            <View style={styles.rewardSummaryChip}>
+              <Text style={styles.rewardSummaryLabel}>{t("common.gold")}</Text>
+              <Text style={styles.rewardSummaryValue}>+{recentQuestReward.gold}</Text>
+            </View>
+          </View>
+          <View style={styles.actionRow}>
+            {recentQuestReward.firstWin ? (
+              <Button
+                label={t("screens.home.shop")}
+                icon="storefront-outline"
+                onPress={() => navigation.navigate("Shop")}
+                style={styles.refreshButton}
+              />
+            ) : null}
+            <Button
+              label={translateOrFallback(t, "common.continue", "Продолжить")}
+              icon="arrow-right"
+              variant="secondary"
+              onPress={() => setRecentQuestReward(null)}
+              style={styles.refreshButton}
+            />
+          </View>
+        </Card>
+      ) : null}
 
       <Card>
         <Text style={styles.filterTitle}>{t("screens.quests.quick.show")}</Text>
@@ -342,6 +479,80 @@ function createStyles(colors: ReturnType<typeof useThemeColors>, themeMode: Retu
     actionRow: {
       flexDirection: "row",
       gap: 8,
+    },
+    guideTitle: {
+      color: colors.text,
+      fontSize: 16,
+      fontWeight: "900",
+    },
+    guideSubtitle: {
+      color: colors.textMuted,
+      fontSize: 13,
+      lineHeight: 19,
+    },
+    guideList: {
+      gap: 10,
+    },
+    guideItem: {
+      flexDirection: "row",
+      gap: 10,
+      alignItems: "flex-start",
+    },
+    guideBadge: {
+      width: 26,
+      height: 26,
+      borderRadius: 999,
+      alignItems: "center",
+      justifyContent: "center",
+      borderWidth: 1,
+      borderColor: colors.primary,
+      backgroundColor: themeMode === "light" ? "#f6e8cf" : "#112036",
+      marginTop: 2,
+    },
+    guideBadgeText: {
+      color: themeMode === "light" ? "#7a4b12" : "#bfdbfe",
+      fontSize: 12,
+      fontWeight: "900",
+    },
+    guideCopy: {
+      flex: 1,
+      gap: 2,
+    },
+    guideItemTitle: {
+      color: colors.text,
+      fontSize: 13,
+      fontWeight: "800",
+    },
+    guideItemDescription: {
+      color: colors.textMuted,
+      fontSize: 12,
+      lineHeight: 17,
+    },
+    rewardSummaryRow: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 8,
+    },
+    rewardSummaryChip: {
+      flexGrow: 1,
+      minWidth: 112,
+      borderRadius: radii.md,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.backgroundInset,
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+      gap: 2,
+    },
+    rewardSummaryLabel: {
+      color: colors.textMuted,
+      fontSize: 10,
+      fontWeight: "700",
+    },
+    rewardSummaryValue: {
+      color: colors.text,
+      fontSize: 14,
+      fontWeight: "900",
     },
     refreshButton: {
       flex: 1,

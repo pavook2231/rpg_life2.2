@@ -49,6 +49,47 @@ const CLASS_BASE_STYLES: Record<string, StyleProp<ImageStyle>> = {
   },
 };
 
+const HEAD_LAYER: LayeredEquipmentAsset = {
+  main: require("../../assets/equipment/head/helmet1.png"),
+};
+
+const SHOULDERS_LAYER: LayeredEquipmentAsset = {
+  main: require("../../assets/equipment/shoulders/shoulders1.png"),
+};
+
+const CHEST_LAYER: LayeredEquipmentAsset = {
+  back: require("../../assets/equipment/chest/armor1_back.png"),
+  front: require("../../assets/equipment/chest/armor1_front.png"),
+};
+
+const WRISTS_LAYER: LayeredEquipmentAsset = {
+  main: require("../../assets/equipment/wrists/wrists1.png"),
+};
+
+const BELT_LAYER: LayeredEquipmentAsset = {
+  main: require("../../assets/equipment/belt/belt1.png"),
+};
+
+const LEGS_LAYER: LayeredEquipmentAsset = {
+  main: require("../../assets/equipment/legs/pants1.png"),
+};
+
+const BOOTS_LAYER: LayeredEquipmentAsset = {
+  main: require("../../assets/equipment/boots/boots1.png"),
+};
+
+const CLOAK_LAYER: LayeredEquipmentAsset = {
+  main: require("../../assets/equipment/cloak/cloak1.png"),
+};
+
+const WEAPON_LAYER: LayeredEquipmentAsset = {
+  main: require("../../assets/equipment/weapons/sword1.png"),
+};
+
+function aliasEntries(asset: LayeredEquipmentAsset, aliases: string[]) {
+  return Object.fromEntries(aliases.map((alias) => [alias, asset])) as Record<string, LayeredEquipmentAsset>;
+}
+
 /**
  * React Native / Expo cannot reliably require local PNG files from a runtime string path.
  * The registry below is the safe way to bind an item id to a bundled PNG layer.
@@ -57,50 +98,119 @@ const CLASS_BASE_STYLES: Record<string, StyleProp<ImageStyle>> = {
  */
 export const CHARACTER_EQUIPMENT_ASSETS: EquipmentRegistry = {
   head: {
-    helmet1: {
-      main: require("../../assets/equipment/head/helmet1.png"),
-    },
+    helmet1: HEAD_LAYER,
+    ...aliasEntries(HEAD_LAYER, [
+      "armor_1102_chain_helmet",
+      "armor_1205_ranger_hood",
+      "armor_1304_wizard_hat",
+      "head_2",
+      "e9c20b70_8880_41ec_a452_aba7dd27a517",
+      "hood",
+      "helmet",
+      "wizard_hat",
+    ]),
   },
   shoulders: {
-    shoulders1: {
-      main: require("../../assets/equipment/shoulders/shoulders1.png"),
-    },
+    shoulders1: SHOULDERS_LAYER,
+    ...aliasEntries(SHOULDERS_LAYER, ["armor_1202_plate_shoulders", "shoulders"]),
   },
   chest: {
-    armor1: {
-      back: require("../../assets/equipment/chest/armor1_back.png"),
-      front: require("../../assets/equipment/chest/armor1_front.png"),
-    },
+    armor1: CHEST_LAYER,
+    ...aliasEntries(CHEST_LAYER, [
+      "armor_1101_leather_armor",
+      "armor_1201_steel_breastplate",
+      "armor_1204_magic_robe",
+      "armor_1301_full_plate",
+      "armor_1401_paladin_armor",
+      "armor_1402_wind_mail",
+      "armor_1403_archmage_robes",
+      "armor_1501_immortal_armor",
+      "armor_1502_shadow_armor",
+      "armor_1503_prophet_robes",
+      "chest_armor",
+      "robe",
+      "armor",
+    ]),
   },
   wrists: {
-    wrists1: {
-      main: require("../../assets/equipment/wrists/wrists1.png"),
-    },
+    wrists1: WRISTS_LAYER,
+    ...aliasEntries(WRISTS_LAYER, [
+      "armor_1104_leather_gloves",
+      "gloves1",
+      "gloves2",
+      "gloves_black",
+      "gloves_green",
+      "gloves_red",
+      "glove",
+      "gloves",
+    ]),
   },
   belt: {
-    belt1: {
-      main: require("../../assets/equipment/belt/belt1.png"),
-    },
+    belt1: BELT_LAYER,
+    ...aliasEntries(BELT_LAYER, [
+      "armor_1203_mail_belt",
+      "armor_1302_dragon_belt",
+      "poyas",
+      "poyas1",
+      "poyas2",
+      "poyas3",
+      "poyas_purple",
+      "belt",
+    ]),
   },
   legs: {
-    pants1: {
-      main: require("../../assets/equipment/legs/pants1.png"),
-    },
+    pants1: LEGS_LAYER,
+    ...aliasEntries(LEGS_LAYER, ["armor_1103_cloth_leggings", "pants", "leggings"]),
   },
   boots: {
-    boots1: {
-      main: require("../../assets/equipment/boots/boots1.png"),
-    },
+    boots1: BOOTS_LAYER,
+    ...aliasEntries(BOOTS_LAYER, ["armor_1105_leather_boots", "boots"]),
   },
   cloak: {
-    cloak1: {
-      main: require("../../assets/equipment/cloak/cloak1.png"),
-    },
+    cloak1: CLOAK_LAYER,
+    ...aliasEntries(CLOAK_LAYER, [
+      "armor_1303_shadow_cloak",
+      "armor_1305_invisibility_cloak",
+      "plash_blue",
+      "plash_gray",
+      "plash_green",
+      "plash_purple",
+      "plash_red",
+      "cloak",
+    ]),
   },
   weapon: {
-    sword1: {
-      main: require("../../assets/equipment/weapons/sword1.png"),
-    },
+    sword1: WEAPON_LAYER,
+    ...aliasEntries(WEAPON_LAYER, [
+      "weapon_101",
+      "weapon_101_rusty_sword",
+      "weapon_104",
+      "weapon_104_stone_axe",
+      "weapon_105",
+      "weapon_105_bone_dagger",
+      "weapon_106",
+      "weapon_106_recruit_mace",
+      "weapon_201_steel_sword",
+      "weapon_204",
+      "weapon_204_battle_axe",
+      "weapon_205",
+      "weapon_205_greatsword",
+      "weapon_206",
+      "weapon_206_shadow_daggers",
+      "weapon_301_elven_blade",
+      "weapon_401",
+      "weapon_401_dragon_blade",
+      "weapon_501_excalibur",
+      "weapon_502",
+      "weapon_502_thunder_axe",
+      "sword",
+      "blade",
+      "axe",
+      "dagger",
+      "daggers",
+      "mace",
+      "greatsword",
+    ]),
   },
 };
 

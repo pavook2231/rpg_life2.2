@@ -704,6 +704,16 @@ async def auth_refresh(request: Request, payload: RefreshTokenSchema, db: Sessio
     return success_response(auth_service.refresh_access_token(db, payload.refresh_token), "РўРѕРєРµРЅ РѕР±РЅРѕРІР»РµРЅ")
 
 
+@router.post(
+    "/auth/logout",
+    summary="Р’С‹С…РѕРґ РёР· РјРѕР±РёР»СЊРЅРѕР№ СЃРµСЃСЃРёРё",
+    description="РћС‚Р·С‹РІ РєРѕРЅРєСЂРµС‚РЅРѕР№ refresh-СЃРµСЃСЃРёРё РјРѕР±РёР»СЊРЅРѕРіРѕ РєР»РёРµРЅС‚Р°.",
+)
+async def auth_logout(request: Request, payload: RefreshTokenSchema, db: Session = Depends(get_db)):
+    await enforce_rate_limit(request, bucket="mobile-logout", limit=20, window_seconds=300)
+    return success_response(auth_service.logout_mobile_session(db, payload.refresh_token), "РЎРµСЃСЃРёСЏ Р·Р°РІРµСЂС€РµРЅР°")
+
+
 @router.get("/auth/providers", summary="Available social auth providers")
 async def auth_providers():
     return success_response({"providers": auth_service.get_social_auth_providers()}, "Social auth providers loaded")

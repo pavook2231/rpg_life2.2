@@ -395,7 +395,6 @@ def _serialize_friend_request(request: FriendRequest, current_user_id: int) -> d
             "name": other_user.name or other_user.email,
             "username": other_user.username,
             "friend_id": crud.user_friend_id(other_user),
-            "email": other_user.email,
         },
     }
 
@@ -429,6 +428,12 @@ def list_friends(
     sort_order: str = "asc",
 ) -> dict:
     crud.backfill_missing_usernames(db)
+    if search:
+        normalized_search = normalize_username_lookup(search)
+        public_user_id = parse_public_user_id(search)
+        if not normalized_search and not public_user_id:
+            return _paginate([], page, page_size)
+
     query = (
         db.query(Friendship)
         .options(joinedload(Friendship.friend))
@@ -459,7 +464,6 @@ def list_friends(
                 "name": friend.name or friend.email,
                 "username": friend.username,
                 "friend_id": crud.user_friend_id(friend),
-                "email": friend.email,
                 "stats": stats,
                 "friends_since": row.created_at.isoformat(),
             }

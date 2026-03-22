@@ -79,8 +79,6 @@ export function HomeScreen() {
   const dailyBonus = rewards?.daily_bonus ?? null;
   const weeklyGoal = rewards?.weekly_goal ?? null;
   const seasonalGoal = rewards?.seasonal_goal ?? null;
-  const socialPulse = rewards?.social_pulse ?? null;
-  const socialFeedItems = socialPulse?.feed_items?.slice(0, 3) ?? [];
   const unlockState = useMemo(
     () =>
       getNavigationUnlockState({
@@ -162,18 +160,6 @@ export function HomeScreen() {
             icon: "shield-account",
             onPress: () => navigation.navigate("Character"),
           }
-        : unlockState.socialUnlocked && !unlockState.hasFriends
-      ? {
-          label: t("common.findFriends"),
-          icon: "account-multiple-outline",
-          onPress: () => handleSocialAction("friends"),
-        }
-      : unlockState.coopUnlocked
-        ? {
-            label: t("navigation.coopTasks"),
-            icon: "account-multiple",
-            onPress: () => handleSocialAction("coop"),
-          }
         : unlockState.shopUnlocked
           ? {
               label: t("screens.home.shop"),
@@ -181,7 +167,6 @@ export function HomeScreen() {
               onPress: () => navigation.navigate("Shop"),
             }
           : null;
-  const socialSurfaceUnlocked = unlockState.hasEquippedItems || unlockState.hasFriends;
   const firstWeekProgram = [
     {
       title: translateOrFallback(t, "screens.home.quick.programDayOneTitle", "Определи направление"),
@@ -245,11 +230,11 @@ export function HomeScreen() {
       key: "goal",
       icon: "flag-checkered",
       done: !needsGoalSetup,
-      title: translateOrFallback(t, "screens.home.quick.onboardingGoalTitle", "Choose a goal"),
+      title: translateOrFallback(t, "screens.home.quick.onboardingGoalTitle", "Выбери цель"),
       description: translateOrFallback(
         t,
         "screens.home.quick.onboardingGoalDescription",
-        "This gives the app a clear direction for quests and progress.",
+        "После этого приложение начнет давать более точные задания и понятный прогресс.",
       ),
       actionLabel: t("common.createGoal"),
       onPress: () => navigation.navigate("GoalSelect"),
@@ -258,11 +243,11 @@ export function HomeScreen() {
       key: "quest",
       icon: "notebook-outline",
       done: unlockState.hasQuestProgress,
-      title: translateOrFallback(t, "screens.home.quick.onboardingQuestTitle", "Complete the first quest"),
+      title: translateOrFallback(t, "screens.home.quick.onboardingQuestTitle", "Закрой первое задание"),
       description: translateOrFallback(
         t,
         "screens.home.quick.onboardingQuestDescription",
-        "The first completed quest starts the real progression loop.",
+        "Первое выполненное задание запускает настоящий цикл прогресса.",
       ),
       actionLabel: t("screens.home.toQuests"),
       onPress: () => navigation.navigate("Quests"),
@@ -271,11 +256,11 @@ export function HomeScreen() {
       key: "item",
       icon: "storefront-outline",
       done: unlockState.hasInventoryItems,
-      title: translateOrFallback(t, "screens.home.quick.onboardingItemTitle", "Get the first item"),
+      title: translateOrFallback(t, "screens.home.quick.onboardingItemTitle", "Получи первый предмет"),
       description: translateOrFallback(
         t,
         "screens.home.quick.onboardingItemDescription",
-        "Gear is what turns quests into long-term RPG growth.",
+        "Первый предмет связывает задания с развитием героя и делает прогресс заметным.",
       ),
       actionLabel: t("screens.home.shop"),
       onPress: () => navigation.navigate("Shop"),
@@ -284,33 +269,26 @@ export function HomeScreen() {
       key: "equip",
       icon: "shield-account",
       done: unlockState.hasEquippedItems,
-      title: translateOrFallback(t, "screens.home.quick.onboardingEquipTitle", "Equip the first upgrade"),
+      title: translateOrFallback(t, "screens.home.quick.onboardingEquipTitle", "Экипируй первый предмет"),
       description: translateOrFallback(
         t,
         "screens.home.quick.onboardingEquipDescription",
-        "Once you equip something, stats and rewards start to matter immediately.",
+        "После экипировки бонусы к статам и наградам начинают работать сразу.",
       ),
       actionLabel: t("screens.home.character"),
       onPress: () => navigation.navigate("Character"),
-    },
-    {
-      key: "friend",
-      icon: "account-multiple-outline",
-      done: unlockState.hasFriends,
-      title: translateOrFallback(t, "screens.home.quick.onboardingFriendTitle", "Add the first friend"),
-      description: translateOrFallback(
-        t,
-        "screens.home.quick.onboardingFriendDescription",
-        "This unlocks the social layer: rivalry, leaderboards, and co-op.",
-      ),
-      actionLabel: t("common.findFriends"),
-      onPress: () => handleSocialAction("friends"),
     },
   ];
   const onboardingCompletedCount = onboardingSteps.filter((step) => step.done).length;
   const nextOnboardingStep = onboardingSteps.find((step) => !step.done) ?? null;
   const showOnboardingRoadmap = onboardingCompletedCount < onboardingSteps.length;
   const showAdvancedHome = !showOnboardingRoadmap && unlockState.hasQuestProgress;
+  const showDeepGuideCards = showAdvancedHome && unlockState.hasEquippedItems;
+  const showFirstWinCard =
+    !needsGoalSetup &&
+    unlockState.hasQuestProgress &&
+    unlockState.inventoryResolved &&
+    !unlockState.hasInventoryItems;
   const currentProgramDay = Math.min(firstWeekProgram.length, Math.max(1, onboardingCompletedCount + 1));
   const currentProgramFocus = firstWeekProgram[currentProgramDay - 1];
   const stepStatusDetails =
@@ -390,40 +368,28 @@ export function HomeScreen() {
             icon: "notebook-outline",
           }
         : unlockState.inventoryResolved && !unlockState.hasInventoryItems
-          ? {
-              title: translateOrFallback(t, "screens.home.quick.todayPlanFirstItemTitle", "Open the shop and get your first item"),
-              description: translateOrFallback(
-                t,
-                "screens.home.quick.todayPlanFirstItemDescription",
-                "Your first purchase unlocks the core RPG loop: better loot, stronger stats, and more rewarding quests.",
-              ),
-              actionLabel: t("screens.home.shop"),
-              onPress: () => navigation.navigate("Shop"),
-              icon: "storefront-outline",
-            }
-          : unlockState.inventoryResolved && !unlockState.hasEquippedItems
             ? {
-                title: translateOrFallback(t, "screens.home.quick.todayPlanEquipTitle", "Equip your first upgrade"),
+                title: translateOrFallback(t, "screens.home.quick.todayPlanFirstItemTitle", "Открой магазин и возьми первый предмет"),
                 description: translateOrFallback(
                   t,
-                  "screens.home.quick.todayPlanEquipDescription",
-                  "Equipping gear turns inventory into real bonuses for stats, rewards, and survivability.",
+                  "screens.home.quick.todayPlanFirstItemDescription",
+                  "Первая покупка связывает задания с прогрессом героя: у тебя появляется экипировка и заметный рост характеристик.",
                 ),
-                actionLabel: t("screens.home.character"),
-                onPress: () => navigation.navigate("Character"),
-                icon: "shield-account",
+                actionLabel: t("screens.home.shop"),
+                onPress: () => navigation.navigate("Shop"),
+                icon: "storefront-outline",
               }
-            : unlockState.socialUnlocked && !unlockState.hasFriends
+            : unlockState.inventoryResolved && !unlockState.hasEquippedItems
               ? {
-                  title: translateOrFallback(t, "screens.home.quick.todayPlanFriendsTitle", "Add your first friend"),
+                  title: translateOrFallback(t, "screens.home.quick.todayPlanEquipTitle", "Экипируй первый предмет"),
                   description: translateOrFallback(
                     t,
-                    "screens.home.quick.todayPlanFriendsDescription",
-                    "Once the base hero loop is clear, social makes sense: friends, rivalry, and co-op challenges.",
+                    "screens.home.quick.todayPlanEquipDescription",
+                    "После экипировки предмет начинает реально усиливать героя: растут характеристики, награды и выживаемость.",
                   ),
-                  actionLabel: t("common.findFriends"),
-                  onPress: () => handleSocialAction("friends"),
-                  icon: "account-multiple-outline",
+                  actionLabel: t("screens.home.character"),
+                  onPress: () => navigation.navigate("Character"),
+                  icon: "shield-account",
                 }
         : systemCompleted < systemCap
           ? {
@@ -442,55 +408,16 @@ export function HomeScreen() {
               icon: "run-fast",
             }
           : {
-              title: translateOrFallback(t, "screens.home.quick.todayPlanSocialTitle", "Сравни прогресс с друзьями"),
+              title: translateOrFallback(t, "screens.home.quick.todayPlanReviewTitle", "Проверь героя и закрепи результат"),
               description: translateOrFallback(
                 t,
-                "screens.home.quick.todayPlanSocialDescription",
-                "Ты уже закрыл план на сегодня. Можно зайти к друзьям и посмотреть, кого получится обогнать.",
+                "screens.home.quick.todayPlanReviewDescription",
+                "Сегодняшний минимум уже сделан. Зайди в персонажа, посмотри экипировку и подготовь следующий шаг по цели.",
               ),
-              actionLabel: translateOrFallback(t, "screens.home.quick.openFriends", "Открыть друзей"),
-              onPress: () => handleSocialAction("friends"),
-              icon: "account-multiple-outline",
+              actionLabel: t("screens.home.character"),
+              onPress: () => navigation.navigate("Character"),
+              icon: "shield-account",
             };
-
-  function handleSocialAction(action?: string | null) {
-    if (action === "friends" || !unlockState.socialUnlocked) {
-      navigation.navigate("FriendsTab", {
-        initialTab: "friends",
-        focusSearch: true,
-        requestedAt: Date.now(),
-      });
-      return;
-    }
-
-    switch (action) {
-      case "leaderboard":
-        navigation.navigate("FriendsTab", {
-          initialTab: "leaderboard",
-          initialPeriod: "weekly",
-          requestedAt: Date.now(),
-        });
-        return;
-      case "coop":
-        if (!unlockState.coopUnlocked) {
-          navigation.navigate("FriendsTab", {
-            initialTab: "friends",
-            focusSearch: true,
-            requestedAt: Date.now(),
-          });
-          return;
-        }
-        navigation.navigate("CoopQuests");
-        return;
-      case "friends":
-      default:
-        navigation.navigate("FriendsTab", {
-          initialTab: "friends",
-          focusSearch: true,
-          requestedAt: Date.now(),
-        });
-    }
-  }
 
   React.useEffect(() => {
     const shouldPrompt = dailyBonus?.can_claim && dailyBonus?.available;
@@ -552,6 +479,64 @@ export function HomeScreen() {
       icon: "armor",
       title: t("screens.home.stats.armor.title"),
       description: t("screens.home.quick.stats.armor", { value: derivedStats.armorReductionPercent }),
+    },
+  ];
+  const howItWorksItems = [
+    {
+      icon: "flag-checkered",
+      title: translateOrFallback(t, "screens.home.quick.onboardingGoalTitle", "Выбери цель"),
+      description: translateOrFallback(
+        t,
+        "screens.home.quick.onboardingGoalDescription",
+        "Цель задает направление: под нее подбираются задания и считается прогресс.",
+      ),
+    },
+    {
+      icon: "notebook-outline",
+      title: translateOrFallback(t, "screens.home.features.quests.title", "Задания"),
+      description: translateOrFallback(
+        t,
+        "screens.home.features.quests.description",
+        "Выполняй задания каждый день, чтобы получать опыт, золото и двигаться к цели.",
+      ),
+    },
+    {
+      icon: "storefront-outline",
+      title: translateOrFallback(t, "screens.home.features.inventory.title", "Инвентарь и экипировка"),
+      description: translateOrFallback(
+        t,
+        "screens.home.features.inventory.description",
+        "Предметы покупаются или выпадают из наград, а потом усиливают героя через экипировку.",
+      ),
+    },
+  ];
+  const equipmentGuideItems = [
+    {
+      icon: "shield-account",
+      title: translateOrFallback(t, "screens.home.quick.itemsBoostTitle", "Экипировка усиливает героя"),
+      description: translateOrFallback(
+        t,
+        "screens.home.quick.itemsBoostDescription",
+        "Предметы повышают характеристики, броню, крит и удачу. Чем лучше экипировка, тем полезнее каждый квест.",
+      ),
+    },
+    {
+      icon: "storefront-outline",
+      title: translateOrFallback(t, "screens.home.quick.itemsSourceTitle", "Откуда берутся предметы"),
+      description: translateOrFallback(
+        t,
+        "screens.home.quick.itemsSourceDescription",
+        "Предметы можно купить в магазине или получить из наград, а затем надеть на персонажа.",
+      ),
+    },
+    {
+      icon: "heart-plus",
+      title: translateOrFallback(t, "screens.home.quick.healthRecoverTitle", "Зачем следить за здоровьем"),
+      description: translateOrFallback(
+        t,
+        "screens.home.quick.healthRecoverDescription",
+        "Заходи регулярно, выполняй задания и держи броню на персонаже, чтобы не терять темп прогресса.",
+      ),
     },
   ];
 
@@ -837,28 +822,122 @@ export function HomeScreen() {
       </Card>
 
       {showOnboardingRoadmap ? (
-        <Card tone={nextOnboardingStep ? "accent" : "subtle"}>
+        <Card tone="accent">
           <Text style={styles.eyebrow}>
             {translateOrFallback(t, "screens.home.quick.programLabel", "Первые 7 дней")}
           </Text>
-          <Text style={styles.cardTitle}>{translateOrFallback(t, "screens.home.quick.onboardingTitle", "Hero path")}</Text>
+          <Text style={styles.cardTitle}>{translateOrFallback(t, "screens.home.quick.onboardingTitle", "Первые шаги")}</Text>
           <Text style={styles.bonusText}>
             {translateOrFallback(
               t,
               "screens.home.quick.onboardingDescription",
-              "Finish the base loop first, then the app opens the full social and co-op layer at the right moment.",
+              "Сначала пройди базовый путь: цель, первое задание, первая награда и первое усиление. Потом откроются остальные системы.",
             )}
           </Text>
           <InfoItem icon="calendar-star" title={`День ${currentProgramDay}: ${currentProgramFocus.title}`} description={currentProgramFocus.description} />
           <InfoItem icon={stepStatusDetails.icon} title={stepStatusDetails.title} description={stepStatusDetails.description} />
           <Text style={styles.rewardMeta}>
+              {translateOrFallback(
+                t,
+                "screens.home.quick.onboardingProgress",
+                `РћС‚РєСЂС‹С‚Рѕ ${onboardingCompletedCount}/${onboardingSteps.length}`,
+                { completed: onboardingCompletedCount, total: onboardingSteps.length },
+              )}
+            </Text>
+          <View style={styles.roadmapList}>
+            {onboardingSteps.map((step) => {
+              const isActive = nextOnboardingStep?.key === step.key;
+
+              return (
+                <View key={step.key} style={[styles.roadmapItem, isActive ? styles.roadmapItemActive : null]}>
+                  <View
+                    style={[
+                      styles.roadmapIconWrap,
+                      step.done ? styles.roadmapIconWrapDone : null,
+                      isActive ? styles.roadmapIconWrapActive : null,
+                    ]}
+                  >
+                    <GameIcon
+                      name={step.done ? "check-circle-outline" : step.icon}
+                      size={18}
+                      color={step.done || isActive ? colors.primary : colors.textDim}
+                    />
+                  </View>
+                  <View style={styles.roadmapCopy}>
+                    <Text style={styles.roadmapTitle}>{step.title}</Text>
+                    <Text style={styles.roadmapDescription}>{step.description}</Text>
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+          <Button
+            label={nextOnboardingStep?.actionLabel ?? t("screens.home.toQuests")}
+            icon={nextOnboardingStep?.icon ?? "notebook-outline"}
+            onPress={nextOnboardingStep?.onPress ?? (() => navigation.navigate("Quests"))}
+            variant="secondary"
+          />
+        </Card>
+      ) : null}
+
+      <Card tone="subtle">
+        <Text style={styles.cardTitle}>{t("screens.home.aboutTitle")}</Text>
+        <Text style={styles.bonusText}>{t("screens.home.aboutText")}</Text>
+        <View style={styles.roadmapList}>
+          {howItWorksItems.map((item) => (
+            <InfoItem key={item.title} icon={item.icon} title={item.title} description={item.description} />
+          ))}
+        </View>
+      </Card>
+
+      {showDeepGuideCards ? (
+        <Card tone="subtle">
+          <Text style={styles.cardTitle}>{t("screens.home.statsTitle")}</Text>
+          <Text style={styles.bonusText}>{t("screens.home.statsIntro")}</Text>
+          <View style={styles.statsGrid}>
+            {statItems.map((item) => (
+              <View key={item.key} style={styles.statCard}>
+                <View style={styles.statHeader}>
+                  <View style={styles.statIconWrap}>
+                    <GameIcon name={item.icon} size={18} color={colors.primary} />
+                  </View>
+                  <Text style={styles.statName}>{item.title}</Text>
+                </View>
+                <Text style={styles.statText}>{item.description}</Text>
+              </View>
+            ))}
+          </View>
+          <View style={styles.roadmapList}>
+            {equipmentGuideItems.map((item) => (
+              <InfoItem key={item.title} icon={item.icon} title={item.title} description={item.description} />
+            ))}
+          </View>
+        </Card>
+      ) : null}
+
+      {false ? (
+        <Card tone={nextOnboardingStep ? "accent" : "subtle"}>
+          <Text style={styles.eyebrow}>
+            {translateOrFallback(t, "screens.home.quick.programLabel", "Первые 7 дней")}
+          </Text>
+          <Text style={styles.cardTitle}>{translateOrFallback(t, "screens.home.quick.onboardingTitle", "Первые шаги")}</Text>
+          <Text style={styles.bonusText}>
             {translateOrFallback(
               t,
-              "screens.home.quick.onboardingProgress",
-              `Unlocked ${onboardingCompletedCount}/${onboardingSteps.length}`,
-              { completed: onboardingCompletedCount, total: onboardingSteps.length },
+              "screens.home.quick.onboardingDescription",
+              "Сначала пройди базовый путь: цель, первое задание, первая награда и первое усиление. Потом откроются остальные системы.",
             )}
           </Text>
+          <InfoItem icon="calendar-star" title={`День ${currentProgramDay}: ${currentProgramFocus.title}`} description={currentProgramFocus.description} />
+          <InfoItem icon={stepStatusDetails.icon} title={stepStatusDetails.title} description={stepStatusDetails.description} />
+          <Text style={styles.rewardMeta}>
+              {translateOrFallback(
+                t,
+                "screens.home.quick.onboardingProgress",
+                `Открыто ${onboardingCompletedCount}/${onboardingSteps.length}`,
+                { completed: onboardingCompletedCount, total: onboardingSteps.length },
+              )}
+            </Text>
           <View style={styles.roadmapList}>
             {onboardingSteps.map((step) => {
               const isActive = nextOnboardingStep?.key === step.key;
@@ -888,12 +967,45 @@ export function HomeScreen() {
           </View>
           {nextOnboardingStep ? (
             <Button
-              label={nextOnboardingStep.actionLabel}
-              icon={nextOnboardingStep.icon}
-              onPress={nextOnboardingStep.onPress}
+              label={nextOnboardingStep?.actionLabel ?? t("screens.home.toQuests")}
+              icon={nextOnboardingStep?.icon ?? "notebook-outline"}
+              onPress={nextOnboardingStep?.onPress ?? (() => navigation.navigate("Quests"))}
               variant="secondary"
             />
           ) : null}
+        </Card>
+      ) : null}
+
+      {showFirstWinCard ? (
+        <Card tone="accent">
+          <Text style={styles.eyebrow}>
+            {translateOrFallback(t, "screens.home.quick.firstWinLabel", "Первый результат")}
+          </Text>
+          <Text style={styles.cardTitle}>
+            {translateOrFallback(t, "screens.home.quick.firstWinTitle", "Прогресс уже запущен")}
+          </Text>
+          <Text style={styles.bonusText}>
+            {translateOrFallback(
+              t,
+              "screens.home.quick.firstWinDescription",
+              "Ты уже закрыл первое задание. Теперь пора закрепить результат наградой или первым предметом, чтобы путь стал ощутимым.",
+            )}
+          </Text>
+          <View style={styles.firstWinStats}>
+            <View style={styles.firstWinStatChip}>
+              <GameIcon name="star-four-points-outline" size={16} color={colors.primary} />
+              <Text style={styles.firstWinStatText}>XP: {hero?.current_xp ?? 0}</Text>
+            </View>
+            <View style={styles.firstWinStatChip}>
+              <GameIcon name="currency-usd" size={16} color={colors.gold} />
+              <Text style={styles.firstWinStatText}>{t("common.gold")}: {hero?.crystals ?? 0}</Text>
+            </View>
+          </View>
+          <Button
+            label={unlockState.shopUnlocked ? t("screens.home.shop") : t("screens.home.toQuests")}
+            icon={unlockState.shopUnlocked ? "storefront-outline" : "notebook-outline"}
+            onPress={() => navigation.navigate(unlockState.shopUnlocked ? "Shop" : "Quests")}
+          />
         </Card>
       ) : null}
 
@@ -913,72 +1025,6 @@ export function HomeScreen() {
         <InfoItem icon={todayPlan.icon} title={todayPlan.title} description={todayPlan.description} />
         <InfoItem icon={stepStatusDetails.icon} title={stepStatusDetails.title} description={stepStatusDetails.description} />
         <Button label={todayPlan.actionLabel} icon={todayPlan.icon} onPress={todayPlan.onPress} variant="secondary" />
-        </Card>
-      ) : null}
-
-      {showAdvancedHome && socialSurfaceUnlocked && socialPulse ? (
-        <Card tone={socialPulse.pending_challenge_invitations > 0 ? "accent" : "subtle"}>
-          <Text style={styles.cardTitle}>{socialPulse.title}</Text>
-          <Text style={styles.bonusText}>{socialPulse.description}</Text>
-          {socialPulse.weekly_rank != null && socialPulse.weekly_total != null ? (
-            <Text style={styles.rewardMeta}>
-              {translateOrFallback(
-                t,
-                "screens.home.quick.socialWeeklyRank",
-                `Неделя: #${socialPulse.weekly_rank} из ${socialPulse.weekly_total}`,
-                { rank: socialPulse.weekly_rank, total: socialPulse.weekly_total },
-              )}
-            </Text>
-          ) : null}
-          {socialPulse.closest_friend_ahead ? (
-            <Text style={styles.rewardMeta}>
-              {translateOrFallback(
-                t,
-                "screens.home.quick.socialGap",
-                `До @${socialPulse.closest_friend_ahead.username ?? socialPulse.closest_friend_ahead.name} осталось ${socialPulse.closest_friend_ahead.gap_steps ?? 0} шагов`,
-                {
-                  name: socialPulse.closest_friend_ahead.username ?? socialPulse.closest_friend_ahead.name,
-                  steps: socialPulse.closest_friend_ahead.gap_steps ?? 0,
-                },
-              )}
-            </Text>
-          ) : null}
-          <View style={[styles.quickActionsRow, isCompactLayout ? styles.quickActionsRowCompact : null]}>
-            <Button
-              label={socialPulse.primary_action_label ?? translateOrFallback(t, "screens.home.quick.openFriends", "Открыть друзей")}
-              icon={socialPulse.primary_action === "leaderboard" ? "trophy-outline" : "account-multiple-outline"}
-              onPress={() => handleSocialAction(socialPulse.primary_action)}
-              style={styles.primaryAction}
-            />
-            <Button
-              label={translateOrFallback(t, "screens.home.quick.openWeeklyBoard", "Недельный рейтинг")}
-              icon="trophy-variant-outline"
-              onPress={() => handleSocialAction("leaderboard")}
-              variant="secondary"
-              style={styles.secondaryAction}
-            />
-          </View>
-        </Card>
-      ) : null}
-
-      {showAdvancedHome && socialSurfaceUnlocked && socialFeedItems.length > 0 ? (
-        <Card tone="subtle">
-          <Text style={styles.cardTitle}>{translateOrFallback(t, "screens.home.quick.socialFeedTitle", "Лента друзей")}</Text>
-          <View style={styles.feedList}>
-            {socialFeedItems.map((item, index) => (
-              <View key={`${item.kind}-${index}`} style={styles.feedItem}>
-                <View style={styles.feedCopy}>
-                  <Text style={styles.feedTitle}>{item.title}</Text>
-                  <Text style={styles.feedDescription}>{item.description}</Text>
-                </View>
-                <Pressable style={styles.feedActionChip} onPress={() => handleSocialAction(item.action)}>
-                  <Text style={styles.feedActionText}>
-                    {item.action_label ?? translateOrFallback(t, "screens.home.quick.openFriends", "Открыть друзей")}
-                  </Text>
-                </Pressable>
-              </View>
-            ))}
-          </View>
         </Card>
       ) : null}
 
@@ -1401,6 +1447,27 @@ function createStyles(colors: ReturnType<typeof useThemeColors>, themeMode: Retu
       color: colors.textMuted,
       fontSize: 12,
       lineHeight: 18,
+    },
+    firstWinStats: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 8,
+    },
+    firstWinStatChip: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+      borderRadius: radii.md,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.backgroundInset,
+    },
+    firstWinStatText: {
+      color: colors.text,
+      fontSize: 12,
+      fontWeight: "800",
     },
   });
 }

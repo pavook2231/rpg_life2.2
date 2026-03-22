@@ -192,9 +192,9 @@ def can_equip_item(
         return False, "Character class progress not found"
 
     if item.required_level and item.required_level > progress.level:
-        return False, f"Required level: {item.required_level}"
+        return False, f"Требуется уровень {item.required_level}"
     if item.required_class and item.required_class != progress.class_name:
-        return False, f"Item is restricted to class: {item.required_class}"
+        return False, f"Предмет доступен только для класса {item.required_class}"
 
     slot_compatibility = {
         "head": ["armor"],

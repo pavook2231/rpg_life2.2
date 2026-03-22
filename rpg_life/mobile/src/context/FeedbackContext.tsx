@@ -28,7 +28,7 @@ type ToastOptions = {
   variant?: "default" | "achievement" | "achievementLegendary";
 };
 
-type QueuedToast = ToastItem & {
+type ActiveToast = ToastItem & {
   sound?: SoundKey;
   haptic?: ToastHaptic;
   durationMs: number;
@@ -58,6 +58,7 @@ type SoundHandle = {
   unloadAsync: () => Promise<unknown>;
   setPositionAsync: (positionMillis: number) => Promise<unknown>;
   playAsync: () => Promise<unknown>;
+  stopAsync?: () => Promise<unknown>;
 };
 
 type ExpoAvModule = {
@@ -82,25 +83,17 @@ const soundSources: Record<SoundKey, number> = {
   select: require("../../assets/sounds/select.mp3"),
 };
 
-const soundDurations: Record<SoundKey, number> = {
-  achievement: 1550,
-  quest: 1250,
-  item: 900,
-  level: 1100,
-  select: 360,
-};
-
 const FeedbackContext = createContext<FeedbackContextValue | undefined>(undefined);
 
 export function FeedbackProvider({ children }: { children: ReactNode }) {
   const [activeToast, setActiveToast] = useState<ToastItem | null>(null);
   const [activeDialog, setActiveDialog] = useState<DialogItem | null>(null);
-  const queueRef = useRef<QueuedToast[]>([]);
   const idRef = useRef(1);
   const soundsRef = useRef<Partial<Record<SoundKey, SoundHandle>>>({});
   const dialogRef = useRef<DialogItem | null>(null);
-  const isProcessingToastRef = useRef(false);
-  const soundQueueRef = useRef(Promise.resolve());
+  const activeToastRef = useRef<ActiveToast | null>(null);
+  const toastAnimationRef = useRef<Animated.CompositeAnimation | null>(null);
+  const soundRequestIdRef = useRef(0);
   const translateY = useRef(new Animated.Value(42)).current;
   const scale = useRef(new Animated.Value(0.9)).current;
   const opacity = useRef(new Animated.Value(0)).current;
@@ -144,6 +137,7 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
       cancelled = true;
       const sounds = Object.values(soundsRef.current);
       sounds.forEach((sound) => {
+        sound?.stopAsync?.().catch(() => undefined);
         sound?.unloadAsync().catch(() => undefined);
       });
     };
@@ -153,119 +147,122 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
     dialogRef.current = activeDialog;
   }, [activeDialog]);
 
-  const playSound = useCallback((key: SoundKey) => {
-    soundQueueRef.current = soundQueueRef.current.then(async () => {
+  useEffect(() => {
+    activeToastRef.current = activeToast as ActiveToast | null;
+  }, [activeToast]);
+
+  const playSound = useCallback(async (key: SoundKey) => {
+    const requestId = ++soundRequestIdRef.current;
+    const sounds = Object.values(soundsRef.current);
+
+    try {
+      await Promise.all(sounds.map((sound) => sound?.stopAsync?.().catch(() => undefined)));
       const sound = soundsRef.current[key];
-      if (!sound) {
+      if (!sound || requestId !== soundRequestIdRef.current) {
         return;
       }
-      try {
-        await sound.setPositionAsync(0);
-        await sound.playAsync();
-        await new Promise((resolve) => setTimeout(resolve, soundDurations[key] ?? 900));
-      } catch {
-        // Ignore audio glitches to avoid blocking gameplay flows.
+      await sound.setPositionAsync(0);
+      if (requestId !== soundRequestIdRef.current) {
+        return;
       }
-    });
-    return soundQueueRef.current;
+      await sound.playAsync();
+    } catch {
+      // Ignore audio glitches to avoid blocking gameplay flows.
+    }
   }, []);
 
-  const showNextToast = useCallback(async () => {
-    if (activeToast || isProcessingToastRef.current || queueRef.current.length === 0) {
+  useEffect(() => {
+    if (!activeToastRef.current) {
       return;
     }
-    const next = queueRef.current.shift() ?? null;
-    if (!next) {
-      return;
-    }
-    isProcessingToastRef.current = true;
-    setActiveToast(next);
+
+    const currentToast = activeToastRef.current;
     translateY.setValue(42);
     scale.setValue(0.9);
     opacity.setValue(0);
     glow.setValue(0.28);
 
-    if (next.haptic) {
-      await triggerHaptic(next.haptic);
+    if (currentToast.haptic) {
+      void triggerHaptic(currentToast.haptic);
     }
 
-    if (next.sound) {
-      void playSound(next.sound);
+    if (currentToast.sound) {
+      void playSound(currentToast.sound);
     }
 
-    await new Promise<void>((resolve) => {
-      Animated.sequence([
-        Animated.parallel([
-          Animated.timing(translateY, {
-            toValue: 0,
-            duration: 340,
-            easing: Easing.out(Easing.back(1.08)),
-            useNativeDriver: true,
-          }),
-          Animated.timing(opacity, {
-            toValue: 1,
-            duration: 240,
-            useNativeDriver: true,
-          }),
-          Animated.timing(scale, {
-            toValue: 1,
-            duration: 320,
-            easing: Easing.out(Easing.cubic),
-            useNativeDriver: true,
-          }),
-          Animated.timing(glow, {
-            toValue: 1,
-            duration: 260,
-            easing: Easing.out(Easing.quad),
-            useNativeDriver: true,
-          }),
-        ]),
-        Animated.delay(next.durationMs),
-        Animated.parallel([
-          Animated.timing(translateY, {
-            toValue: -18,
-            duration: 240,
-            easing: Easing.in(Easing.cubic),
-            useNativeDriver: true,
-          }),
-          Animated.timing(opacity, {
-            toValue: 0,
-            duration: 200,
-            useNativeDriver: true,
-          }),
-          Animated.timing(scale, {
-            toValue: 0.96,
-            duration: 200,
-            useNativeDriver: true,
-          }),
-          Animated.timing(glow, {
-            toValue: 0.14,
-            duration: 180,
-            useNativeDriver: true,
-          }),
-        ]),
-      ]).start(() => resolve());
+    toastAnimationRef.current = Animated.sequence([
+      Animated.parallel([
+        Animated.timing(translateY, {
+          toValue: 0,
+          duration: 340,
+          easing: Easing.out(Easing.back(1.08)),
+          useNativeDriver: true,
+        }),
+        Animated.timing(opacity, {
+          toValue: 1,
+          duration: 240,
+          useNativeDriver: true,
+        }),
+        Animated.timing(scale, {
+          toValue: 1,
+          duration: 320,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.timing(glow, {
+          toValue: 1,
+          duration: 260,
+          easing: Easing.out(Easing.quad),
+          useNativeDriver: true,
+        }),
+      ]),
+      Animated.delay(currentToast.durationMs),
+      Animated.parallel([
+        Animated.timing(translateY, {
+          toValue: -18,
+          duration: 240,
+          easing: Easing.in(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.timing(opacity, {
+          toValue: 0,
+          duration: 200,
+          useNativeDriver: true,
+        }),
+        Animated.timing(scale, {
+          toValue: 0.96,
+          duration: 200,
+          useNativeDriver: true,
+        }),
+        Animated.timing(glow, {
+          toValue: 0.14,
+          duration: 180,
+          useNativeDriver: true,
+        }),
+      ]),
+    ]);
+
+    toastAnimationRef.current.start(({ finished }) => {
+      if (!finished || activeToastRef.current?.id !== currentToast.id) {
+        return;
+      }
+      currentToast.resolve();
+      activeToastRef.current = null;
+      setActiveToast(null);
     });
 
-    setActiveToast(null);
-    next.resolve();
-    isProcessingToastRef.current = false;
+    return () => {
+      toastAnimationRef.current?.stop();
+      toastAnimationRef.current = null;
+    };
   }, [activeToast, glow, opacity, playSound, scale, translateY]);
-
-  useEffect(() => {
-    if (!activeToast) {
-      const timer = setTimeout(showNextToast, 20);
-      return () => clearTimeout(timer);
-    }
-    return undefined;
-  }, [activeToast, showNextToast]);
 
   const pushToast = useCallback((toast: Omit<ToastItem, "id">, options?: ToastOptions) => {
     const inferredHaptic =
       options?.haptic ?? (toast.tone === "reward" ? "reward" : toast.tone === "warning" ? "warning" : toast.tone === "success" ? "success" : undefined);
 
     return new Promise<void>((resolve) => {
-      queueRef.current.push({
+      const nextToast: ActiveToast = {
         ...toast,
         id: idRef.current++,
         sound: options?.sound,
@@ -273,12 +270,17 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
         durationMs: options?.durationMs ?? 2200,
         variant: options?.variant ?? "default",
         resolve,
-      });
-      if (!activeToast) {
-        void showNextToast();
+      };
+
+      const previousToast = activeToastRef.current;
+      if (previousToast) {
+        previousToast.resolve();
       }
+
+      activeToastRef.current = nextToast;
+      setActiveToast(nextToast);
     });
-  }, [activeToast, showNextToast]);
+  }, []);
 
   const hideDialog = useCallback(() => {
     const dialog = dialogRef.current;

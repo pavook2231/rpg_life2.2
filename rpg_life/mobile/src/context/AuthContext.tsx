@@ -1,7 +1,7 @@
 import React, { createContext, ReactNode, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Linking } from "react-native";
 
-import { getSocialAuthProviders, login, register, socialLogin, type SocialAuthProvider } from "../api/auth";
+import { getSocialAuthProviders, login, logout, register, socialLogin, type SocialAuthProvider } from "../api/auth";
 import { fetchProfile } from "../api/game";
 import { unregisterStoredPushDevice } from "../api/notifications";
 import { SOCIAL_AUTH_REDIRECT_SCHEME } from "../config/env";
@@ -233,10 +233,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setAuthFlowNotice(null);
       },
       signOut: async () => {
+        const refreshToken = await getRefreshToken();
         try {
           await unregisterStoredPushDevice();
         } catch {
           // Best-effort cleanup; auth state should still be cleared locally.
+        }
+        if (refreshToken) {
+          try {
+            await logout(refreshToken);
+          } catch {
+            // Best-effort server-side logout; local auth state still must be cleared.
+          }
         }
         lastHandledSocialUrlRef.current = null;
         setAuthFlowNotice(null);

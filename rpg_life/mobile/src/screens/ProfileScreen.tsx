@@ -88,11 +88,22 @@ function getAchievementStatusLabel(t: (key: string, params?: Record<string, stri
   return t("screens.profile.achievementStatus.unknown");
 }
 
+function translateOrFallback(
+  t: (key: string, params?: Record<string, string | number>) => string,
+  key: string,
+  fallback: string,
+  params?: Record<string, string | number>,
+) {
+  const translated = t(key, params);
+  return translated === key ? fallback : translated;
+}
+
 function QuickActionRow({
   icon,
   label,
   subtitle,
   onPress,
+  readOnly = false,
   styles,
   colors,
 }: {
@@ -100,11 +111,12 @@ function QuickActionRow({
   label: string;
   subtitle?: string;
   onPress: () => void;
+  readOnly?: boolean;
   styles: ReturnType<typeof createStyles>;
   colors: ReturnType<typeof useThemeColors>;
 }) {
   return (
-    <Pressable style={styles.quickRow} onPress={onPress}>
+    <Pressable style={styles.quickRow} onPress={onPress} disabled={readOnly}>
       <View style={styles.quickRowLeft}>
         <View style={styles.quickIconWrap}>
           <GameIcon name={icon} size={18} color={colors.primary} />
@@ -118,7 +130,7 @@ function QuickActionRow({
           ) : null}
         </View>
       </View>
-      <GameIcon name="chevron-right" size={18} color={colors.textDim} />
+      {!readOnly ? <GameIcon name="chevron-right" size={18} color={colors.textDim} /> : null}
     </Pressable>
   );
 }
@@ -299,6 +311,8 @@ export function ProfileScreen() {
     [achievements],
   );
   const previewAchievements = useMemo(() => (achievements ?? []).slice(0, 8), [achievements]);
+  const isBeginnerProfile = (hero?.level ?? 1) <= 1 && (hero?.current_xp ?? 0) <= 0;
+  const showAchievementPreview = !isBeginnerProfile || earnedAchievements > 0;
 
   return (
     <Screen title={t("screens.profile.title")} subtitle={t("screens.profile.subtitle")}>
@@ -318,9 +332,67 @@ export function ProfileScreen() {
         subtitle={`${displayClass} | ${displayUsername}`}
       />
 
+      {isBeginnerProfile ? (
+        <Card tone="subtle">
+          <Text style={styles.sectionTitle}>
+            {translateOrFallback(t, "screens.profile.beginnerTitle", "С чего начать в профиле")}
+          </Text>
+          <Text style={styles.quickSubtitle}>
+            {translateOrFallback(
+              t,
+              "screens.profile.beginnerDescription",
+              "Сейчас здесь достаточно трёх вещей: проверить имя, выбрать цель и сохранить удобные для себя настройки.",
+            )}
+          </Text>
+          <View style={styles.beginnerChecklist}>
+            <QuickActionRow
+              icon="account-edit-outline"
+              label={translateOrFallback(t, "screens.profile.beginnerIdentityTitle", "Проверь имя и ник")}
+              subtitle={translateOrFallback(
+                t,
+                "screens.profile.beginnerIdentityDescription",
+                "Так тебя будет проще узнать в приложении, когда откроются остальные системы.",
+              )}
+              onPress={() => undefined}
+              readOnly
+              styles={styles}
+              colors={colors}
+            />
+            <QuickActionRow
+              icon="flag-checkered"
+              label={translateOrFallback(t, "screens.profile.beginnerGoalTitle", "Выбери направление")}
+              subtitle={translateOrFallback(
+                t,
+                "screens.profile.beginnerGoalDescription",
+                "От выбранной цели зависит, какие задания и подсказки приложение будет показывать дальше.",
+              )}
+              onPress={() => undefined}
+              readOnly
+              styles={styles}
+              colors={colors}
+            />
+            <QuickActionRow
+              icon="content-save-outline"
+              label={translateOrFallback(t, "screens.profile.beginnerSaveTitle", "Сохрани изменения")}
+              subtitle={translateOrFallback(
+                t,
+                "screens.profile.beginnerSaveDescription",
+                "После этого можно возвращаться на главную и проходить первые шаги без лишней путаницы.",
+              )}
+              onPress={() => undefined}
+              readOnly
+              styles={styles}
+              colors={colors}
+            />
+          </View>
+        </Card>
+      ) : null}
+
       <Card>
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>{t("screens.profile.characterSettings")}</Text>
+          <Text style={styles.sectionTitle}>
+            {translateOrFallback(t, "screens.profile.identityTitle", "Личные данные")}
+          </Text>
           <Text style={styles.sectionMeta}>{currentLanguageLabel}</Text>
         </View>
 
@@ -369,7 +441,9 @@ export function ProfileScreen() {
 
       <Card>
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>{t("screens.profile.quick.goalsTitle")}</Text>
+          <Text style={styles.sectionTitle}>
+            {translateOrFallback(t, "screens.profile.goalCardTitle", "Цель и направление")}
+          </Text>
           <Text style={styles.sectionMeta}>{profile?.user?.goal_progress_percent ?? 0}%</Text>
         </View>
         <Text style={styles.quickSubtitle}>{t("screens.profile.quick.goalsSubtitle")}</Text>
@@ -414,28 +488,33 @@ export function ProfileScreen() {
       </Card>
 
       <Card>
-        <Text style={styles.sectionTitle}>{t("screens.profile.appSections")}</Text>
+        <Text style={styles.sectionTitle}>
+          {translateOrFallback(t, "screens.profile.usefulSectionsTitle", "Полезные разделы")}
+        </Text>
         <LanguageSwitcher />
 
         <View style={styles.quickList}>
+          <QuickActionRow
+            icon="account-multiple-outline"
+            label={t("screens.friends.title")}
+            subtitle={t("screens.friends.subtitle")}
+            onPress={() => navigation.navigate("Friends", { initialTab: "friends", focusSearch: true, requestedAt: Date.now() })}
+            styles={styles}
+            colors={colors}
+          />
+          <QuickActionRow
+            icon="podium-gold"
+            label={t("screens.leaderboard.title")}
+            subtitle={t("screens.leaderboard.subtitle")}
+            onPress={() => navigation.navigate("Leaderboard", { requestedAt: Date.now() })}
+            styles={styles}
+            colors={colors}
+          />
           <QuickActionRow
             icon="cog-outline"
             label={t("screens.settings.title")}
             subtitle={t("screens.settings.subtitle")}
             onPress={() => navigation.navigate("Settings")}
-            styles={styles}
-            colors={colors}
-          />
-          <QuickActionRow
-            icon="account-multiple-outline"
-            label={t("common.findFriends")}
-            subtitle={t("screens.friends.searchHint")}
-            onPress={() =>
-              navigation.navigate("FriendsTab", {
-                initialTab: "friends",
-                focusSearch: true,
-                requestedAt: Date.now(),
-              })}
             styles={styles}
             colors={colors}
           />
@@ -460,41 +539,56 @@ export function ProfileScreen() {
         <Button label={t("screens.profile.logout")} icon="logout-variant" onPress={signOut} variant="danger" />
       </Card>
 
-      <Card>
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>{t("screens.profile.achievements")}</Text>
-          <Text style={styles.sectionMeta}>
-            {earnedAchievements}/{achievements?.length ?? 0}
+      {showAchievementPreview ? (
+        <Card>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>{t("screens.profile.achievements")}</Text>
+            <Text style={styles.sectionMeta}>
+              {earnedAchievements}/{achievements?.length ?? 0}
+            </Text>
+          </View>
+
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.achievementRow}>
+            {previewAchievements.map((achievement) => {
+              const accent = getRarityColor(achievement.status);
+              return (
+                <Pressable
+                  key={achievement.id}
+                  style={[styles.achievementTile, { borderColor: accent, opacity: achievement.status === "locked" ? 0.58 : 1 }]}
+                  onPress={() => setSelectedAchievement(achievement)}
+                >
+                  <View style={[styles.achievementArt, { backgroundColor: `${accent}22` }]}>
+                    <Text style={styles.achievementIcon}>{achievement.icon}</Text>
+                  </View>
+                  <Text style={styles.achievementName} numberOfLines={2}>
+                    {normalizeDisplayText(achievement.title)}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+
+          <Button
+            label={t("screens.profile.quick.openAllAchievements")}
+            icon="trophy-variant-outline"
+            variant="secondary"
+            onPress={() => navigation.navigate("Achievements")}
+          />
+        </Card>
+      ) : (
+        <Card tone="subtle">
+          <Text style={styles.sectionTitle}>
+            {translateOrFallback(t, "screens.profile.achievementsLockedTitle", "Достижения откроются чуть позже")}
           </Text>
-        </View>
-
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.achievementRow}>
-          {previewAchievements.map((achievement) => {
-            const accent = getRarityColor(achievement.status);
-            return (
-              <Pressable
-                key={achievement.id}
-                style={[styles.achievementTile, { borderColor: accent, opacity: achievement.status === "locked" ? 0.58 : 1 }]}
-                onPress={() => setSelectedAchievement(achievement)}
-              >
-                <View style={[styles.achievementArt, { backgroundColor: `${accent}22` }]}>
-                  <Text style={styles.achievementIcon}>{achievement.icon}</Text>
-                </View>
-                <Text style={styles.achievementName} numberOfLines={2}>
-                  {normalizeDisplayText(achievement.title)}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-
-        <Button
-          label={t("screens.profile.quick.openAllAchievements")}
-          icon="trophy-variant-outline"
-          variant="secondary"
-          onPress={() => navigation.navigate("Achievements")}
-        />
-      </Card>
+          <Text style={styles.quickSubtitle}>
+            {translateOrFallback(
+              t,
+              "screens.profile.achievementsLockedDescription",
+              "Сначала пройди первые шаги: выбери цель, закрой первое задание и забери первую награду. После этого достижения начнут заполняться сами.",
+            )}
+          </Text>
+        </Card>
+      )}
 
       <Modal
         visible={Boolean(selectedAchievement)}
@@ -658,6 +752,9 @@ function createStyles(colors: ReturnType<typeof useThemeColors>, themeMode: Retu
       color: colors.text,
     },
     quickList: {
+      gap: 8,
+    },
+    beginnerChecklist: {
       gap: 8,
     },
     quickRow: {

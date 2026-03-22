@@ -9,7 +9,7 @@ import { useTranslation } from "../context/LocalizationContext";
 import { AchievementsScreen } from "../screens/AchievementsScreen";
 import { CharacterScreen } from "../screens/CharacterScreen";
 import { CoopQuestsScreen } from "../screens/CoopQuestsScreen";
-import { FriendsScreen } from "../screens/FriendsScreen";
+import { FriendsStableScreen } from "../screens/FriendsStableScreen";
 import { GoalSelectScreen } from "../screens/GoalSelectScreen";
 import { HelpScreen } from "../screens/HelpScreen";
 import { HomeScreen } from "../screens/HomeScreen";
@@ -59,8 +59,6 @@ function MainTabs({ navigation }: { navigation: { navigate: (name: string) => vo
     if (rewards?.seasonal_goal?.claimable) count += 1;
     return count;
   }, [rewards?.daily_bonus?.can_claim, rewards?.seasonal_goal?.claimable, rewards?.weekly_goal?.claimable]);
-
-  const invitationBadgeCount = (rewards?.social_pulse?.pending_friend_requests ?? 0) + (rewards?.social_pulse?.pending_challenge_invitations ?? 0);
 
   useEffect(() => {
     let active = true;
@@ -200,16 +198,6 @@ function MainTabs({ navigation }: { navigation: { navigate: (name: string) => vo
           }}
         />
       ) : null}
-      <Tabs.Screen
-        name="FriendsTab"
-        component={FriendsScreen}
-        listeners={buildTabListeners("FriendsTab")}
-        options={{
-          title: t("screens.friends.title"),
-          tabBarBadge: invitationBadgeCount > 0 ? String(invitationBadgeCount) : undefined,
-          tabBarIcon: ({ focused }) => <TabIcon name="account-multiple-outline" focused={focused} trigger={tabBounceSeed.FriendsTab ?? 0} />,
-        }}
-      />
       {unlockState.coopUnlocked ? (
         <Tabs.Screen
           name="CoopQuests"
@@ -322,8 +310,8 @@ export function AppNavigator() {
           <Stack.Screen name="RewardScreen" component={AchievementsScreen} options={{ title: "Награды" }} />
           <Stack.Screen name="SkillTree" component={CharacterScreen} options={{ title: "Навыки" }} />
           <Stack.Screen name="Stats" component={CharacterScreen} options={{ title: "Статы" }} />
+          <Stack.Screen name="Friends" component={FriendsStableScreen} options={{ title: t("screens.friends.title") }} />
           <Stack.Screen name="Leaderboard" component={LeaderboardScreen} options={{ title: t("screens.leaderboard.title") }} />
-          <Stack.Screen name="Friends" component={FriendsScreen} options={{ title: t("screens.friends.title") }} />
           <Stack.Screen name="Settings" component={SettingsScreen} options={{ title: t("screens.settings.title") }} />
           <Stack.Screen name="Achievements" component={AchievementsScreen} options={{ title: t("screens.profile.achievements") }} />
           <Stack.Screen name="Help" component={HelpScreen} options={{ title: t("screens.help.title") }} />

@@ -106,6 +106,31 @@ def test_search_users_matches_public_friend_id(db_session) -> None:
     assert payload["items"][0]["friend_id"] == "RPG-000002"
 
 
+def test_list_friends_invalid_search_does_not_return_full_roster(db_session) -> None:
+    owner = _create_user(db_session, "friends-owner@example.com")
+    friend = _create_user(db_session, "friends-target@example.com")
+    _make_friends(db_session, owner.id, friend.id)
+
+    payload = social_service.list_friends(db_session, owner, page=1, page_size=20, search="!!!")
+
+    assert payload["items"] == []
+    assert payload["pagination"]["total_items"] == 0
+
+
+def test_social_payloads_do_not_expose_email(db_session) -> None:
+    sender = _create_user(db_session, "privacy-sender@example.com")
+    receiver = _create_user(db_session, "privacy-receiver@example.com")
+
+    social_service.send_friend_request(db_session, sender, receiver.id)
+    request_payload = social_service.list_friend_requests(db_session, receiver)
+    accepted_request_id = request_payload["items"][0]["id"]
+    social_service.respond_friend_request(db_session, receiver, accepted_request_id, "accept")
+    friends_payload = social_service.list_friends(db_session, sender, page=1, page_size=20)
+
+    assert "email" not in request_payload["items"][0]["user"]
+    assert "email" not in friends_payload["items"][0]
+
+
 def test_send_friend_request_reopens_declined_pair_without_integrity_error(db_session) -> None:
     sender = _create_user(db_session, "sender@example.com")
     receiver = _create_user(db_session, "receiver@example.com")
@@ -135,6 +160,32 @@ def test_respond_friend_request_invalidates_leaderboard_cache_on_accept(db_sessi
 
     assert response["status"] == "accepted"
     assert invalidations == ["leaderboard"]
+
+
+def test_friend_request_accept_updates_friends_list_and_friends_leaderboard(db_session) -> None:
+    sender = _create_user(db_session, "rank-sender@example.com")
+    receiver = _create_user(db_session, "rank-receiver@example.com")
+    sender_progress = _create_progress(db_session, sender.id)
+    receiver_progress = _create_progress(db_session, receiver.id)
+
+    request_payload = social_service.send_friend_request(db_session, sender, receiver.id)
+    social_service.respond_friend_request(db_session, receiver, request_payload["request"]["id"], "accept")
+
+    db_session.add_all([
+        DailySteps(user_id=sender.id, class_progress_id=sender_progress.id, steps=2_000, date=utc_now()),
+        DailySteps(user_id=receiver.id, class_progress_id=receiver_progress.id, steps=5_000, date=utc_now()),
+    ])
+    db_session.commit()
+
+    friends_payload = social_service.list_friends(db_session, sender, page=1, page_size=20)
+    leaderboard = social_service.get_friends_leaderboard(db_session, sender, "steps", page=1, page_size=20, period="weekly")
+
+    assert [item["id"] for item in friends_payload["items"]] == [receiver.id]
+    assert friends_payload["items"][0]["friend_id"] == "RPG-000002"
+    assert leaderboard["pagination"]["total_items"] == 2
+    assert [item["user_id"] for item in leaderboard["items"]] == [receiver.id, sender.id]
+    assert leaderboard["items"][0]["score"] == 5_000
+    assert leaderboard["items"][1]["score"] == 2_000
 
 
 def test_send_challenge_invitation_reopens_declined_pair_without_integrity_error(db_session) -> None:

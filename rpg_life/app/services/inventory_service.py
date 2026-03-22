@@ -23,6 +23,17 @@ from app.models import CharacterEquipment, Item, User, UserClassProgress, UserIn
 from app.text_utils import normalize_item_model, normalize_nested_strings
 
 SHOP_ROTATION_HOURS = 12
+ITEM_BONUS_FIELDS = (
+    "strength_bonus",
+    "agility_bonus",
+    "intellect_bonus",
+    "stamina_bonus",
+    "critical_bonus",
+    "luck_bonus",
+    "xp_bonus",
+    "crystal_bonus",
+    "health_bonus",
+)
 CHEST_SHOP_IDS = {
     "COMMON_CHEST": -9001,
     "RARE_CHEST": -9002,
@@ -70,8 +81,131 @@ def _catalog_cache_key(user_id: int, rotation_start: datetime, class_name: str |
     return f"shop:catalog:{user_id}:{class_name or 'none'}:{level}:{rotation_start.isoformat()}"
 
 
+def _extract_bonus_fields(source: Item | dict) -> dict:
+    if isinstance(source, dict):
+        stats = source.get("stats") if isinstance(source.get("stats"), dict) else {}
+        return {
+            field: stats.get(field, source.get(field, 0)) or 0
+            for field in ITEM_BONUS_FIELDS
+        }
+
+    item = normalize_item_model(source)
+    return {field: getattr(item, field, 0) or 0 for field in ITEM_BONUS_FIELDS}
+
+
+def _build_stats_record(bonuses: dict) -> dict:
+    return {field: value for field, value in bonuses.items() if value}
+
+
+def serialize_weapon_stats_payload(stats) -> dict | None:
+    if not stats:
+        return None
+    if isinstance(stats, dict):
+        payload = {
+            "weapon_type": stats.get("weapon_type"),
+            "weapon_category": stats.get("weapon_category"),
+            "damage_min": stats.get("damage_min"),
+            "damage_max": stats.get("damage_max"),
+            "speed": stats.get("speed"),
+            "dps": stats.get("dps"),
+            "critical_strike_chance": stats.get("critical_strike_chance"),
+            "required_strength": stats.get("required_strength"),
+            "required_agility": stats.get("required_agility"),
+            "required_intellect": stats.get("required_intellect"),
+        }
+    else:
+        payload = {
+            "weapon_type": stats.weapon_type,
+            "weapon_category": stats.weapon_category,
+            "damage_min": stats.damage_min,
+            "damage_max": stats.damage_max,
+            "speed": stats.speed,
+            "dps": stats.dps,
+            "critical_strike_chance": getattr(stats, "critical_strike_chance", None),
+            "required_strength": getattr(stats, "required_strength", None),
+            "required_agility": getattr(stats, "required_agility", None),
+            "required_intellect": getattr(stats, "required_intellect", None),
+        }
+    return normalize_nested_strings(payload)
+
+
+def serialize_armor_stats_payload(stats) -> dict | None:
+    if not stats:
+        return None
+    if isinstance(stats, dict):
+        payload = {
+            "armor_type": stats.get("armor_type"),
+            "armor_value": stats.get("armor_value"),
+            "slot": stats.get("slot"),
+            "dodge_chance": stats.get("dodge_chance"),
+            "block_chance": stats.get("block_chance"),
+        }
+    else:
+        payload = {
+            "armor_type": getattr(stats, "armor_type", None),
+            "armor_value": stats.armor_value,
+            "slot": stats.slot,
+            "dodge_chance": getattr(stats, "dodge_chance", None),
+            "block_chance": getattr(stats, "block_chance", None),
+        }
+    return normalize_nested_strings(payload)
+
+
+def serialize_item_payload(source: Item | dict) -> dict:
+    if isinstance(source, dict):
+        bonuses = _extract_bonus_fields(source)
+        payload = {
+            "id": source.get("id"),
+            "name": source.get("name"),
+            "description": source.get("description"),
+            "type": source.get("type"),
+            "subclass": source.get("subclass"),
+            "slot": source.get("slot"),
+            "rarity": source.get("rarity"),
+            "icon": source.get("icon"),
+            "required_level": source.get("required_level", 1),
+            "required_class": source.get("required_class"),
+            "set_name": source.get("set_name"),
+            "price_crystals": source.get("price_crystals", 0),
+            **bonuses,
+            "stats": _build_stats_record(bonuses),
+        }
+        return normalize_nested_strings(payload)
+
+    item = normalize_item_model(source)
+    bonuses = _extract_bonus_fields(item)
+    payload = {
+        "id": item.id,
+        "name": item.name,
+        "description": item.description,
+        "type": item.type,
+        "subclass": item.subclass,
+        "slot": item.slot,
+        "rarity": item.rarity,
+        "icon": item.icon,
+        "required_level": item.required_level,
+        "required_class": item.required_class,
+        "set_name": item.set_name,
+        "price_crystals": item.price_crystals,
+        **bonuses,
+        "stats": _build_stats_record(bonuses),
+    }
+    return normalize_nested_strings(payload)
+
+
+def _serialize_shop_item_entry(item: dict) -> dict:
+    return normalize_nested_strings(
+        {
+            **serialize_item_payload(item),
+            "weapon_stats": serialize_weapon_stats_payload(item.get("weapon_stats")),
+            "armor_stats": serialize_armor_stats_payload(item.get("armor_stats")),
+            "chest_name": item.get("chest_name"),
+        }
+    )
+
+
 def _serialize_shop_items(items: list[dict]) -> list[dict]:
-    return [normalize_nested_strings(item) for item in items]
+    return [_serialize_shop_item_entry(item) for item in items]
 
 
 def _build_shop_chests() -> list[dict]:
@@ -155,7 +289,7 @@ def _get_shop_meta(next_rotation_at: datetime) -> dict:
     }
 
 
-def _serialize_inventory_item_entry(inv: UserInventory, *, is_equipped: bool) -> dict:
+def serialize_inventory_item_entry(inv: UserInventory, *, is_equipped: bool) -> dict:
     item = normalize_item_model(inv.item)
     return normalize_nested_strings(
         {
@@ -164,49 +298,9 @@ def _serialize_inventory_item_entry(inv: UserInventory, *, is_equipped: bool) ->
             "quantity": inv.quantity,
             "is_equipped": is_equipped,
             "acquired_at": inv.acquired_at.isoformat() if inv.acquired_at else None,
-            "item": {
-                "id": item.id,
-                "name": item.name,
-                "description": item.description,
-                "type": item.type,
-                "subclass": item.subclass,
-                "slot": item.slot,
-                "rarity": item.rarity,
-                "icon": item.icon,
-                "strength_bonus": item.strength_bonus,
-                "agility_bonus": item.agility_bonus,
-                "intellect_bonus": item.intellect_bonus,
-                "stamina_bonus": item.stamina_bonus,
-                "xp_bonus": item.xp_bonus,
-                "crystal_bonus": item.crystal_bonus,
-                "health_bonus": item.health_bonus,
-                "set_name": item.set_name,
-                "required_level": item.required_level,
-                "required_class": item.required_class,
-            },
-            "weapon_stats": {
-                "weapon_type": item.weapon_stats.weapon_type,
-                "weapon_category": item.weapon_stats.weapon_category,
-                "damage_min": item.weapon_stats.damage_min,
-                "damage_max": item.weapon_stats.damage_max,
-                "speed": item.weapon_stats.speed,
-                "dps": item.weapon_stats.dps,
-                "critical_strike_chance": item.weapon_stats.critical_strike_chance,
-                "required_strength": item.weapon_stats.required_strength,
-                "required_agility": item.weapon_stats.required_agility,
-                "required_intellect": item.weapon_stats.required_intellect,
-            }
-            if item.weapon_stats
-            else None,
-            "armor_stats": {
-                "armor_type": item.armor_stats.armor_type,
-                "armor_value": item.armor_stats.armor_value,
-                "slot": item.armor_stats.slot,
-                "dodge_chance": item.armor_stats.dodge_chance,
-                "block_chance": item.armor_stats.block_chance,
-            }
-            if item.armor_stats
-            else None,
+            "item": serialize_item_payload(item),
+            "weapon_stats": serialize_weapon_stats_payload(item.weapon_stats),
+            "armor_stats": serialize_armor_stats_payload(item.armor_stats),
         }
     )
 
@@ -378,7 +472,7 @@ def get_inventory_payload(db: Session, current_user: User) -> dict:
 
     result = []
     for inv in inventory:
-        result.append(_serialize_inventory_item_entry(inv, is_equipped=inv.id in equipped_ids))
+        result.append(serialize_inventory_item_entry(inv, is_equipped=inv.id in equipped_ids))
 
     return {"inventory": result}
 
@@ -434,7 +528,7 @@ def get_inventory_item_detail(db: Session, current_user: User, inventory_id: int
 
     item = normalize_item_model(inventory_item.item)
     equipped_ids = get_equipped_inventory_ids(db, current_user.id)
-    payload = _serialize_inventory_item_entry(inventory_item, is_equipped=inventory_item.id in equipped_ids)
+    payload = serialize_inventory_item_entry(inventory_item, is_equipped=inventory_item.id in equipped_ids)
     payload["inventory_id"] = payload.pop("id")
     payload["sell_price"] = max(1, int((item.price_crystals or 0) * 0.5))
     return payload

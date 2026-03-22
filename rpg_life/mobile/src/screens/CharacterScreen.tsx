@@ -8,7 +8,11 @@ import {
   sellInventoryItem,
   unequipInventoryItem,
 } from "../api/game";
-import { CharacterView, type Equipment as LayeredEquipment } from "../components/CharacterView";
+import {
+  CharacterView,
+  CHARACTER_EQUIPMENT_ASSETS,
+  type Equipment as LayeredEquipment,
+} from "../components/CharacterView";
 import { Screen } from "../components/Screen";
 import { useFeedback } from "../context/FeedbackContext";
 import { useGameInventoryEquipment, useGameProgress } from "../context/GameContext";
@@ -19,6 +23,7 @@ import { buildDerivedStats } from "../lib/gameRules";
 import { getRarityLabel, getSlotLabel, normalizeItemText } from "../lib/gameUi";
 import { getNextHealthDecayLabel } from "../lib/healthUi";
 import {
+  Button,
   ChestOpeningModal,
   Card,
   FullscreenItemDetails,
@@ -34,19 +39,49 @@ import {
 const LEFT_SLOTS = ["head", "neck", "shoulders", "chest", "waist", "ring1", "trinket1"] as const;
 const RIGHT_SLOTS = ["back", "main_hand", "off_hand", "wrist", "hands", "legs", "feet"] as const;
 
-function mapEquipmentToLayers(entries: Array<{ slot: string }> = []): LayeredEquipment {
+function mapEquipmentToLayers(
+  entries: Array<{
+    slot: string;
+    item?: { icon?: string | null; subclass?: string | null };
+    weapon_stats?: { weapon_category?: string | null } | null;
+  }> = [],
+): LayeredEquipment {
   const layered: LayeredEquipment = {};
 
+  function resolveLayerKey(
+    slot: keyof LayeredEquipment,
+    preferredKey: string | null | undefined,
+    fallbackKey: string,
+  ) {
+    if (preferredKey && CHARACTER_EQUIPMENT_ASSETS[slot]?.[preferredKey]) {
+      return preferredKey;
+    }
+    return CHARACTER_EQUIPMENT_ASSETS[slot]?.[fallbackKey] ? fallbackKey : undefined;
+  }
+
   for (const entry of entries) {
-    if (entry.slot === "head") layered.head = "helmet1";
-    if (entry.slot === "shoulders") layered.shoulders = "shoulders1";
-    if (entry.slot === "chest") layered.chest = "armor1";
-    if (entry.slot === "wrist" || entry.slot === "hands") layered.wrists = "wrists1";
-    if (entry.slot === "waist") layered.belt = "belt1";
-    if (entry.slot === "legs") layered.legs = "pants1";
-    if (entry.slot === "feet") layered.boots = "boots1";
-    if (entry.slot === "back") layered.cloak = "cloak1";
-    if (entry.slot === "main_hand" || entry.slot === "off_hand" || entry.slot === "ranged") layered.weapon = "sword1";
+    const itemIcon = entry.item?.icon;
+
+    if (entry.slot === "head") layered.head = resolveLayerKey("head", itemIcon, "helmet1");
+    if (entry.slot === "shoulders") layered.shoulders = resolveLayerKey("shoulders", itemIcon, "shoulders1");
+    if (entry.slot === "chest") layered.chest = resolveLayerKey("chest", itemIcon, "armor1");
+    if (entry.slot === "wrist" || entry.slot === "hands") layered.wrists = resolveLayerKey("wrists", itemIcon, "wrists1");
+    if (entry.slot === "waist") layered.belt = resolveLayerKey("belt", itemIcon, "belt1");
+    if (entry.slot === "legs") layered.legs = resolveLayerKey("legs", itemIcon, "pants1");
+    if (entry.slot === "feet") layered.boots = resolveLayerKey("boots", itemIcon, "boots1");
+    if (entry.slot === "back") layered.cloak = resolveLayerKey("cloak", itemIcon, "cloak1");
+    if (entry.slot === "main_hand" || entry.slot === "off_hand" || entry.slot === "ranged") {
+      const weaponCategory = entry.weapon_stats?.weapon_category;
+      const subclass = entry.item?.subclass;
+      const hasNoMatchingLayerArt =
+        weaponCategory === "ranged" ||
+        subclass === "bow" ||
+        subclass === "staff" ||
+        subclass === "spellbook";
+      if (!hasNoMatchingLayerArt) {
+        layered.weapon = resolveLayerKey("weapon", itemIcon, "sword1");
+      }
+    }
   }
 
   return layered;
@@ -59,6 +94,16 @@ type StatHint = {
   value: string | number;
   description: string;
 };
+
+function translateOrFallback(
+  t: (key: string, params?: Record<string, string | number>) => string,
+  key: string,
+  fallback: string,
+  params?: Record<string, string | number>,
+) {
+  const translated = t(key, params);
+  return translated === key ? fallback : translated;
+}
 
 export function CharacterScreen() {
   const t = useTranslation();
@@ -207,6 +252,16 @@ export function CharacterScreen() {
   );
   const selectedItemRequiredLevel = getItemRequiredLevel(selectedItem);
   const selectedItemLocked = isItemLevelLocked(selectedItem);
+  const firstEquippableBagItem = useMemo(
+    () => bagItems.find((item) => !isItemLevelLocked(item) && item.item?.type !== "chest") ?? null,
+    [bagItems, heroLevel],
+  );
+  const firstEquippableStatEntries = useMemo(
+    () => (firstEquippableBagItem ? buildItemStatEntries(firstEquippableBagItem, t).slice(0, 3) : []),
+    [firstEquippableBagItem, t],
+  );
+  const showFirstEquipGuide = equippedCount === 0 && bagItems.length > 0;
+  const showEmptyBagGuide = equippedCount === 0 && bagItems.length === 0;
 
   async function openItemByInventoryId(inventoryId: number) {
     try {
@@ -456,6 +511,13 @@ export function CharacterScreen() {
 
       <Card>
         <Text style={styles.sectionTitle}>Мини-характеристики</Text>
+        <Text style={styles.sectionHint}>
+          {translateOrFallback(
+            t,
+            "screens.character.statHint",
+            "Нажми на характеристику, чтобы посмотреть, как она влияет на награды и прогресс.",
+          )}
+        </Text>
         <View style={styles.statsRow}>
           {statHints.map((chip) => (
             <Pressable key={chip.key} onPress={() => setSelectedStat(chip)} style={styles.statChip}>
@@ -472,6 +534,82 @@ export function CharacterScreen() {
           ))}
         </View>
       </Card>
+
+      {showFirstEquipGuide ? (
+        <Card tone="accent">
+          <Text style={styles.sectionTitle}>
+            {translateOrFallback(t, "screens.character.firstEquipTitle", "Что надеть сейчас")}
+          </Text>
+          <Text style={styles.sectionHint}>
+            {firstEquippableBagItem
+              ? translateOrFallback(
+                  t,
+                  "screens.character.firstEquipDescription",
+                  "У тебя уже есть доступный предмет. Открой его и надень, чтобы бонусы начали реально работать.",
+                )
+              : translateOrFallback(
+                  t,
+                  "screens.character.firstEquipLockedDescription",
+                  "В сумке уже есть предметы, но они пока выше твоего уровня. Сначала закрой еще несколько заданий.",
+                )}
+          </Text>
+
+          {firstEquippableBagItem ? (
+            <View style={styles.recommendationCard}>
+              <View style={styles.recommendationHeader}>
+                <View style={styles.recommendationIconWrap}>
+                  <GameIcon
+                    itemId={firstEquippableBagItem.item.id ?? firstEquippableBagItem.item_id}
+                    itemType={firstEquippableBagItem.item.type}
+                    itemSlot={firstEquippableBagItem.item.slot}
+                    itemSubclass={firstEquippableBagItem.item.subclass}
+                    rarity={firstEquippableBagItem.item.rarity}
+                    name={firstEquippableBagItem.item.icon}
+                    size={28}
+                    color={colors.primary}
+                  />
+                </View>
+                <View style={styles.recommendationCopy}>
+                  <Text style={styles.recommendationTitle}>{normalizeItemText(firstEquippableBagItem.item.name)}</Text>
+                  <Text style={styles.recommendationMeta}>
+                    {getSlotLabel(firstEquippableBagItem.item.slot, t)} | {t("screens.character.levelBadge", { level: getItemRequiredLevel(firstEquippableBagItem) })}
+                  </Text>
+                </View>
+              </View>
+              {firstEquippableStatEntries.length ? (
+                <View style={styles.recommendationStats}>
+                  {firstEquippableStatEntries.map((entry) => (
+                    <View key={`${entry.label}-${entry.value}`} style={styles.recommendationStatChip}>
+                      <Text style={styles.recommendationStatLabel}>{entry.label}</Text>
+                      <Text style={styles.recommendationStatValue}>{entry.value}</Text>
+                    </View>
+                  ))}
+                </View>
+              ) : null}
+              <Button
+                label={translateOrFallback(t, "screens.character.firstEquipAction", "Открыть предмет")}
+                icon="shield-account"
+                onPress={() => openItemByInventoryId(firstEquippableBagItem.id)}
+              />
+            </View>
+          ) : null}
+        </Card>
+      ) : null}
+
+      {showEmptyBagGuide ? (
+        <Card tone="subtle">
+          <Text style={styles.sectionTitle}>
+            {translateOrFallback(t, "screens.character.emptyBagTitle", "Экипировка появится после первой награды")}
+          </Text>
+          <Text style={styles.sectionHint}>
+            {translateOrFallback(
+              t,
+              "screens.character.emptyBagDescription",
+              "Пока сумка пустая. Сначала закрой задания или зайди в магазин, а затем вернись сюда, чтобы надеть первый предмет.",
+            )}
+          </Text>
+        </Card>
+      ) : null}
 
       <Card>
         <View style={styles.bagHeader}>
@@ -776,6 +914,11 @@ function createStyles(colors: ReturnType<typeof useThemeColors>, themeMode: Retu
     fontSize: 17,
     fontWeight: "900",
   },
+  sectionHint: {
+    color: colors.textMuted,
+    fontSize: 12,
+    lineHeight: 18,
+  },
   statsRow: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -822,6 +965,67 @@ function createStyles(colors: ReturnType<typeof useThemeColors>, themeMode: Retu
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
+  },
+  recommendationCard: {
+    gap: 10,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: themeMode === "light" ? "rgba(214,199,170,0.9)" : "rgba(255,255,255,0.12)",
+    backgroundColor: themeMode === "light" ? "rgba(251,247,239,0.95)" : "rgba(9,14,24,0.8)",
+    padding: 12,
+  },
+  recommendationHeader: {
+    flexDirection: "row",
+    gap: 10,
+    alignItems: "center",
+  },
+  recommendationIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: themeMode === "light" ? "rgba(183,121,31,0.16)" : "rgba(245,158,11,0.12)",
+    borderWidth: 1,
+    borderColor: themeMode === "light" ? "rgba(183,121,31,0.24)" : "rgba(245,158,11,0.24)",
+  },
+  recommendationCopy: {
+    flex: 1,
+    gap: 2,
+  },
+  recommendationTitle: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: "900",
+  },
+  recommendationMeta: {
+    color: colors.textMuted,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  recommendationStats: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  recommendationStatChip: {
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: themeMode === "light" ? "rgba(214,199,170,0.7)" : "rgba(255,255,255,0.08)",
+    backgroundColor: themeMode === "light" ? "rgba(255,250,240,0.9)" : "rgba(8,13,23,0.66)",
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    gap: 2,
+  },
+  recommendationStatLabel: {
+    color: colors.textMuted,
+    fontSize: 10,
+    fontWeight: "700",
+  },
+  recommendationStatValue: {
+    color: colors.text,
+    fontSize: 13,
+    fontWeight: "900",
   },
   bagCount: {
     color: colors.primary,

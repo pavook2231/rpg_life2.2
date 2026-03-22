@@ -720,6 +720,40 @@ def refresh_access_token(db: Session, refresh_token: str) -> dict:
     }
 
 
+def logout_mobile_session(db: Session, refresh_token: str) -> dict:
+    payload = auth.decode_token(refresh_token)
+    if not auth.validate_token_type(payload, "refresh"):
+        return {"ok": True}
+
+    email = payload.get("sub") if payload else None
+    token_id = payload.get("jti") if payload else None
+    if not email or not token_id:
+        return {"ok": True}
+
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        return {"ok": True}
+
+    token_session = (
+        db.query(RefreshTokenSession)
+        .filter(
+            RefreshTokenSession.user_id == user.id,
+            RefreshTokenSession.jti_hash == auth.hash_token_id(token_id),
+            RefreshTokenSession.is_revoked == False,
+        )
+        .first()
+    )
+    if not token_session:
+        return {"ok": True}
+
+    now = utc_now()
+    token_session.is_revoked = True
+    token_session.last_used_at = now
+    token_session.revoked_at = now
+    db.commit()
+    return {"ok": True}
+
+
 def change_password(db: Session, current_user: User, current_password: str, new_password: str) -> dict:
     user = db.query(User).filter(User.id == current_user.id).first()
     if not user:

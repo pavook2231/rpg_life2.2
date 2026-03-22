@@ -1,11 +1,12 @@
-import { useFocusEffect, useNavigation, useRoute } from "@react-navigation/native";
+﻿import { useFocusEffect, useNavigation, useRoute } from "@react-navigation/native";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, RefreshControl, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 
-import { fetchLeaderboard, type LeaderboardEntry, type LeaderboardPeriod, type LeaderboardResponse } from "../api/game";
+import { type LeaderboardEntry, type LeaderboardPeriod, type LeaderboardResponse } from "../api/game";
 import {
   fetchFriendRequests,
   fetchFriends,
+  fetchGlobalLeaderboard,
   fetchFriendsLeaderboard,
   respondToFriendRequest,
   searchUsers,
@@ -238,9 +239,7 @@ export function FriendsScreen() {
         setLeaderboardPage(payload.pagination.page);
         setLeaderboardHasMore(payload.pagination.page < payload.pagination.total_pages);
       } else {
-        const payload = await fetchLeaderboard(leaderboardMetric, "global", page, LEADERBOARD_PAGE_SIZE, leaderboardPeriod, {
-          forceRefresh: !append,
-        });
+        const payload = await fetchGlobalLeaderboard(leaderboardMetric, page, LEADERBOARD_PAGE_SIZE, leaderboardPeriod);
         if (requestId !== leaderboardRequestRef.current) {
           return;
         }
@@ -429,11 +428,11 @@ export function FriendsScreen() {
   function getPeriodLabel(value: LeaderboardPeriod) {
     switch (value) {
       case "weekly":
-        return translateOrFallback(t, "screens.friends.periods.weekly", "Неделя");
+        return translateOrFallback(t, "screens.friends.periods.weekly", "РќРµРґРµР»СЏ");
       case "season":
-        return translateOrFallback(t, "screens.friends.periods.season", "Сезон");
+        return translateOrFallback(t, "screens.friends.periods.season", "РЎРµР·РѕРЅ");
       default:
-        return translateOrFallback(t, "screens.friends.periods.all_time", "Все время");
+        return translateOrFallback(t, "screens.friends.periods.all_time", "Р’СЃРµ РІСЂРµРјСЏ");
     }
   }
 
@@ -454,7 +453,7 @@ export function FriendsScreen() {
         message: translateOrFallback(
           t,
           "screens.friends.shareIdentityMessage",
-          `Мой код в RPG Life: ${currentUserIdentityLabel}. Добавь меня в друзья через поиск по нику или RPG-ID.`,
+          `РњРѕР№ РєРѕРґ РІ RPG Life: ${currentUserIdentityLabel}. Р”РѕР±Р°РІСЊ РјРµРЅСЏ РІ РґСЂСѓР·СЊСЏ С‡РµСЂРµР· РїРѕРёСЃРє РїРѕ РЅРёРєСѓ РёР»Рё RPG-ID.`,
           { identity: currentUserIdentityLabel },
         ),
       });
@@ -468,53 +467,145 @@ export function FriendsScreen() {
   const incomingRequests = friendRequests.filter((request) => request.direction === "incoming");
   const outgoingRequests = friendRequests.filter((request) => request.direction === "outgoing");
   const pendingRequestCount = friendRequests.length;
-  const topLeaderboardEntry = currentLeaderboardItems[0] ?? null;
+  const currentUserId = profile?.user?.id;
+  const friendsLeaderboardHasPeers =
+    activeTab !== "leaderboard" ||
+    friends.length > 0 ||
+    (currentUserId != null
+      ? currentLeaderboardItems.some((item) => item.user_id !== currentUserId)
+      : currentLeaderboardItems.length > 0);
+  const visibleLeaderboardItems = activeTab === "leaderboard" && !friendsLeaderboardHasPeers ? [] : currentLeaderboardItems;
+  const topLeaderboardEntry = visibleLeaderboardItems[0] ?? null;
   const topLeaderboardLabel = topLeaderboardEntry ? `#${topLeaderboardEntry.rank} ${topLeaderboardEntry.name}` : EMPTY_VALUE;
   const leaderboardPeriodLabel = getPeriodLabel(currentLeaderboardMeta?.period ?? leaderboardPeriod);
   const leaderboardPeriodEndsLabel = currentLeaderboardMeta?.period_ends_at
     ? new Date(currentLeaderboardMeta.period_ends_at).toLocaleDateString()
     : null;
   const leaderboardEmptyActionLabel = activeTab === "leaderboard"
-    ? t("screens.friends.tabs.global")
+    ? t("screens.friends.empty.findFriendsAction")
     : t("common.createGoal");
   const handleLeaderboardEmptyAction = activeTab === "leaderboard"
-    ? () => setActiveTab("global")
+    ? focusSearchInput
     : () => navigation.navigate("GoalSelect");
   const currentUserIdentityLabel = formatIdentityLabel(profile?.user?.username, profile?.user?.friend_id);
-  const socialPulse = friends.length === 0
+  const socialSupportTitle = friends.length === 0
+    ? translateOrFallback(t, "screens.friends.quick.supportTitleStart", "РљР°Рє РЅР°С‡Р°С‚СЊ РІРјРµСЃС‚Рµ")
+    : translateOrFallback(t, "screens.friends.quick.supportTitleActive", "РљР°Рє social РїРѕРјРѕРіР°РµС‚ РґРµСЂР¶Р°С‚СЊ С‚РµРјРї");
+  const socialSupportDescription = friends.length === 0
+    ? translateOrFallback(
+        t,
+        "screens.friends.quick.supportDescriptionStart",
+        "Р—РґРµСЃСЊ РІР°Р¶РЅРµРµ РЅРµ СЃРѕСЂРµРІРЅРѕРІР°РЅРёРµ, Р° РѕС‰СѓС‰РµРЅРёРµ, С‡С‚Рѕ С‚С‹ РёРґРµС€СЊ Рє С†РµР»Рё РЅРµ РІ РѕРґРёРЅРѕС‡РєСѓ.",
+      )
+    : translateOrFallback(
+        t,
+        "screens.friends.quick.supportDescriptionActive",
+        "РСЃРїРѕР»СЊР·СѓР№ РґСЂСѓР·РµР№ РєР°Рє РјСЏРіРєРёР№ РѕСЂРёРµРЅС‚РёСЂ: РІРёРґРµС‚СЊ С‚РµРјРї, РїРѕРґРґРµСЂР¶РёРІР°С‚СЊ СЂРёС‚Рј Рё РЅРµ РІС‹РїР°РґР°С‚СЊ РёР· РїСѓС‚Рё.",
+      );
+  const socialSupportItems = friends.length === 0
+    ? [
+        {
+          title: translateOrFallback(t, "screens.friends.quick.supportStepFindTitle", "РќР°Р№РґРё С‡РµР»РѕРІРµРєР° РїРѕ РЅРёРєСѓ РёР»Рё RPG-ID"),
+          description: translateOrFallback(
+            t,
+            "screens.friends.quick.supportStepFindDescription",
+            "Р”РѕР±Р°РІСЊ РїРµСЂРІРѕРіРѕ Р·РЅР°РєРѕРјРѕРіРѕ, СЃ РєРµРј РїСЂРѕС‰Рµ РґРµСЂР¶Р°С‚СЊ РѕР±С‰РёР№ СЂРёС‚Рј Рё СЃРјРѕС‚СЂРµС‚СЊ РЅР° РїСЂРѕРіСЂРµСЃСЃ Р±РµР· РґР°РІР»РµРЅРёСЏ.",
+          ),
+        },
+        {
+          title: translateOrFallback(t, "screens.friends.quick.supportStepSendTitle", "РћС‚РїСЂР°РІСЊ Р·Р°СЏРІРєСѓ Рё РґРѕР¶РґРёСЃСЊ РѕС‚РІРµС‚Р°"),
+          description: translateOrFallback(
+            t,
+            "screens.friends.quick.supportStepSendDescription",
+            "РџРѕСЃР»Рµ РїСЂРёРЅСЏС‚РёСЏ Р·Р°СЏРІРєРё Сѓ С‚РµР±СЏ РїРѕСЏРІРёС‚СЃСЏ СЃРІРѕР№ РґСЂСѓР¶РµСЃРєРёР№ РєСЂСѓРі Рё РїРѕРЅСЏС‚РЅС‹Р№ social-РєРѕРЅС‚РµРєСЃС‚.",
+          ),
+        },
+        {
+          title: translateOrFallback(t, "screens.friends.quick.supportStepTrackTitle", "РЎРјРѕС‚СЂРё РЅР° РґСЂСѓР¶РµСЃРєРёР№ СЂРµР№С‚РёРЅРі РєР°Рє РЅР° РѕСЂРёРµРЅС‚РёСЂ"),
+          description: translateOrFallback(
+            t,
+            "screens.friends.quick.supportStepTrackDescription",
+            "Р РµР№С‚РёРЅРі РґСЂСѓР·РµР№ РїРѕР»РµР·РµРЅ РЅРµ СЂР°РґРё СЃС‚СЂРµСЃСЃР°, Р° С‡С‚РѕР±С‹ РїРѕРЅРёРјР°С‚СЊ С‚РµРјРї Рё РЅРµ С‚РµСЂСЏС‚СЊ РґРІРёР¶РµРЅРёРµ Рє С†РµР»Рё.",
+          ),
+        },
+      ]
+    : [
+        {
+          title: translateOrFallback(t, "screens.friends.quick.supportStepCheckTitle", "РЎРјРѕС‚СЂРё, РєС‚Рѕ РґРµСЂР¶РёС‚ С‚РµРјРї СЂСЏРґРѕРј"),
+          description: translateOrFallback(
+            t,
+            "screens.friends.quick.supportStepCheckDescription",
+            "Р Р°Р· РІ РґРµРЅСЊ РїСЂРѕРІРµСЂСЏР№ РґСЂСѓР¶РµСЃРєРёР№ СЂРµР№С‚РёРЅРі, С‡С‚РѕР±С‹ СѓРІРёРґРµС‚СЊ Р±Р»РёР·РєРёР№ РѕСЂРёРµРЅС‚РёСЂ, Р° РЅРµ Р°Р±СЃС‚СЂР°РєС‚РЅС‹Р№ С‚РѕРї.",
+          ),
+        },
+        {
+          title: translateOrFallback(t, "screens.friends.quick.supportStepUseTitle", "РСЃРїРѕР»СЊР·СѓР№ СЂРµР№С‚РёРЅРі РєР°Рє РїРѕРґСЃРєР°Р·РєСѓ"),
+          description: translateOrFallback(
+            t,
+            "screens.friends.quick.supportStepUseDescription",
+            "Р•СЃР»Рё РєС‚Рѕ-С‚Рѕ СѓС€РµР» РІРїРµСЂРµРґ, СЌС‚Рѕ СЃРёРіРЅР°Р» РЅРµ СЃСЂР°РІРЅРёРІР°С‚СЊ СЃРµР±СЏ Р¶РµСЃС‚РєРѕ, Р° РІС‹Р±СЂР°С‚СЊ РѕРґРёРЅ СЃР»РµРґСѓСЋС‰РёР№ С€Р°Рі РЅР° СЃРµРіРѕРґРЅСЏ.",
+          ),
+        },
+        {
+          title: translateOrFallback(t, "screens.friends.quick.supportStepShareTitle", "РџРѕРґРґРµСЂР¶РёРІР°Р№С‚Рµ РїСѓС‚СЊ РІРјРµСЃС‚Рµ"),
+          description: translateOrFallback(
+            t,
+            "screens.friends.quick.supportStepShareDescription",
+            "РџРµСЂРµРґР°РІР°Р№ СЃРІРѕР№ РєРѕРґ РЅРѕРІС‹Рј Р»СЋРґСЏРј Рё СЃРѕР±РёСЂР°Р№ РѕРєСЂСѓР¶РµРЅРёРµ, РєРѕС‚РѕСЂРѕРµ РїРѕРјРѕРіР°РµС‚ РІРѕР·РІСЂР°С‰Р°С‚СЊСЃСЏ РІ РїСЂРёР»РѕР¶РµРЅРёРµ СЂРµРіСѓР»СЏСЂРЅРѕ.",
+          ),
+        },
+      ];
+  const socialPulseCard = friends.length === 0
     ? {
-        title: translateOrFallback(t, "screens.friends.quick.pulseNoFriendsTitle", "Добавь первых союзников"),
+        title: translateOrFallback(t, "screens.friends.quick.pulseNoFriendsTitle", "Р”РѕР±Р°РІСЊ РїРµСЂРІРѕРіРѕ СЃРѕСЋР·РЅРёРєР°"),
         description: translateOrFallback(
           t,
           "screens.friends.quick.pulseNoFriendsDescription",
-          "С друзьями проще держать темп: можно сравнивать прогресс и следить за рейтингом.",
+          "РЎ РґСЂСѓР·СЊСЏРјРё РїСЂРѕС‰Рµ РЅРµ Р±СЂРѕСЃР°С‚СЊ С†РµР»СЊ РЅР° РїРѕР»РїСѓС‚Рё: РІРёРґРЅРѕ РѕР±С‰РёР№ С‚РµРјРї, РїСЂРѕС‰Рµ РІРµСЂРЅСѓС‚СЊСЃСЏ РІ СЂРёС‚Рј Рё РґРµР»Р°С‚СЊ СЃР»РµРґСѓСЋС‰РёР№ С€Р°Рі.",
         ),
         actionLabel: t("screens.friends.empty.findFriendsAction"),
         onPress: focusSearchInput,
       }
     : pendingRequestCount > 0
       ? {
-          title: translateOrFallback(t, "screens.friends.quick.pulsePendingTitle", "Есть новые контакты"),
+          title: translateOrFallback(t, "screens.friends.quick.pulsePendingTitle", "РЎРІСЏР·Рё СѓР¶Рµ СЃРѕР±РёСЂР°СЋС‚СЃСЏ"),
           description: translateOrFallback(
             t,
             "screens.friends.quick.pulsePendingDescription",
-            `У тебя уже ${pendingRequestCount} отправленных заявок. Пока ждёшь ответ, можно заглянуть в лидерборд.`,
+            `РЈ С‚РµР±СЏ СѓР¶Рµ ${pendingRequestCount} Р·Р°СЏРІРѕРє. РџРѕРєР° Р¶РґРµС€СЊ РѕС‚РІРµС‚, РјРѕР¶РЅРѕ РґРѕР±Р°РІРёС‚СЊ РµС‰Рµ РѕРґРЅРѕРіРѕ С‡РµР»РѕРІРµРєР° Рё СЃРѕР±СЂР°С‚СЊ СЃРІРѕР№ РєСЂСѓРі РїРѕРґРґРµСЂР¶РєРё.`,
             { count: pendingRequestCount },
           ),
-          actionLabel: translateOrFallback(t, "screens.friends.quick.openLeaderboard", "Открыть рейтинг"),
-          onPress: () => setActiveTab("leaderboard"),
+          actionLabel: t("screens.friends.empty.findFriendsAction"),
+          onPress: focusSearchInput,
         }
       : {
-          title: translateOrFallback(t, "screens.friends.quick.pulseReadyTitle", "Ты уже в социальной игре"),
+          title: translateOrFallback(t, "screens.friends.quick.pulseReadyTitle", "Р”РµСЂР¶РёС‚Рµ С‚РµРјРї РІРјРµСЃС‚Рµ"),
           description: translateOrFallback(
             t,
             "screens.friends.quick.pulseReadyDescription",
-            `У тебя ${friends.length} друзей. Открой рейтинг и посмотри, кого можно догнать сегодня.`,
+            `РЈ С‚РµР±СЏ ${friends.length} РґСЂСѓР·РµР№. Р—Р°РіР»СЏРЅРё РІ РґСЂСѓР¶РµСЃРєРёР№ СЂРµР№С‚РёРЅРі Рё РІС‹Р±РµСЂРё РѕРґРЅРѕРіРѕ С‡РµР»РѕРІРµРєР° РєР°Рє РјСЏРіРєРёР№ РѕСЂРёРµРЅС‚РёСЂ РЅР° СЃРµРіРѕРґРЅСЏ.`,
             { count: friends.length },
           ),
-          actionLabel: translateOrFallback(t, "screens.friends.quick.openLeaderboard", "Открыть рейтинг"),
+          actionLabel: translateOrFallback(t, "screens.friends.quick.openLeaderboard", "РћС‚РєСЂС‹С‚СЊ СЂРµР№С‚РёРЅРі"),
           onPress: () => setActiveTab("leaderboard"),
         };
+  const leaderboardGuide = activeTab === "leaderboard"
+    ? {
+        title: translateOrFallback(t, "screens.friends.quick.friendLeaderboardTitle", "Р”СЂСѓР¶РµСЃРєРёР№ С‚РµРјРї РЅРµРґРµР»Рё"),
+        description: translateOrFallback(
+          t,
+          "screens.friends.quick.friendLeaderboardDescription",
+          "РЎРјРѕС‚СЂРё РЅР° СЂРµР№С‚РёРЅРі РґСЂСѓР·РµР№ РєР°Рє РЅР° РѕСЂРёРµРЅС‚РёСЂ РїРѕ С‚РµРјРїСѓ. Р—РґРµСЃСЊ РІР°Р¶РЅРµРµ Р±Р»РёР·РєРёРµ Р»СЋРґРё Рё РїРѕРЅСЏС‚РЅС‹Р№ СЃР»РµРґСѓСЋС‰РёР№ С€Р°Рі, Р° РЅРµ Р°Р±СЃРѕР»СЋС‚РЅС‹Р№ С‚РѕРї.",
+        ),
+      }
+    : {
+        title: translateOrFallback(t, "screens.friends.quick.globalLeaderboardTitle", "Р“Р»РѕР±Р°Р»СЊРЅС‹Р№ РѕСЂРёРµРЅС‚РёСЂ"),
+        description: translateOrFallback(
+          t,
+          "screens.friends.quick.globalLeaderboardDescription",
+          "Р“Р»РѕР±Р°Р»СЊРЅС‹Р№ СЂРµР№С‚РёРЅРі РїРѕР»РµР·РµРЅ РєР°Рє С„РѕРЅ Рё РІРґРѕС…РЅРѕРІРµРЅРёРµ. Р”Р»СЏ РµР¶РµРґРЅРµРІРЅРѕРіРѕ СЂРёС‚РјР° РѕСЂРёРµРЅС‚РёСЂСѓР№СЃСЏ РІ РїРµСЂРІСѓСЋ РѕС‡РµСЂРµРґСЊ РЅР° РґСЂСѓР·РµР№ Рё СЃРІРѕР№ РїСѓС‚СЊ.",
+        ),
+      };
 
   return (
     <Screen title={t("screens.friends.title")} subtitle={t("screens.friends.subtitle")} scrollable={false}>
@@ -551,12 +642,30 @@ export function FriendsScreen() {
           }
         >
           <Card>
-            <Text style={styles.sectionTitle}>{translateOrFallback(t, "screens.friends.quick.pulseTitle", "Социальная сводка")}</Text>
-            <Text style={styles.pulseTitle}>{socialPulse.title}</Text>
-            <Text style={styles.pulseDescription}>{socialPulse.description}</Text>
-            <Pressable style={styles.pulseButton} onPress={socialPulse.onPress}>
-              <Text style={styles.pulseButtonText}>{socialPulse.actionLabel}</Text>
+            <Text style={styles.sectionTitle}>{translateOrFallback(t, "screens.friends.quick.pulseTitle", "РЎРѕС†РёР°Р»СЊРЅР°СЏ СЃРІРѕРґРєР°")}</Text>
+            <Text style={styles.pulseTitle}>{socialPulseCard.title}</Text>
+            <Text style={styles.pulseDescription}>{socialPulseCard.description}</Text>
+            <Pressable style={styles.pulseButton} onPress={socialPulseCard.onPress}>
+              <Text style={styles.pulseButtonText}>{socialPulseCard.actionLabel}</Text>
             </Pressable>
+          </Card>
+
+          <Card>
+            <Text style={styles.sectionTitle}>{socialSupportTitle}</Text>
+            <Text style={styles.pulseDescription}>{socialSupportDescription}</Text>
+            <View style={styles.supportList}>
+              {socialSupportItems.map((item, index) => (
+                <View key={`${item.title}-${index}`} style={styles.supportItem}>
+                  <View style={styles.supportStepBadge}>
+                    <Text style={styles.supportStepText}>{index + 1}</Text>
+                  </View>
+                  <View style={styles.supportCopy}>
+                    <Text style={styles.supportTitle}>{item.title}</Text>
+                    <Text style={styles.supportDescription}>{item.description}</Text>
+                  </View>
+                </View>
+              ))}
+            </View>
           </Card>
 
           <View style={styles.summaryRow}>
@@ -569,7 +678,7 @@ export function FriendsScreen() {
               <Text style={styles.summaryValue}>{searchResults.length}</Text>
             </View>
             <View style={styles.summaryChip}>
-              <Text style={styles.summaryLabel}>{translateOrFallback(t, "screens.friends.pendingTotal", "Ожидают ответа")}</Text>
+              <Text style={styles.summaryLabel}>{translateOrFallback(t, "screens.friends.pendingTotal", "РћР¶РёРґР°СЋС‚ РѕС‚РІРµС‚Р°")}</Text>
               <Text style={styles.summaryValue}>{pendingRequestCount}</Text>
             </View>
           </View>
@@ -581,30 +690,30 @@ export function FriendsScreen() {
             }}
           >
             <Text style={styles.sectionTitle}>
-              {translateOrFallback(t, "screens.friends.findFriendsTitle", "Найти друзей")}
+              {translateOrFallback(t, "screens.friends.findFriendsTitle", "РќР°Р№С‚Рё РґСЂСѓР·РµР№")}
             </Text>
             <Text style={styles.searchHint}>
               {translateOrFallback(
                 t,
                 "screens.friends.searchHint",
-                "Ищи людей по нику или по публичному ID формата RPG-000123.",
+                "РС‰Рё Р»СЋРґРµР№ РїРѕ РЅРёРєСѓ РёР»Рё РїРѕ РїСѓР±Р»РёС‡РЅРѕРјСѓ ID С„РѕСЂРјР°С‚Р° RPG-000123.",
               )}
             </Text>
             {currentUserIdentityLabel ? (
               <View style={styles.identityCard}>
                 <Text style={styles.identityLabel}>
-                  {translateOrFallback(t, "screens.friends.shareIdentityLabel", "Твой код для друзей")}
+                  {translateOrFallback(t, "screens.friends.shareIdentityLabel", "РўРІРѕР№ РєРѕРґ РґР»СЏ РґСЂСѓР·РµР№")}
                 </Text>
                 <Text style={styles.identityValue}>{currentUserIdentityLabel}</Text>
                 <Pressable style={styles.identityActionButton} onPress={handleShareIdentity}>
                   <Text style={styles.identityActionText}>
-                    {translateOrFallback(t, "screens.friends.shareIdentityAction", "Поделиться кодом")}
+                    {translateOrFallback(t, "screens.friends.shareIdentityAction", "РџРѕРґРµР»РёС‚СЊСЃСЏ РєРѕРґРѕРј")}
                   </Text>
                 </Pressable>
               </View>
             ) : null}
             <Text style={styles.sectionTitleHidden}>
-              {translateOrFallback(t, "screens.friends.findFriendsTitle", "Найти друзей")}
+              {translateOrFallback(t, "screens.friends.findFriendsTitle", "РќР°Р№С‚Рё РґСЂСѓР·РµР№")}
             </Text>
             <View style={styles.searchContainer}>
               <TextInput
@@ -679,7 +788,7 @@ export function FriendsScreen() {
                               disabled={!user.request_id || respondingRequestIds.includes(user.request_id)}
                             >
                               <Text style={styles.actionButtonText}>
-                                {translateOrFallback(t, "screens.friends.acceptRequest", "РџСЂРёРЅСЏС‚СЊ")}
+                                {translateOrFallback(t, "screens.friends.acceptRequest", "Р СџРЎР‚Р С‘Р Р…РЎРЏРЎвЂљРЎРЉ")}
                               </Text>
                             </Pressable>
                             <Pressable
@@ -691,7 +800,7 @@ export function FriendsScreen() {
                               disabled={!user.request_id || respondingRequestIds.includes(user.request_id)}
                             >
                               <Text style={styles.secondaryButtonText}>
-                                {translateOrFallback(t, "screens.friends.declineRequest", "РћС‚РєР»РѕРЅРёС‚СЊ")}
+                                {translateOrFallback(t, "screens.friends.declineRequest", "Р С›РЎвЂљР С”Р В»Р С•Р Р…Р С‘РЎвЂљРЎРЉ")}
                               </Text>
                             </Pressable>
                           </View>
@@ -736,7 +845,7 @@ export function FriendsScreen() {
           {incomingRequests.length > 0 ? (
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>
-                {translateOrFallback(t, "screens.friends.incomingRequests", "Входящие заявки")}
+                {translateOrFallback(t, "screens.friends.incomingRequests", "Р’С…РѕРґСЏС‰РёРµ Р·Р°СЏРІРєРё")}
               </Text>
               {incomingRequests.map((request) => {
                 const isResponding = respondingRequestIds.includes(request.id);
@@ -757,7 +866,7 @@ export function FriendsScreen() {
                           <Text style={styles.actionButtonText}>
                             {isResponding
                               ? t("common.loading")
-                              : translateOrFallback(t, "screens.friends.acceptRequest", "Принять")}
+                              : translateOrFallback(t, "screens.friends.acceptRequest", "РџСЂРёРЅСЏС‚СЊ")}
                           </Text>
                         </Pressable>
                         <Pressable
@@ -766,7 +875,7 @@ export function FriendsScreen() {
                           disabled={isResponding}
                         >
                           <Text style={styles.secondaryButtonText}>
-                            {translateOrFallback(t, "screens.friends.declineRequest", "Отклонить")}
+                            {translateOrFallback(t, "screens.friends.declineRequest", "РћС‚РєР»РѕРЅРёС‚СЊ")}
                           </Text>
                         </Pressable>
                       </View>
@@ -780,7 +889,7 @@ export function FriendsScreen() {
           {outgoingRequests.length > 0 ? (
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>
-                {translateOrFallback(t, "screens.friends.outgoingRequests", "Отправленные заявки")}
+                {translateOrFallback(t, "screens.friends.outgoingRequests", "РћС‚РїСЂР°РІР»РµРЅРЅС‹Рµ Р·Р°СЏРІРєРё")}
               </Text>
               {outgoingRequests.map((request) => (
                 <Card key={request.id}>
@@ -867,21 +976,34 @@ export function FriendsScreen() {
             />
           }
         >
+          <Card>
+            <Text style={styles.sectionTitle}>{leaderboardGuide.title}</Text>
+            <Text style={styles.pulseDescription}>{leaderboardGuide.description}</Text>
+          </Card>
+
           <View style={styles.summaryRow}>
             <View style={styles.summaryChip}>
               <Text style={styles.summaryLabel}>{t("screens.leaderboard.fields.score")}</Text>
               <Text style={styles.summaryValue}>{getMetricLabel(leaderboardMetric)}</Text>
             </View>
             <View style={styles.summaryChip}>
-              <Text style={styles.summaryLabel}>{translateOrFallback(t, "screens.friends.periodLabel", "Период")}</Text>
+              <Text style={styles.summaryLabel}>{translateOrFallback(t, "screens.friends.periodLabel", "РџРµСЂРёРѕРґ")}</Text>
               <Text style={styles.summaryValue}>{leaderboardPeriodLabel}</Text>
             </View>
             <View style={styles.summaryChip}>
-              <Text style={styles.summaryLabel}>{t("navigation.leaderboard")}</Text>
-              <Text style={styles.summaryValue}>{currentLeaderboardItems.length}</Text>
+              <Text style={styles.summaryLabel}>
+                {activeTab === "leaderboard"
+                  ? translateOrFallback(t, "screens.friends.summary.participants", "РЈС‡Р°СЃС‚РЅРёРєРѕРІ")
+                  : t("navigation.leaderboard")}
+              </Text>
+              <Text style={styles.summaryValue}>{visibleLeaderboardItems.length}</Text>
             </View>
             <View style={styles.summaryChip}>
-              <Text style={styles.summaryLabel}>TOP 1</Text>
+              <Text style={styles.summaryLabel}>
+                {activeTab === "leaderboard"
+                  ? translateOrFallback(t, "screens.friends.summary.friendTarget", "РћСЂРёРµРЅС‚РёСЂ РЅРµРґРµР»Рё")
+                  : translateOrFallback(t, "screens.friends.summary.globalTarget", "Р›СѓС‡С€РёР№ СЂРµР·СѓР»СЊС‚Р°С‚")}
+              </Text>
               <Text style={styles.summaryValue} numberOfLines={1}>
                 {topLeaderboardLabel}
               </Text>
@@ -889,7 +1011,7 @@ export function FriendsScreen() {
           </View>
           {leaderboardPeriodEndsLabel ? (
             <Text style={styles.periodHint}>
-              {translateOrFallback(t, "screens.friends.periodEnds", `Окно заканчивается ${leaderboardPeriodEndsLabel}`, {
+              {translateOrFallback(t, "screens.friends.periodEnds", `РћРєРЅРѕ Р·Р°РєР°РЅС‡РёРІР°РµС‚СЃСЏ ${leaderboardPeriodEndsLabel}`, {
                 date: leaderboardPeriodEndsLabel,
               })}
             </Text>
@@ -933,7 +1055,7 @@ export function FriendsScreen() {
           </View>
 
           {leaderboardLoading ? <StateBlock tone="info" icon="timer-sand" title={t("common.loading")} /> : null}
-          {!leaderboardLoading && currentLeaderboardItems.length === 0 ? (
+          {!leaderboardLoading && visibleLeaderboardItems.length === 0 ? (
             <StateBlock
               icon="flag-checkered"
               title={t("screens.friends.empty.leaderboardTitle")}
@@ -943,7 +1065,7 @@ export function FriendsScreen() {
             />
           ) : null}
 
-          {currentLeaderboardItems.map((item) => (
+          {visibleLeaderboardItems.map((item) => (
             <Card key={item.user_id}>
               <Text style={styles.title}>
                 #{item.rank} {item.name}
@@ -1280,6 +1402,44 @@ function createStyles(colors: ReturnType<typeof useThemeColors>) {
       color: colors.text,
       fontWeight: "700",
     },
+    supportList: {
+      gap: 10,
+      marginTop: 12,
+    },
+    supportItem: {
+      flexDirection: "row",
+      gap: 10,
+      alignItems: "flex-start",
+    },
+    supportStepBadge: {
+      width: 26,
+      height: 26,
+      borderRadius: 13,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: colors.backgroundRaised,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    supportStepText: {
+      color: colors.primary,
+      fontSize: 13,
+      fontWeight: "800",
+    },
+    supportCopy: {
+      flex: 1,
+      gap: 2,
+    },
+    supportTitle: {
+      color: colors.text,
+      fontSize: 14,
+      fontWeight: "700",
+    },
+    supportDescription: {
+      color: colors.textDim,
+      fontSize: 13,
+      lineHeight: 18,
+    },
     subTitle: {
       fontSize: 13,
       color: colors.textMuted,
@@ -1292,3 +1452,4 @@ function createStyles(colors: ReturnType<typeof useThemeColors>) {
     },
   });
 }
+

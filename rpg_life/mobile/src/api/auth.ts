@@ -90,6 +90,14 @@ export function recoverAccount(email: string) {
   });
 }
 
+export function logout(refreshToken: string) {
+  return apiRequest<{ ok: boolean }>("/auth/logout", {
+    authenticated: false,
+    method: "POST",
+    body: JSON.stringify({ refresh_token: refreshToken }),
+  });
+}
+
 export function getSocialAuthProviders() {
   return apiRequest<{ providers: SocialAuthProvider[] }>("/auth/providers", {
     authenticated: false,
