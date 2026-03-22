@@ -15,7 +15,7 @@ import {
   type InventoryItem,
   type ProfilePayload,
 } from "../api/game";
-import { getTodaySteps, watchTodaySteps } from "../lib/pedometer";
+import { getTodayStepsSnapshot, type StepTrackingState, watchTodaySteps } from "../lib/pedometer";
 import { getLastPedometerSyncState, saveLastPedometerSyncState } from "../storage/pedometerSyncStorage";
 import { useAuth } from "./AuthContext";
 import { useFeedback } from "./FeedbackContext";
@@ -67,12 +67,32 @@ type GameContextValue = {
   rewards: RewardsSummary | null;
   todaySteps: number | null;
   stepSourceLabel: string | null;
+  stepTrackingStatus: StepTrackingState | "sync_deferred" | null;
   isRefreshing: boolean;
   refreshGame: (forceRefresh?: boolean) => Promise<void>;
   applyQuestResult: (result: QuestCompletionResult) => Promise<void>;
 };
 
+type GameProgressContextValue = Pick<
+  GameContextValue,
+  | "profile"
+  | "hero"
+  | "rewards"
+  | "todaySteps"
+  | "stepSourceLabel"
+  | "stepTrackingStatus"
+  | "isRefreshing"
+  | "refreshGame"
+  | "applyQuestResult"
+>;
+
+type GameInventoryContextValue = Pick<GameContextValue, "equipment" | "inventory" | "refreshGame">;
+type GameAchievementsContextValue = Pick<GameContextValue, "achievements">;
+
 const GameContext = createContext<GameContextValue | undefined>(undefined);
+const GameProgressContext = createContext<GameProgressContextValue | undefined>(undefined);
+const GameInventoryContext = createContext<GameInventoryContextValue | undefined>(undefined);
+const GameAchievementsContext = createContext<GameAchievementsContextValue | undefined>(undefined);
 const INVENTORY_PAGE_SIZE = 100;
 
 async function fetchAllInventory(forceRefresh = false): Promise<InventoryItem[]> {
@@ -113,6 +133,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [todaySteps, setTodaySteps] = useState<number | null>(null);
   const [stepSourceLabel, setStepSourceLabel] = useState<string | null>(null);
+  const [stepTrackingStatus, setStepTrackingStatus] = useState<StepTrackingState | "sync_deferred" | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const { pushToast } = useFeedback();
   const { isOnline } = useOffline();
@@ -163,6 +184,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
       setInventory([]);
       setTodaySteps(null);
       setStepSourceLabel(null);
+      setStepTrackingStatus(null);
       backgroundLoadVersionRef.current += 1;
       return;
     }
@@ -193,11 +215,15 @@ export function GameProvider({ children }: { children: ReactNode }) {
     let stopWatch: (() => void) | null = null;
 
     async function syncDeviceStepsIfNeeded(steps: number) {
+      const normalizedSteps = Math.max(0, Math.floor(Number(steps || 0)));
+
       if (!isOnline) {
+        if (normalizedSteps >= 0) {
+          setStepTrackingStatus("sync_deferred");
+        }
         return;
       }
 
-      const normalizedSteps = Math.max(0, Math.floor(Number(steps || 0)));
       const now = new Date();
       const dayKey = localDayKey(now);
       const lastState = await getLastPedometerSyncState();
@@ -213,8 +239,9 @@ export function GameProvider({ children }: { children: ReactNode }) {
       try {
         await syncTodaySteps(normalizedSteps, localDayStartedAt(now), source);
         await saveLastPedometerSyncState({ dayKey, steps: normalizedSteps });
+        setStepTrackingStatus("connected");
       } catch {
-        // Best-effort sync; step tracking should not break the app when network/api is unavailable.
+        setStepTrackingStatus("sync_deferred");
       }
     }
 
@@ -223,15 +250,20 @@ export function GameProvider({ children }: { children: ReactNode }) {
         Platform.OS === "ios" ? "HealthKit" : Platform.OS === "android" ? "Google Fit" : t("screens.quests.quick.stepsSourceFallback");
       setStepSourceLabel(sourceLabel);
 
-      const initialSteps = await getTodaySteps();
-      if (!cancelled && initialSteps != null) {
-        setTodaySteps(initialSteps);
-        await syncDeviceStepsIfNeeded(initialSteps);
+      const initialSnapshot = await getTodayStepsSnapshot();
+      if (!cancelled) {
+        setStepTrackingStatus(initialSnapshot.steps != null ? (isOnline ? "connected" : "sync_deferred") : initialSnapshot.state);
+        setTodaySteps(initialSnapshot.steps);
+      }
+
+      if (!cancelled && initialSnapshot.steps != null) {
+        await syncDeviceStepsIfNeeded(initialSnapshot.steps);
       }
 
       stopWatch = await watchTodaySteps((steps) => {
         if (!cancelled) {
           setTodaySteps(steps);
+          setStepTrackingStatus(isOnline ? "connected" : "sync_deferred");
           void syncDeviceStepsIfNeeded(steps);
         }
       });
@@ -369,20 +401,97 @@ export function GameProvider({ children }: { children: ReactNode }) {
       rewards,
       todaySteps,
       stepSourceLabel,
+      stepTrackingStatus,
       isRefreshing,
       refreshGame,
       applyQuestResult,
     }),
-    [achievements, applyQuestResult, equipment, hero, inventory, isRefreshing, profile, refreshGame, rewards, stepSourceLabel, todaySteps],
+    [
+      achievements,
+      applyQuestResult,
+      equipment,
+      hero,
+      inventory,
+      isRefreshing,
+      profile,
+      refreshGame,
+      rewards,
+      stepSourceLabel,
+      stepTrackingStatus,
+      todaySteps,
+    ],
   );
 
-  return <GameContext.Provider value={value}>{children}</GameContext.Provider>;
+  const progressValue = useMemo(
+    () => ({
+      profile,
+      hero,
+      rewards,
+      todaySteps,
+      stepSourceLabel,
+      stepTrackingStatus,
+      isRefreshing,
+      refreshGame,
+      applyQuestResult,
+    }),
+    [applyQuestResult, hero, isRefreshing, profile, refreshGame, rewards, stepSourceLabel, stepTrackingStatus, todaySteps],
+  );
+
+  const inventoryValue = useMemo(
+    () => ({
+      equipment,
+      inventory,
+      refreshGame,
+    }),
+    [equipment, inventory, refreshGame],
+  );
+
+  const achievementsValue = useMemo(
+    () => ({
+      achievements,
+    }),
+    [achievements],
+  );
+
+  return (
+    <GameProgressContext.Provider value={progressValue}>
+      <GameInventoryContext.Provider value={inventoryValue}>
+        <GameAchievementsContext.Provider value={achievementsValue}>
+          <GameContext.Provider value={value}>{children}</GameContext.Provider>
+        </GameAchievementsContext.Provider>
+      </GameInventoryContext.Provider>
+    </GameProgressContext.Provider>
+  );
 }
 
 export function useGame() {
   const context = useContext(GameContext);
   if (!context) {
     throw new Error("useGame must be used inside GameProvider");
+  }
+  return context;
+}
+
+export function useGameProgress() {
+  const context = useContext(GameProgressContext);
+  if (!context) {
+    throw new Error("useGameProgress must be used inside GameProvider");
+  }
+  return context;
+}
+
+export function useGameInventoryEquipment() {
+  const context = useContext(GameInventoryContext);
+  if (!context) {
+    throw new Error("useGameInventoryEquipment must be used inside GameProvider");
+  }
+  return context;
+}
+
+export function useGameAchievements() {
+  const context = useContext(GameAchievementsContext);
+  if (!context) {
+    throw new Error("useGameAchievements must be used inside GameProvider");
   }
   return context;
 }

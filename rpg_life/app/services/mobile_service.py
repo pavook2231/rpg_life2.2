@@ -311,53 +311,7 @@ def get_inventory(db: Session, current_user: User, page: int, limit: int, sort: 
     equipped_ids = inventory_service.get_equipped_inventory_ids(db, current_user.id)
     items = []
     for inv in rows:
-        normalize_item_model(inv.item)
-        items.append(
-            normalize_nested_strings(
-                {
-                    "id": inv.id,
-                    "item_id": inv.item_id,
-                    "quantity": inv.quantity,
-                    "is_equipped": inv.id in equipped_ids,
-                    "acquired_at": inv.acquired_at.isoformat() if inv.acquired_at else None,
-                    "item": {
-                        "id": inv.item.id,
-                        "name": inv.item.name,
-                        "description": inv.item.description,
-                        "type": inv.item.type,
-                        "subclass": inv.item.subclass,
-                        "slot": inv.item.slot,
-                        "rarity": inv.item.rarity,
-                        "icon": inv.item.icon,
-                        "required_level": inv.item.required_level,
-                        "required_class": inv.item.required_class,
-                        "strength_bonus": inv.item.strength_bonus,
-                        "agility_bonus": inv.item.agility_bonus,
-                        "intellect_bonus": inv.item.intellect_bonus,
-                        "stamina_bonus": inv.item.stamina_bonus,
-                        "xp_bonus": inv.item.xp_bonus,
-                        "crystal_bonus": inv.item.crystal_bonus,
-                        "health_bonus": inv.item.health_bonus,
-                    },
-                    "weapon_stats": {
-                        "weapon_type": inv.item.weapon_stats.weapon_type,
-                        "weapon_category": inv.item.weapon_stats.weapon_category,
-                        "damage_min": inv.item.weapon_stats.damage_min,
-                        "damage_max": inv.item.weapon_stats.damage_max,
-                        "speed": inv.item.weapon_stats.speed,
-                        "dps": inv.item.weapon_stats.dps,
-                    }
-                    if inv.item.weapon_stats
-                    else None,
-                    "armor_stats": {
-                        "armor_value": inv.item.armor_stats.armor_value,
-                        "slot": inv.item.armor_stats.slot,
-                    }
-                    if inv.item.armor_stats
-                    else None,
-                }
-            )
-        )
+        items.append(inventory_service.serialize_inventory_item_entry(inv, is_equipped=inv.id in equipped_ids))
     return {
         "items": items,
         "pagination": {
@@ -504,90 +458,16 @@ def get_equipment_overview(db: Session, current_user: User) -> dict:
                 {
                     "slot": slot,
                     "inventory_id": entry["inventory_id"],
-                    "item": {
-                        "id": item.id,
-                        "name": item.name,
-                        "description": item.description,
-                        "type": item.type,
-                        "subclass": item.subclass,
-                        "slot": item.slot,
-                        "icon": item.icon,
-                        "rarity": item.rarity,
-                        "strength_bonus": item.strength_bonus,
-                        "agility_bonus": item.agility_bonus,
-                        "intellect_bonus": item.intellect_bonus,
-                        "stamina_bonus": item.stamina_bonus,
-                        "xp_bonus": item.xp_bonus,
-                        "crystal_bonus": item.crystal_bonus,
-                        "health_bonus": item.health_bonus,
-                        "required_level": item.required_level,
-                    },
-                    "weapon_stats": {
-                        "weapon_type": entry["weapon_stats"].weapon_type,
-                        "weapon_category": entry["weapon_stats"].weapon_category,
-                        "damage_min": entry["weapon_stats"].damage_min,
-                        "damage_max": entry["weapon_stats"].damage_max,
-                        "speed": entry["weapon_stats"].speed,
-                        "dps": entry["weapon_stats"].dps,
-                    }
-                    if entry.get("weapon_stats")
-                    else None,
-                    "armor_stats": {
-                        "armor_value": entry["armor_stats"].armor_value,
-                        "slot": entry["armor_stats"].slot,
-                    }
-                    if entry.get("armor_stats")
-                    else None,
+                    "item": inventory_service.serialize_item_payload(item),
+                    "weapon_stats": inventory_service.serialize_weapon_stats_payload(entry.get("weapon_stats")),
+                    "armor_stats": inventory_service.serialize_armor_stats_payload(entry.get("armor_stats")),
                 }
             )
         )
 
     bag_items = []
     for inv in context["bag_items"]:
-        item = normalize_item_model(inv.item)
-        bag_items.append(
-            normalize_nested_strings(
-                {
-                    "id": inv.id,
-                    "quantity": inv.quantity,
-                    "acquired_at": inv.acquired_at.isoformat() if inv.acquired_at else None,
-                    "item": {
-                        "id": item.id,
-                        "name": item.name,
-                        "description": item.description,
-                        "type": item.type,
-                        "subclass": item.subclass,
-                        "slot": item.slot,
-                        "icon": item.icon,
-                        "rarity": item.rarity,
-                        "strength_bonus": item.strength_bonus,
-                        "agility_bonus": item.agility_bonus,
-                        "intellect_bonus": item.intellect_bonus,
-                        "stamina_bonus": item.stamina_bonus,
-                        "xp_bonus": item.xp_bonus,
-                        "crystal_bonus": item.crystal_bonus,
-                        "health_bonus": item.health_bonus,
-                        "required_level": item.required_level,
-                    },
-                    "weapon_stats": {
-                        "weapon_type": item.weapon_stats.weapon_type,
-                        "weapon_category": item.weapon_stats.weapon_category,
-                        "damage_min": item.weapon_stats.damage_min,
-                        "damage_max": item.weapon_stats.damage_max,
-                        "speed": item.weapon_stats.speed,
-                        "dps": item.weapon_stats.dps,
-                    }
-                    if item.weapon_stats
-                    else None,
-                    "armor_stats": {
-                        "armor_value": item.armor_stats.armor_value,
-                        "slot": item.armor_stats.slot,
-                    }
-                    if item.armor_stats
-                    else None,
-                }
-            )
-        )
+        bag_items.append(inventory_service.serialize_inventory_item_entry(inv, is_equipped=False))
 
     class_info = context["class_info"]
     set_bonuses_map = calculate_set_bonus(db, current_user.id)

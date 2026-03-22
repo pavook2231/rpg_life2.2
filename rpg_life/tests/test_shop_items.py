@@ -4,7 +4,7 @@ from fastapi import HTTPException
 from app.beta_content import CHEST_CATALOG
 from app.models import CharacterEquipment, User, UserClassProgress, UserInventory
 from app.schemas.beta_schema import ChestOpenSchema
-from app.services import beta_service, inventory_service
+from app.services import beta_service, inventory_service, mobile_service
 from app.items_data import ITEMS
 
 
@@ -208,6 +208,80 @@ def test_shop_item_stats_stay_consistent_after_purchase_and_equip(db_session) ->
     assert equipped_main_hand["item"].stamina_bonus == shop_item["stats"]["stamina_bonus"]
     assert equipped_main_hand["weapon_stats"].damage_min == shop_item["weapon_stats"]["damage_min"]
     assert equipped_main_hand["weapon_stats"].damage_max == shop_item["weapon_stats"]["damage_max"]
+
+
+def test_inventory_list_payload_keeps_top_level_item_stats_consistent(db_session) -> None:
+    user = _create_user(db_session, "shop-inventory-payload@example.com")
+    progress = _create_progress(db_session, user.id, crystals=2_000)
+    progress.class_name = "warrior"
+    progress.display_name = "Warrior"
+    progress.level = 12
+    db_session.commit()
+
+    context = inventory_service.get_shop_context(db_session, user)
+    shop_item = next(item for item in context["items"] if item.get("id") == 205)
+    purchase_result = inventory_service.buy_shop_item(db_session, user, shop_item["id"])
+
+    assert purchase_result["ok"] is True
+
+    inventory_payload = inventory_service.get_inventory_payload(db_session, user)
+    inventory_entry = inventory_payload["inventory"][0]
+    detail_payload = inventory_service.get_inventory_item_detail(db_session, user, inventory_entry["id"])
+
+    assert inventory_entry["item"]["strength_bonus"] == shop_item["stats"]["strength_bonus"]
+    assert inventory_entry["item"]["stamina_bonus"] == shop_item["stats"]["stamina_bonus"]
+    assert inventory_entry["weapon_stats"]["damage_min"] == shop_item["weapon_stats"]["damage_min"]
+    assert inventory_entry["weapon_stats"]["damage_max"] == shop_item["weapon_stats"]["damage_max"]
+    assert inventory_entry["weapon_stats"]["damage_min"] == detail_payload["weapon_stats"]["damage_min"]
+    assert inventory_entry["weapon_stats"]["damage_max"] == detail_payload["weapon_stats"]["damage_max"]
+
+
+def test_crit_bonus_stays_consistent_between_shop_inventory_and_character(db_session) -> None:
+    user = _create_user(db_session, "shop-crit-consistency@example.com")
+    progress = _create_progress(db_session, user.id, crystals=2_000)
+    progress.class_name = "archer"
+    progress.display_name = "Archer"
+    progress.level = 20
+    db_session.commit()
+
+    context = inventory_service.get_shop_context(db_session, user)
+    shop_item = next(item for item in context["items"] if item.get("id") == 1205)
+
+    purchase_result = inventory_service.buy_shop_item(db_session, user, shop_item["id"])
+    assert purchase_result["ok"] is True
+
+    inventory_item = (
+        db_session.query(UserInventory)
+        .filter(UserInventory.user_id == user.id)
+        .order_by(UserInventory.id.desc())
+        .first()
+    )
+    assert inventory_item is not None
+
+    detail_payload = inventory_service.get_inventory_item_detail(db_session, user, inventory_item.id)
+    inventory_payload = inventory_service.get_inventory_payload(db_session, user)
+    equip_result = inventory_service.equip_inventory_item(db_session, user, inventory_item.id, "head", progress.id)
+    equipment_payload = mobile_service.get_equipment_overview(db_session, user)
+
+    assert equip_result["ok"] is True
+    assert shop_item["required_class"] == "archer"
+    assert shop_item["agility_bonus"] == shop_item["stats"]["agility_bonus"]
+    assert shop_item["critical_bonus"] == shop_item["stats"]["critical_bonus"]
+    assert detail_payload["item"]["critical_bonus"] == shop_item["stats"]["critical_bonus"]
+    assert detail_payload["item"].get("strength_bonus", 0) == shop_item["stats"].get("strength_bonus", 0)
+    assert detail_payload["item"].get("stamina_bonus", 0) == shop_item["stats"].get("stamina_bonus", 0)
+    assert detail_payload["item"]["price_crystals"] == shop_item["price_crystals"]
+    assert detail_payload["item"]["required_class"] == shop_item["required_class"]
+    assert detail_payload["item"]["stats"]["critical_bonus"] == shop_item["stats"]["critical_bonus"]
+    assert inventory_payload["inventory"][0]["item"]["critical_bonus"] == shop_item["stats"]["critical_bonus"]
+    assert inventory_payload["inventory"][0]["item"]["price_crystals"] == shop_item["price_crystals"]
+    assert inventory_payload["inventory"][0]["item"]["required_class"] == shop_item["required_class"]
+    equipped_head = next(entry for entry in equipment_payload["equipment"] if entry["slot"] == "head")
+    assert equipped_head["item"]["critical_bonus"] == shop_item["stats"]["critical_bonus"]
+    assert equipped_head["item"]["agility_bonus"] == shop_item["stats"]["agility_bonus"]
+    assert equipped_head["item"]["price_crystals"] == shop_item["price_crystals"]
+    assert equipped_head["item"]["required_class"] == shop_item["required_class"]
+    assert equipped_head["item"]["stats"]["critical_bonus"] == shop_item["stats"]["critical_bonus"]
 
 
 def test_equipping_two_hand_weapon_clears_off_hand_and_returns_item_to_bag(db_session) -> None:

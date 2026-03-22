@@ -23,6 +23,16 @@ function isValidEmail(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 }
 
+function translateOrFallback(
+  t: (key: string, params?: Record<string, string | number>) => string,
+  key: string,
+  fallback: string,
+  params?: Record<string, string | number>,
+) {
+  const translated = t(key, params);
+  return translated === key ? fallback : translated;
+}
+
 export function LoginScreen({ onShowRegister }: Props) {
   const { signIn } = useAuth();
   const t = useTranslation();
@@ -37,6 +47,7 @@ export function LoginScreen({ onShowRegister }: Props) {
   const [isCheckingApi, setIsCheckingApi] = useState(false);
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [showApiTools, setShowApiTools] = useState(false);
+  const showDeveloperTools = __DEV__;
 
   useEffect(() => {
     getStoredApiBaseUrl()
@@ -156,7 +167,14 @@ export function LoginScreen({ onShowRegister }: Props) {
   }
 
   return (
-    <Screen title={t("screens.login.title")} subtitle={t("screens.login.subtitle")}>
+    <Screen
+      title={translateOrFallback(t, "screens.login.title", "Вход")}
+      subtitle={translateOrFallback(
+        t,
+        "screens.login.subtitle",
+        "Продолжи путь к своей цели. Если аккаунта еще нет, создадим его за минуту.",
+      )}
+    >
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.container}>
         <View style={styles.modeRow}>
           <View style={[styles.modeTab, styles.modeTabActive]}>
@@ -196,6 +214,7 @@ export function LoginScreen({ onShowRegister }: Props) {
 
         <SocialAuthSection title={t("screens.login.quick.socialSectionTitle")} hint={t("screens.login.quick.socialSectionHint")} />
 
+        {showDeveloperTools ? (
         <View style={styles.apiCard}>
           <View style={styles.apiHeaderRow}>
             <View style={styles.apiHeaderCopy}>
@@ -233,6 +252,7 @@ export function LoginScreen({ onShowRegister }: Props) {
             </View>
           ) : null}
         </View>
+        ) : null}
       </KeyboardAvoidingView>
     </Screen>
   );

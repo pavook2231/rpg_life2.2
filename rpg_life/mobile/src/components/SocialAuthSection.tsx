@@ -139,7 +139,11 @@ export function SocialAuthSection({ title, hint }: Props) {
     if (authResult.type === "success" && authResult.url) {
       const wasHandled = await completeSocialRedirectUrl(authResult.url);
       if (!wasHandled) {
-        throw new Error(providerId === "google" ? t("screens.login.quick.googleFailed") : t("errors.unknownError"));
+        throw new Error(
+          providerId === "google"
+            ? t("screens.login.quick.googleFailed")
+            : t("screens.login.quick.socialLoginTitle"),
+        );
       }
       return;
     }
@@ -153,6 +157,7 @@ export function SocialAuthSection({ title, hint }: Props) {
     const provider = providerList.find((entry) => entry.id === providerId);
 
     try {
+      clearAuthFlowNotice();
       setActiveSocialProviderId(providerId);
       const resolvedApiBaseUrl = await getApiBaseUrl();
 
@@ -227,6 +232,7 @@ export function SocialAuthSection({ title, hint }: Props) {
           await openBrowserSocialFlow(providerId, `${resolvedApiBaseUrl}${vkLoginPath}`);
           return;
         }
+        throw new Error("VK ID sign-in is not configured on the server yet.");
       }
 
       setIsSocialLoading(true);

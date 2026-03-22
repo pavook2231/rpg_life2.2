@@ -10,6 +10,13 @@ type PedometerLike = {
   watchStepCount?: (callback: (payload: { steps: number }) => void) => { remove: () => void };
 };
 
+export type StepTrackingState = "connected" | "permission_required" | "unavailable";
+
+export type TodayStepsSnapshot = {
+  steps: number | null;
+  state: StepTrackingState;
+};
+
 function resolvePedometer(): PedometerLike | null {
   try {
     const maybeModule = require("expo-sensors");
@@ -106,78 +113,88 @@ async function getStepsFromGoogleFit(start: Date, end: Date): Promise<number | n
   }
 }
 
-export async function ensurePedometerAccess(): Promise<boolean> {
+async function ensurePedometerAccessDetails(): Promise<{ granted: boolean; state: StepTrackingState }> {
   const isSimulator = !__DEV__ || (Platform.OS === "ios" && !AppleHealthKit) || (Platform.OS === "android" && !GoogleFit);
 
   if (Platform.OS === "ios" && !isSimulator) {
     const hkInit = await initHealthKit();
     if (hkInit) {
-      return true;
+      return { granted: true, state: "connected" };
     }
+    return { granted: false, state: "permission_required" };
   } else if (Platform.OS === "android" && !isSimulator) {
     const gfInit = await initGoogleFit();
     if (gfInit) {
-      return true;
+      return { granted: true, state: "connected" };
     }
+    return { granted: false, state: "permission_required" };
   }
 
   const pedometer = resolvePedometer();
   if (!pedometer?.isAvailableAsync) {
-    return false;
+    return { granted: false, state: "unavailable" };
   }
 
   const available = await pedometer.isAvailableAsync();
   if (!available || Platform.OS === "web") {
-    return false;
+    return { granted: false, state: "unavailable" };
   }
 
   if (pedometer.getPermissionsAsync && pedometer.requestPermissionsAsync) {
     const permission = await pedometer.getPermissionsAsync();
     if (permission.granted) {
-      return true;
+      return { granted: true, state: "connected" };
     }
 
     const requested = await pedometer.requestPermissionsAsync();
-    return Boolean(requested.granted);
+    return requested.granted
+      ? { granted: true, state: "connected" }
+      : { granted: false, state: "permission_required" };
   }
 
-  return true;
+  return { granted: true, state: "connected" };
 }
 
-export async function getTodaySteps(): Promise<number | null> {
+export async function ensurePedometerAccess(): Promise<boolean> {
+  const access = await ensurePedometerAccessDetails();
+  return access.granted;
+}
+
+export async function getTodayStepsSnapshot(): Promise<TodayStepsSnapshot> {
   const start = startOfToday();
   const end = new Date();
+  const access = await ensurePedometerAccessDetails();
+
+  if (!access.granted) {
+    return { steps: null, state: access.state };
+  }
 
   if (Platform.OS === "ios" || Platform.OS === "android") {
-    const hasAccess = await ensurePedometerAccess();
+    let steps: number | null = null;
 
-    if (hasAccess) {
-      let steps: number | null = null;
+    if (Platform.OS === "ios") {
+      steps = await getStepsFromHealthKit(start, end);
+    } else if (Platform.OS === "android") {
+      steps = await getStepsFromGoogleFit(start, end);
+    }
 
-      if (Platform.OS === "ios") {
-        steps = await getStepsFromHealthKit(start, end);
-      } else if (Platform.OS === "android") {
-        steps = await getStepsFromGoogleFit(start, end);
-      }
-
-      if (steps !== null && steps > 0) {
-        return Math.max(0, Number(steps));
-      }
+    if (steps !== null) {
+      return { steps: Math.max(0, Number(steps)), state: "connected" };
     }
   }
 
   const pedometer = resolvePedometer();
   if (!pedometer?.getStepCountAsync) {
-    return null;
-  }
-
-  const hasAccess = await ensurePedometerAccess();
-  if (!hasAccess) {
-    return null;
+    return { steps: null, state: "unavailable" };
   }
 
   const data = await pedometer.getStepCountAsync(start, end);
-  return Math.max(0, Number(data?.steps ?? 0));
+  return { steps: Math.max(0, Number(data?.steps ?? 0)), state: "connected" };
+}
+
+export async function getTodaySteps(): Promise<number | null> {
+  const snapshot = await getTodayStepsSnapshot();
+  return snapshot.steps;
 }
 
 export async function watchTodaySteps(onUpdate: (steps: number) => void): Promise<(() => void) | null> {

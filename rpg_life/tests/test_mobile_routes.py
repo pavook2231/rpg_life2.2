@@ -71,6 +71,44 @@ def test_leaderboard_endpoint_forwards_period_to_service(monkeypatch) -> None:
     assert body["data"]["period"] == "weekly"
 
 
+def test_auth_logout_route_uses_rate_limit_and_service(monkeypatch) -> None:
+    request = build_request(router, "/api/v1/auth/logout")
+    captured: dict[str, object] = {}
+
+    async def fake_enforce_rate_limit(request_obj, bucket, limit, window_seconds):
+        captured["bucket"] = bucket
+        captured["limit"] = limit
+        captured["window_seconds"] = window_seconds
+
+    def fake_logout_mobile_session(db, refresh_token):
+        captured["db"] = db
+        captured["refresh_token"] = refresh_token
+        return {"ok": True}
+
+    monkeypatch.setattr(mobile_routes, "enforce_rate_limit", fake_enforce_rate_limit)
+    monkeypatch.setattr(mobile_routes.auth_service, "logout_mobile_session", fake_logout_mobile_session)
+
+    response = asyncio.run(
+        mobile_routes.auth_logout(
+            request=request,
+            payload=mobile_routes.RefreshTokenSchema(refresh_token="refresh-demo"),
+            db="demo-db",
+        )
+    )
+    body = json.loads(response.body.decode("utf-8"))
+
+    assert captured == {
+        "bucket": "mobile-logout",
+        "limit": 20,
+        "window_seconds": 300,
+        "db": "demo-db",
+        "refresh_token": "refresh-demo",
+    }
+    assert response.status_code == 200
+    assert body["status"] == "success"
+    assert body["data"]["ok"] is True
+
+
 def test_telegram_login_page_renders_widget_with_normalized_bot_username(monkeypatch) -> None:
     request = build_request(router, "/api/v1/auth/telegram/login")
     monkeypatch.setattr(mobile_routes, "TELEGRAM_AUTH_ENABLED", True)

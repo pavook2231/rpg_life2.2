@@ -24,6 +24,8 @@ type ItemDetail = {
     agility_bonus?: number;
     intellect_bonus?: number;
     stamina_bonus?: number;
+    critical_bonus?: number;
+    luck_bonus?: number;
     xp_bonus?: number;
     crystal_bonus?: number;
     health_bonus?: number;
@@ -35,6 +37,8 @@ type ItemDetail = {
   agility_bonus?: number;
   intellect_bonus?: number;
   stamina_bonus?: number;
+  critical_bonus?: number;
+  luck_bonus?: number;
   xp_bonus?: number;
   crystal_bonus?: number;
   health_bonus?: number;
@@ -114,11 +118,12 @@ export function pickEquipSlot(detail: ItemDetail, equipped: EquipmentEntry[] = [
 }
 
 function getStatLabel(key: string, t?: TranslateFn) {
-  const normalizedKey = key
+  const baseKey = key
     .toLowerCase()
     .replace(/_bonus$/, "")
     .replace(/^bonus_/, "")
     .replace(/^stat_/, "");
+  const normalizedKey = baseKey === "critical" ? "crit" : baseKey;
   const labels: Record<string, string> = {
     strength: translateOrFallback(t, "game.itemStats.strength", "Сила"),
     agility: translateOrFallback(t, "game.itemStats.agility", "Ловкость"),
@@ -140,11 +145,12 @@ function getStatLabel(key: string, t?: TranslateFn) {
 }
 
 function getStatIcon(key: string) {
-  const normalizedKey = key
+  const baseKey = key
     .toLowerCase()
     .replace(/_bonus$/, "")
     .replace(/^bonus_/, "")
     .replace(/^stat_/, "");
+  const normalizedKey = baseKey === "critical" ? "crit" : baseKey;
   return STAT_ICONS[normalizedKey] ?? STAT_ICONS[key] ?? "sparkles";
 }
 
@@ -160,10 +166,16 @@ function buildEntry(key: string, value: number, t?: TranslateFn, displayValue?: 
 
 export function buildItemStatEntries(detail: ItemDetail, t?: TranslateFn) {
   const item = getItemPayload(detail);
-  const stats: ItemStatEntry[] = [];
+  const stats = new Map<string, ItemStatEntry>();
+
+  const upsertEntry = (entry: ItemStatEntry) => {
+    if (!stats.has(entry.key)) {
+      stats.set(entry.key, entry);
+    }
+  };
 
   if (detail.weapon_stats?.damage_min !== undefined && detail.weapon_stats?.damage_max !== undefined) {
-    stats.push(
+    upsertEntry(
       buildEntry(
         "damage",
         detail.weapon_stats.damage_max,
@@ -172,24 +184,26 @@ export function buildItemStatEntries(detail: ItemDetail, t?: TranslateFn) {
       ),
     );
   }
-  if (detail.armor_stats?.armor_value) stats.push(buildEntry("armor", detail.armor_stats.armor_value, t));
-  if (item.strength_bonus) stats.push(buildEntry("strength", item.strength_bonus, t));
-  if (item.agility_bonus) stats.push(buildEntry("agility", item.agility_bonus, t));
-  if (item.intellect_bonus) stats.push(buildEntry("intellect", item.intellect_bonus, t));
-  if (item.stamina_bonus) stats.push(buildEntry("stamina", item.stamina_bonus, t));
-  if (item.health_bonus) stats.push(buildEntry("health", item.health_bonus, t));
-  if (item.xp_bonus) stats.push(buildEntry("xp_bonus", item.xp_bonus, t));
-  if (item.crystal_bonus) stats.push(buildEntry("crystal_bonus", item.crystal_bonus, t));
+  if (detail.armor_stats?.armor_value) upsertEntry(buildEntry("armor", detail.armor_stats.armor_value, t));
+  if (item.strength_bonus) upsertEntry(buildEntry("strength", item.strength_bonus, t));
+  if (item.agility_bonus) upsertEntry(buildEntry("agility", item.agility_bonus, t));
+  if (item.intellect_bonus) upsertEntry(buildEntry("intellect", item.intellect_bonus, t));
+  if (item.stamina_bonus) upsertEntry(buildEntry("stamina", item.stamina_bonus, t));
+  if (item.critical_bonus) upsertEntry(buildEntry("critical_bonus", item.critical_bonus, t));
+  if (item.luck_bonus) upsertEntry(buildEntry("luck_bonus", item.luck_bonus, t));
+  if (item.health_bonus) upsertEntry(buildEntry("health", item.health_bonus, t));
+  if (item.xp_bonus) upsertEntry(buildEntry("xp_bonus", item.xp_bonus, t));
+  if (item.crystal_bonus) upsertEntry(buildEntry("crystal_bonus", item.crystal_bonus, t));
 
   if (detail.stats) {
     for (const [key, value] of Object.entries(detail.stats)) {
       if (typeof value === "number") {
-        stats.push(buildEntry(key, value, t));
+        upsertEntry(buildEntry(key, value, t));
       }
     }
   }
 
-  return stats;
+  return [...stats.values()];
 }
 
 export function buildItemStats(detail: ItemDetail, t?: TranslateFn) {

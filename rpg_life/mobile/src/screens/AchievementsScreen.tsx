@@ -3,7 +3,7 @@ import { Animated, Pressable, StyleSheet, Text, View } from "react-native";
 
 import { type AchievementItem } from "../api/game";
 import { Screen } from "../components/Screen";
-import { useGame } from "../context/GameContext";
+import { useGameAchievements } from "../context/GameContext";
 import { useTranslation } from "../context/LocalizationContext";
 import { getRarityColor, normalizeDisplayText } from "../lib/gameUi";
 import { Card, Modal, radii, useThemeColors, useThemeMode } from "../ui";
@@ -85,7 +85,7 @@ function AchievementVisualTile({
 }
 
 export function AchievementsScreen() {
-  const { achievements } = useGame();
+  const { achievements } = useGameAchievements();
   const t = useTranslation();
   const colors = useThemeColors();
   const themeMode = useThemeMode();

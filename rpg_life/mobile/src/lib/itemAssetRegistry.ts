@@ -280,10 +280,6 @@ function getSemanticFallback(context?: ItemAssetContext, iconName?: string | nul
 }
 
 export function getItemAsset(itemId?: number | null, context?: ItemAssetContext, iconName?: string | null) {
-  if (itemId && ITEM_ASSET_REGISTRY[itemId]) {
-    return ITEM_ASSET_REGISTRY[itemId];
-  }
-
   const namedAsset = getItemSourceAssetByName(iconName);
   if (namedAsset) {
     return namedAsset;
@@ -292,6 +288,10 @@ export function getItemAsset(itemId?: number | null, context?: ItemAssetContext,
   const semanticFallback = getSemanticFallback(context, iconName);
   if (semanticFallback) {
     return semanticFallback;
+  }
+
+  if (itemId && ITEM_ASSET_REGISTRY[itemId]) {
+    return ITEM_ASSET_REGISTRY[itemId];
   }
 
   if (context?.itemType === "chest") {

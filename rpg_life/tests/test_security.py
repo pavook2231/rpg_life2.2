@@ -233,3 +233,40 @@ def test_refresh_token_rotation_revokes_previous_token(db_session) -> None:
         auth_service.refresh_access_token(db_session, first_refresh)
 
     assert exc.value.status_code == 401
+
+
+def test_register_user_tokens_marks_goal_setup_as_required(db_session) -> None:
+    payload = auth_service.register_user_tokens(
+        db_session,
+        auth_service.UserCreate(
+            email="new-user@example.com",
+            password="Password123",
+            name="New Hero",
+        ),
+    )
+
+    assert payload["needs_goal_setup"] is True
+
+
+def test_authenticate_social_mobile_marks_new_google_user_for_goal_setup(
+    db_session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(auth_service, "GOOGLE_AUTH_ENABLED", True)
+    monkeypatch.setattr(auth_service, "GOOGLE_AUTH_ACCEPTED_CLIENT_IDS", ("android-client-id",))
+    monkeypatch.setattr(
+        auth_service,
+        "_verify_google_id_token",
+        lambda _: {
+            "sub": "google-new-user",
+            "email": "social-new@example.com",
+            "name": "Social Hero",
+            "given_name": "socialhero",
+            "picture": None,
+        },
+    )
+
+    payload = auth_service.authenticate_social_mobile(db_session, "google", id_token="demo-token")
+
+    assert payload["needs_goal_setup"] is True
+    assert payload["user"]["email"] == "social-new@example.com"

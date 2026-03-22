@@ -6,7 +6,6 @@ export type FriendItem = {
   name: string;
   username?: string | null;
   friend_id?: string | null;
-  email?: string;
   friends_since: string;
   stats: {
     level?: number;
@@ -65,7 +64,6 @@ export type FriendRequestItem = {
     name: string;
     username?: string | null;
     friend_id?: string | null;
-    email?: string;
   };
 };
 
@@ -168,6 +166,17 @@ export function fetchFriendsLeaderboard(
 ) {
   return apiRequest<LeaderboardResponse>(
     `/social/leaderboard/friends?metric=${encodeURIComponent(metric)}&period=${encodeURIComponent(period)}&page=${page}&page_size=${pageSize}`
+  );
+}
+
+export function fetchGlobalLeaderboard(
+  metric: string = "level",
+  page = 1,
+  pageSize = 20,
+  period: LeaderboardPeriod = "all_time",
+) {
+  return apiRequest<LeaderboardResponse>(
+    `/social/leaderboard/global?metric=${encodeURIComponent(metric)}&period=${encodeURIComponent(period)}&page=${page}&page_size=${pageSize}`
   );
 }
 

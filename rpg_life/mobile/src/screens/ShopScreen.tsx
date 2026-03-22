@@ -1,3 +1,4 @@
+import { useNavigation } from "@react-navigation/native";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
 
@@ -5,7 +6,7 @@ import { buyShopItem, fetchShop, type ShopItemPayload, type ShopPayload } from "
 import { Screen } from "../components/Screen";
 import { StateBlock } from "../components/StateBlock";
 import { useFeedback } from "../context/FeedbackContext";
-import { useGame } from "../context/GameContext";
+import { useGameInventoryEquipment, useGameProgress } from "../context/GameContext";
 import { useLocalization, useTranslation } from "../context/LocalizationContext";
 import { buildItemComparison } from "../lib/itemComparison";
 import { buildItemStatEntries, type ItemStatEntry } from "../lib/equipment";
@@ -46,6 +47,16 @@ function toStatEntries(item: ShopVisualItem, t: ReturnType<typeof useTranslation
   return buildItemStatEntries(item, t);
 }
 
+function translateOrFallback(
+  t: (key: string, params?: Record<string, string | number>) => string,
+  key: string,
+  fallback: string,
+  params?: Record<string, string | number>,
+) {
+  const translated = t(key, params);
+  return translated === key ? fallback : translated;
+}
+
 function buildShopVisualItem(serverItem: ShopItemPayload): ShopVisualItem {
   const normalizedType =
     serverItem.type === "chest"
@@ -68,10 +79,12 @@ function buildShopVisualItem(serverItem: ShopItemPayload): ShopVisualItem {
 }
 
 export function ShopScreen() {
+  const navigation = useNavigation<any>();
   const { language } = useLocalization();
   const t = useTranslation();
   const { pushToast } = useFeedback();
-  const { hero, equipment, refreshGame } = useGame();
+  const { hero } = useGameProgress();
+  const { equipment, inventory, refreshGame } = useGameInventoryEquipment();
   const { width } = useWindowDimensions();
   const colors = useThemeColors();
   const themeMode = useThemeMode();
@@ -85,6 +98,12 @@ export function ShopScreen() {
   const [sortMode, setSortMode] = useState<SortMode>("level");
   const [search, setSearch] = useState("");
   const [shopError, setShopError] = useState<string | null>(null);
+  const [recentPurchase, setRecentPurchase] = useState<{
+    name: string;
+    requiredLevel: number;
+    statEntries: ItemStatEntry[];
+    isChest: boolean;
+  } | null>(null);
 
   const shopItems = useMemo(() => {
     return (shopPayload?.items ?? []).map((serverItem) => buildShopVisualItem(serverItem));
@@ -114,6 +133,39 @@ export function ShopScreen() {
 
   const shopGold = hero?.crystals ?? shopPayload?.crystals ?? 0;
   const heroLevel = hero?.level ?? shopPayload?.character_level ?? 1;
+  const showFirstPurchaseGuide =
+    (heroLevel <= 1 || (hero?.current_xp ?? 0) <= 0) &&
+    (equipment?.equipment?.length ?? 0) === 0 &&
+    inventory.length === 0;
+  const firstPurchaseGuideItems = [
+    {
+      icon: "shield-check-outline",
+      title: translateOrFallback(t, "screens.shop.quick.firstGuideStatsTitle", "Смотри на характеристики"),
+      description: translateOrFallback(
+        t,
+        "screens.shop.quick.firstGuideStatsDescription",
+        "Первый предмет лучше выбирать не по редкости, а по полезным бонусам: броня, сила, ловкость или выносливость.",
+      ),
+    },
+    {
+      icon: "lock-open-check-outline",
+      title: translateOrFallback(t, "screens.shop.quick.firstGuideLevelTitle", "Проверь уровень"),
+      description: translateOrFallback(
+        t,
+        "screens.shop.quick.firstGuideLevelDescription",
+        "Если на предмете стоит нужный уровень, его пока не получится надеть. Для первого шага лучше брать то, что доступно уже сейчас.",
+      ),
+    },
+    {
+      icon: "shield-account",
+      title: translateOrFallback(t, "screens.shop.quick.firstGuideEquipTitle", "После покупки надень предмет"),
+      description: translateOrFallback(
+        t,
+        "screens.shop.quick.firstGuideEquipDescription",
+        "Покупка сама по себе ничего не усиливает. Бонусы начинают работать только после экипировки на экране персонажа.",
+      ),
+    },
+  ];
   const selectedComparison = useMemo(
     () => buildItemComparison(selectedItem, equipment?.equipment ?? [], t),
     [equipment?.equipment, selectedItem, t],
@@ -184,6 +236,12 @@ export function ShopScreen() {
       setPurchasingItemId(item.shopItemId);
       setSelectedItem(null);
       const result = await buyShopItem(item.shopItemId);
+      setRecentPurchase({
+        name: item.name,
+        requiredLevel: item.requiredLevel,
+        statEntries: toStatEntries(item, t).slice(0, 3),
+        isChest: result.kind === "chest",
+      });
       await Promise.all([refreshGame(true), loadShop(true)]);
 
       if (result.kind === "chest") {
@@ -278,6 +336,82 @@ export function ShopScreen() {
           ))}
         </View>
       </Card>
+
+      {showFirstPurchaseGuide ? (
+        <Card tone="subtle">
+          <Text style={styles.guideTitle}>
+            {translateOrFallback(t, "screens.shop.quick.firstGuideTitle", "Как выбрать первый предмет")}
+          </Text>
+          <Text style={styles.guideDescription}>
+            {translateOrFallback(
+              t,
+              "screens.shop.quick.firstGuideDescription",
+              "Для старта не нужен идеальный набор. Достаточно одного доступного предмета, который ты сможешь сразу надеть.",
+            )}
+          </Text>
+          <View style={styles.guideList}>
+            {firstPurchaseGuideItems.map((item) => (
+              <View key={item.title} style={styles.guideRow}>
+                <View style={styles.guideIconWrap}>
+                  <GameIcon name={item.icon} size={16} color={colors.primary} />
+                </View>
+                <View style={styles.guideCopy}>
+                  <Text style={styles.guideItemTitle}>{item.title}</Text>
+                  <Text style={styles.guideItemDescription}>{item.description}</Text>
+                </View>
+              </View>
+            ))}
+          </View>
+        </Card>
+      ) : null}
+
+      {recentPurchase ? (
+        <Card tone="accent">
+          <Text style={styles.guideTitle}>
+            {recentPurchase.isChest
+              ? translateOrFallback(t, "screens.shop.quick.purchaseChestTitle", "Покупка готова к открытию")
+              : translateOrFallback(t, "screens.shop.quick.purchaseTitle", "Покупка завершена")}
+          </Text>
+          <Text style={styles.guideDescription}>
+            {recentPurchase.isChest
+              ? translateOrFallback(
+                  t,
+                  "screens.shop.quick.purchaseChestDescription",
+                  `Сундук уже в сумке. Открой персонажа, чтобы открыть его и забрать награду.`,
+                )
+              : translateOrFallback(
+                  t,
+                  "screens.shop.quick.purchaseDescription",
+                  `Предмет "${recentPurchase.name}" уже в сумке. Следующий шаг — открыть персонажа и надеть его.`,
+                )}
+          </Text>
+          {recentPurchase.statEntries.length ? (
+            <View style={styles.purchaseStatsRow}>
+              {recentPurchase.statEntries.map((entry) => (
+                <View key={`${entry.label}-${entry.value}`} style={styles.purchaseStatChip}>
+                  <Text style={styles.purchaseStatLabel}>{entry.label}</Text>
+                  <Text style={styles.purchaseStatValue}>{entry.value}</Text>
+                </View>
+              ))}
+            </View>
+          ) : null}
+          <View style={styles.purchaseActionRow}>
+            <Button
+              label={t("screens.home.character")}
+              icon="shield-account"
+              onPress={() => navigation.navigate("Character")}
+              style={styles.sortButton}
+            />
+            <Button
+              label={translateOrFallback(t, "common.close", "Закрыть")}
+              icon="check"
+              variant="secondary"
+              onPress={() => setRecentPurchase(null)}
+              style={styles.sortButton}
+            />
+          </View>
+        </Card>
+      ) : null}
 
       {shopError ? (
         <StateBlock
@@ -438,6 +572,79 @@ function createStyles(colors: ReturnType<typeof useThemeColors>, themeMode: Retu
       color: colors.text,
       fontSize: 18,
       fontWeight: "900",
+    },
+    guideTitle: {
+      color: colors.text,
+      fontSize: 16,
+      fontWeight: "900",
+    },
+    guideDescription: {
+      color: colors.textMuted,
+      fontSize: 13,
+      lineHeight: 19,
+    },
+    guideList: {
+      gap: 10,
+    },
+    guideRow: {
+      flexDirection: "row",
+      gap: 10,
+      alignItems: "flex-start",
+    },
+    guideIconWrap: {
+      width: 28,
+      height: 28,
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: themeMode === "light" ? "rgba(214,199,170,0.9)" : "rgba(255,255,255,0.12)",
+      backgroundColor: themeMode === "light" ? "rgba(251,247,239,0.95)" : "rgba(9,14,24,0.8)",
+      alignItems: "center",
+      justifyContent: "center",
+      marginTop: 2,
+    },
+    guideCopy: {
+      flex: 1,
+      gap: 2,
+    },
+    guideItemTitle: {
+      color: colors.text,
+      fontSize: 13,
+      fontWeight: "800",
+    },
+    guideItemDescription: {
+      color: colors.textMuted,
+      fontSize: 12,
+      lineHeight: 17,
+    },
+    purchaseStatsRow: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 8,
+    },
+    purchaseStatChip: {
+      flexGrow: 1,
+      minWidth: 100,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: themeMode === "light" ? "rgba(214,199,170,0.7)" : "rgba(255,255,255,0.08)",
+      backgroundColor: themeMode === "light" ? "rgba(255,250,240,0.92)" : "rgba(8,13,23,0.78)",
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+      gap: 2,
+    },
+    purchaseStatLabel: {
+      color: colors.textMuted,
+      fontSize: 10,
+      fontWeight: "700",
+    },
+    purchaseStatValue: {
+      color: colors.text,
+      fontSize: 13,
+      fontWeight: "900",
+    },
+    purchaseActionRow: {
+      flexDirection: "row",
+      gap: 8,
     },
     toolbarRow: {
       flexDirection: "row",

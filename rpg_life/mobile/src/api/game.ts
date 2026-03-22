@@ -258,16 +258,20 @@ export type InventoryItem = {
     type: string;
     subclass?: string | null;
     slot: string | null;
-    strength_bonus?: number;
-    agility_bonus?: number;
-    intellect_bonus?: number;
-    stamina_bonus?: number;
-    xp_bonus?: number;
+      strength_bonus?: number;
+      agility_bonus?: number;
+      intellect_bonus?: number;
+      stamina_bonus?: number;
+      critical_bonus?: number;
+      luck_bonus?: number;
+      xp_bonus?: number;
     crystal_bonus?: number;
     health_bonus?: number;
     required_level?: number;
     required_class?: string | null;
     set_name?: string | null;
+    price_crystals?: number;
+    stats?: Record<string, number> | null;
   };
   weapon_stats?: {
     weapon_type?: string;
@@ -381,6 +385,17 @@ export type ShopItemPayload = {
   rarity: string;
   price_crystals: number;
   required_level: number;
+  required_class?: string | null;
+  set_name?: string | null;
+  strength_bonus?: number;
+  agility_bonus?: number;
+  intellect_bonus?: number;
+  stamina_bonus?: number;
+  critical_bonus?: number;
+  luck_bonus?: number;
+  xp_bonus?: number;
+  crystal_bonus?: number;
+  health_bonus?: number;
   chest_name?: string;
   stats?: Record<string, number>;
   weapon_stats?: {
@@ -390,9 +405,17 @@ export type ShopItemPayload = {
     damage_max: number;
     speed?: number;
     dps?: number;
+    critical_strike_chance?: number;
+    required_strength?: number;
+    required_agility?: number;
+    required_intellect?: number;
   } | null;
   armor_stats?: {
+    armor_type?: string;
     armor_value: number;
+    slot?: string;
+    dodge_chance?: number;
+    block_chance?: number;
   } | null;
 };
 

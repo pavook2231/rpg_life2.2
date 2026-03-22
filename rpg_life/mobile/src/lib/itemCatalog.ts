@@ -162,6 +162,8 @@ type StatBonusKey =
   | "agility_bonus"
   | "intellect_bonus"
   | "stamina_bonus"
+  | "critical_bonus"
+  | "luck_bonus"
   | "xp_bonus"
   | "crystal_bonus"
   | "health_bonus";
@@ -171,6 +173,8 @@ const BONUS_FIELDS: StatBonusKey[] = [
   "agility_bonus",
   "intellect_bonus",
   "stamina_bonus",
+  "critical_bonus",
+  "luck_bonus",
   "xp_bonus",
   "crystal_bonus",
   "health_bonus",
@@ -211,6 +215,8 @@ type AnyItemPayload = {
   agility_bonus?: number;
   intellect_bonus?: number;
   stamina_bonus?: number;
+  critical_bonus?: number;
+  luck_bonus?: number;
   xp_bonus?: number;
   crystal_bonus?: number;
   health_bonus?: number;
@@ -447,6 +453,8 @@ function buildBonuses(seed: number, category: ItemCategory, rarity: ItemRarity, 
     agility_bonus: 0,
     intellect_bonus: 0,
     stamina_bonus: 0,
+    critical_bonus: 0,
+    luck_bonus: 0,
     xp_bonus: 0,
     crystal_bonus: 0,
     health_bonus: 0,
@@ -526,7 +534,7 @@ function buildStatEntries(
     });
   }
 
-  const bonusLabels: Record<StatBonusKey, { label: string; icon: string }> = {
+  const bonusLabels: Record<string, { label: string; icon: string }> = {
     strength_bonus: { label: "Сила", icon: "strength" },
     agility_bonus: { label: "Ловкость", icon: "agility" },
     intellect_bonus: { label: "Интеллект", icon: "intellect" },
@@ -645,16 +653,6 @@ const BY_SOURCE = CATALOG_ITEMS.reduce<Record<number, UnifiedCatalogItem>>((acc,
   return acc;
 }, {});
 
-function applyBonusesFromCatalog(base: AnyItemPayload, catalog: UnifiedCatalogItem) {
-  const next: AnyItemPayload = { ...base };
-  for (const key of BONUS_FIELDS) {
-    if (typeof next[key] !== "number") {
-      next[key] = catalog.bonuses[key];
-    }
-  }
-  return next;
-}
-
 function pickPayloadValue<T>(payloadValue: T | null | undefined, fallbackValue: T): T {
   if (payloadValue === null || payloadValue === undefined) {
     return fallbackValue;
@@ -673,14 +671,13 @@ function hasObjectValues(value: unknown) {
 function buildStatsRecord(
   payloadStats: Record<string, number> | undefined,
   payloadItem: AnyItemPayload,
-  catalog: UnifiedCatalogItem | null,
 ) {
   if (hasObjectValues(payloadStats)) {
     return { ...payloadStats };
   }
 
   const stats = BONUS_FIELDS.reduce<Record<string, number>>((acc, key) => {
-    const value = typeof payloadItem[key] === "number" ? payloadItem[key] : catalog?.bonuses[key] ?? 0;
+    const value = typeof payloadItem[key] === "number" ? payloadItem[key] : 0;
     if (value) {
       acc[key] = value;
     }
@@ -715,8 +712,27 @@ export function findUnifiedItemById(itemId?: number | null) {
   return BY_ID[itemId] ?? null;
 }
 
+function findCatalogForRemoteItem(payloadItem: AnyItemPayload) {
+  return findUnifiedItemByIcon(payloadItem.icon);
+}
+
+function applyServerStats<T extends AnyItemPayload & { stats?: Record<string, number> | null }>(payloadItem: T): T {
+  if (!payloadItem.stats || typeof payloadItem.stats !== "object") {
+    return payloadItem;
+  }
+
+  const next = { ...payloadItem };
+  for (const key of BONUS_FIELDS) {
+    const statValue = payloadItem.stats[key];
+    if (typeof next[key] !== "number" && typeof statValue === "number") {
+      next[key] = statValue;
+    }
+  }
+  return next;
+}
+
 export function mapPayloadItemToCatalog<T extends AnyItemPayload>(payloadItem: T): T {
-  const catalog = findUnifiedItemById(payloadItem.id) ?? findUnifiedItemByIcon(payloadItem.icon);
+  const catalog = findCatalogForRemoteItem(payloadItem);
   if (!catalog) {
     return {
       ...payloadItem,
@@ -724,9 +740,8 @@ export function mapPayloadItemToCatalog<T extends AnyItemPayload>(payloadItem: T
     };
   }
 
-  const merged = applyBonusesFromCatalog(payloadItem, catalog);
   return {
-    ...merged,
+    ...payloadItem,
     id: payloadItem.id ?? catalog.id,
     name: pickPayloadValue(payloadItem.name, catalog.name),
     description: pickPayloadValue(payloadItem.description, catalog.description),
@@ -735,19 +750,27 @@ export function mapPayloadItemToCatalog<T extends AnyItemPayload>(payloadItem: T
     type: pickPayloadValue(payloadItem.type, catalog.category),
     slot: payloadItem.slot ?? catalog.slot ?? null,
     subclass: payloadItem.subclass ?? catalog.subclass ?? null,
-    required_level: payloadItem.required_level ?? catalog.requiredLevel,
   } as T;
 }
 
-export function mapInventoryEntryToCatalog<T extends { item: AnyItemPayload; item_id?: number; weapon_stats?: { damage_min?: number; damage_max?: number } | null; armor_stats?: { armor_value?: number } | null }>(entry: T): T {
-  const item = mapPayloadItemToCatalog({
+export function mapInventoryEntryToCatalog<
+  T extends {
+    item: AnyItemPayload & {
+      weapon_stats?: { damage_min?: number; damage_max?: number } | null;
+      armor_stats?: { armor_value?: number } | null;
+    };
+    item_id?: number;
+    weapon_stats?: { damage_min?: number; damage_max?: number } | null;
+    armor_stats?: { armor_value?: number } | null;
+  },
+>(entry: T): T {
+  const item = applyServerStats(mapPayloadItemToCatalog({
     ...entry.item,
     id: entry.item.id ?? entry.item_id,
-  });
-  const catalog = findUnifiedItemById(item.id) ?? findUnifiedItemByIcon(item.icon);
+  }));
 
-  const weaponStats = entry.weapon_stats ?? catalog?.weaponStats ?? null;
-  const armorStats = entry.armor_stats ?? catalog?.armorStats ?? null;
+  const weaponStats = entry.weapon_stats ?? entry.item.weapon_stats ?? null;
+  const armorStats = entry.armor_stats ?? entry.item.armor_stats ?? null;
 
   return {
     ...entry,
@@ -764,34 +787,24 @@ export function mapInventoryDetailToCatalog<
     armor_stats?: { armor_value?: number } | null;
   },
 >(detail: T): T {
-  const item = mapPayloadItemToCatalog(detail.item);
-  const catalog = findUnifiedItemById(item.id) ?? findUnifiedItemByIcon(item.icon);
+  const item = applyServerStats(mapPayloadItemToCatalog(detail.item));
 
   return {
     ...detail,
     item,
-    weapon_stats: detail.weapon_stats ?? catalog?.weaponStats ?? null,
-    armor_stats: detail.armor_stats ?? catalog?.armorStats ?? null,
+    weapon_stats: detail.weapon_stats ?? null,
+    armor_stats: detail.armor_stats ?? null,
   };
 }
 
 export function mapShopItemToCatalog<T extends AnyItemPayload & { id: number; price_crystals?: number; required_level?: number; weapon_stats?: { damage_min: number; damage_max: number } | null; armor_stats?: { armor_value: number } | null; stats?: Record<string, number> }>(item: T): T {
-  const mapped = mapPayloadItemToCatalog(item);
-  const catalog = findUnifiedItemById(mapped.id) ?? findUnifiedItemByIcon(mapped.icon);
-  if (!catalog) {
-    return {
-      ...mapped,
-      stats: buildStatsRecord(item.stats, mapped, null),
-    };
-  }
+  const mapped = applyServerStats(mapPayloadItemToCatalog(item));
 
   return {
     ...mapped,
-    price_crystals: item.price_crystals ?? catalog.priceGold,
-    required_level: item.required_level ?? catalog.requiredLevel,
-    weapon_stats: item.weapon_stats ?? catalog.weaponStats ?? null,
-    armor_stats: item.armor_stats ?? catalog.armorStats ?? null,
-    stats: buildStatsRecord(item.stats, mapped, catalog),
+    weapon_stats: item.weapon_stats ?? null,
+    armor_stats: item.armor_stats ?? null,
+    stats: buildStatsRecord(item.stats, mapped),
   };
 }
 
@@ -806,7 +819,7 @@ export function buildCatalogLookupTokens(item: UnifiedCatalogItem) {
 }
 
 export function mapChestRewardToCatalog<T extends { id?: number; name: string; icon?: string; rarity?: string; slot?: string | null }>(item: T): T {
-  const catalog = findUnifiedItemById(item.id) ?? findUnifiedItemByIcon(item.icon);
+  const catalog = findUnifiedItemByIcon(item.icon);
   if (!catalog) {
     return {
       ...item,

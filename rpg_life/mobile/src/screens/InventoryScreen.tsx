@@ -12,7 +12,8 @@ import {
   type InventoryItem,
 } from "../api/game";
 import { Screen } from "../components/Screen";
-import { useGame } from "../context/GameContext";
+import { useGameProgress } from "../context/GameContext";
+import { useGameInventoryEquipment } from "../context/GameContext";
 import { useFeedback } from "../context/FeedbackContext";
 import { useTranslation } from "../context/LocalizationContext";
 import { buildItemStatEntries, buildItemStats, pickEquipSlot } from "../lib/equipment";
@@ -34,7 +35,8 @@ const rarityWeight: Record<string, number> = {
 
 export function InventoryScreen() {
   const t = useTranslation();
-  const { equipment, refreshGame } = useGame();
+  const { hero } = useGameProgress();
+  const { equipment, refreshGame } = useGameInventoryEquipment();
   const { pushToast } = useFeedback();
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -47,10 +49,22 @@ export function InventoryScreen() {
   const [isLoadingInventory, setIsLoadingInventory] = useState(false);
   const [activeItemAction, setActiveItemAction] = useState<ItemAction>(null);
   const isPhoneLayout = width < 420;
+  const heroLevel = hero?.level ?? equipment?.class_info?.level ?? 1;
   const selectedComparison = useMemo(
     () => (selectedItem?.is_equipped ? null : buildItemComparison(selectedItem, equipment?.equipment ?? [], t)),
     [equipment?.equipment, selectedItem, t],
   );
+
+  function getItemRequiredLevel(item: { item?: { required_level?: number | null; type?: string | null } | null } | null | undefined) {
+    return Math.max(1, item?.item?.required_level ?? 1);
+  }
+
+  function isItemLevelLocked(item: { item?: { required_level?: number | null; type?: string | null } | null } | null | undefined) {
+    if (!item?.item || item.item.type === "chest") {
+      return false;
+    }
+    return getItemRequiredLevel(item) > heroLevel;
+  }
 
   const loadInventory = useCallback(async () => {
     setIsLoadingInventory(true);
@@ -101,6 +115,16 @@ export function InventoryScreen() {
 
   async function handleEquip() {
     if (!selectedItem) return;
+    const requiredLevel = getItemRequiredLevel(selectedItem);
+    if (isItemLevelLocked(selectedItem)) {
+      void pushToast({
+        title: t("screens.character.levelLocked"),
+        description: t("screens.character.unlockAtLevel", { level: requiredLevel }),
+        icon: "lock",
+        tone: "warning",
+      });
+      return;
+    }
     try {
       setActiveItemAction("equip");
       const targetSlot = pickEquipSlot(selectedItem, equipment?.equipment ?? []);
@@ -281,6 +305,7 @@ export function InventoryScreen() {
               statEntries={buildItemStatEntries(item as any, t)}
               badge={`${getSlotLabel(item.item.slot, t)} | ${getRarityLabel(item.item.rarity, t)}`}
               equipped={item.is_equipped}
+              locked={isItemLevelLocked(item)}
               compact
               onPress={() => openItem(item)}
               delay={index * 18}
@@ -305,6 +330,7 @@ export function InventoryScreen() {
             ? [
                 { label: t("inventory.slot"), value: getSlotLabel(pickEquipSlot(selectedItem, equipment?.equipment ?? []), t) },
                 { label: t("inventory.rarity"), value: getRarityLabel(selectedItem.item.rarity, t) },
+                { label: t("screens.character.requiredLevel"), value: t("screens.character.levelBadge", { level: getItemRequiredLevel(selectedItem) }) },
                 { label: t("inventory.sellPrice"), value: `${selectedItem.sell_price} ${t("common.gold")}` },
               ]
             : []
@@ -336,10 +362,14 @@ export function InventoryScreen() {
                             loading: activeItemAction === "unequip",
                           }
                         : {
-                            label: t("inventory.equipItem"),
-                            icon: "shield-sword",
-                            onPress: handleEquip as () => void,
-                            loading: activeItemAction === "equip",
+                            label: isItemLevelLocked(selectedItem)
+                              ? t("screens.character.unlockAtLevelAction", { level: getItemRequiredLevel(selectedItem) })
+                              : t("inventory.equipItem"),
+                            icon: isItemLevelLocked(selectedItem) ? "lock" : "shield-sword",
+                            onPress: isItemLevelLocked(selectedItem) ? (() => undefined) : (handleEquip as () => void),
+                            loading: !isItemLevelLocked(selectedItem) && activeItemAction === "equip",
+                            variant: isItemLevelLocked(selectedItem) ? ("secondary" as const) : undefined,
+                            disabled: isItemLevelLocked(selectedItem),
                           },
                     ]),
                 {
