@@ -1,450 +1,80 @@
-﻿import { useFocusEffect, useNavigation, useRoute } from "@react-navigation/native";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Pressable, RefreshControl, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
+import { useRoute } from "@react-navigation/native";
+import React, { useEffect, useMemo, useRef } from "react";
+import { RefreshControl, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 
-import { type LeaderboardEntry, type LeaderboardPeriod, type LeaderboardResponse } from "../api/game";
-import {
-  fetchFriendRequests,
-  fetchFriends,
-  fetchGlobalLeaderboard,
-  fetchFriendsLeaderboard,
-  respondToFriendRequest,
-  searchUsers,
-  sendFriendRequest,
-  type FriendRequestItem,
-  type FriendItem,
-  type UserSearchResult,
-} from "../api/social";
-import { Card } from "../components/Card";
-import { Screen } from "../components/Screen";
 import { StateBlock } from "../components/StateBlock";
+import { Screen } from "../components/Screen";
 import { useGameProgress } from "../context/GameContext";
 import { useTranslation } from "../context/LocalizationContext";
-import { useThemeColors } from "../ui/theme";
-
-const tabs = ["friends", "leaderboard", "global"] as const;
-const metrics = ["level", "quests", "steps", "challenge_wins"] as const;
-const periods = ["weekly", "season", "all_time"] as const;
-type LeaderboardMetric = (typeof metrics)[number];
-type LeaderboardScope = "leaderboard" | "global";
-const FRIENDS_PAGE_SIZE = 20;
-const SEARCH_PAGE_SIZE = 20;
-const LEADERBOARD_PAGE_SIZE = 20;
-const LEADERBOARD_SEPARATOR = " | ";
-const EMPTY_VALUE = "-";
-
-type LeaderboardMeta = Pick<
-  LeaderboardResponse,
-  "period" | "period_started_at" | "period_ends_at" | "event_id" | "season_key"
->;
-
-type FriendsRouteParams = {
-  initialTab?: (typeof tabs)[number];
-  initialPeriod?: LeaderboardPeriod;
-  focusSearch?: boolean;
-  requestedAt?: number;
-};
-
-function translateOrFallback(
-  t: (key: string, params?: Record<string, string | number>) => string,
-  key: string,
-  fallback: string,
-  params?: Record<string, string | number>,
-) {
-  const translated = t(key, params);
-  return translated === key ? fallback : translated;
-}
-
-function formatIdentityLabel(username?: string | null, friendId?: string | null) {
-  const parts = [username ? `@${username}` : null, friendId ?? null].filter(Boolean);
-  return parts.length ? parts.join(LEADERBOARD_SEPARATOR) : null;
-}
+import { FriendCard } from "../features/friends/components/FriendCard";
+import { FriendRequestCard } from "../features/friends/components/FriendRequestCard";
+import { FriendSearchResultCard } from "../features/friends/components/FriendSearchResultCard";
+import { FriendsSummaryCard } from "../features/friends/components/FriendsSummaryCard";
+import { FriendsTabBar } from "../features/friends/components/FriendsTabBar";
+import type { FriendsRouteParams } from "../features/friends/types";
+import { useFriendsScreenState } from "../features/friends/useFriendsScreenState";
+import { formatIdentityLabel, translateOrFallback } from "../features/friends/utils";
+import { Button } from "../ui/Button";
+import { Card } from "../ui/Card";
+import { radii, useThemeColors } from "../ui/theme";
 
 export function FriendsScreen() {
-  const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const { profile, refreshGame } = useGameProgress();
-  const friendsScrollRef = useRef<ScrollView | null>(null);
-  const searchInputRef = useRef<TextInput | null>(null);
-  const searchSectionYRef = useRef(0);
-  const friendsRequestRef = useRef(0);
-  const searchRequestRef = useRef(0);
-  const leaderboardRequestRef = useRef(0);
-  const [activeTab, setActiveTab] = useState<(typeof tabs)[number]>("friends");
-  const [friends, setFriends] = useState<FriendItem[]>([]);
-  const [friendsLoading, setFriendsLoading] = useState(false);
-  const [friendsLoadingMore, setFriendsLoadingMore] = useState(false);
-  const [friendsRefreshing, setFriendsRefreshing] = useState(false);
-  const [friendsPage, setFriendsPage] = useState(1);
-  const [friendsHasMore, setFriendsHasMore] = useState(false);
-  const [friendsError, setFriendsError] = useState<string | null>(null);
-  const [friendRequests, setFriendRequests] = useState<FriendRequestItem[]>([]);
-  const [friendRequestsLoading, setFriendRequestsLoading] = useState(false);
-  const [friendRequestsError, setFriendRequestsError] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<UserSearchResult[]>([]);
-  const [searchLoading, setSearchLoading] = useState(false);
-  const [searchLoadingMore, setSearchLoadingMore] = useState(false);
-  const [searchAttempted, setSearchAttempted] = useState(false);
-  const [searchPage, setSearchPage] = useState(1);
-  const [searchHasMore, setSearchHasMore] = useState(false);
-  const [searchActiveQuery, setSearchActiveQuery] = useState("");
-  const [searchError, setSearchError] = useState<string | null>(null);
-  const [sendingRequestIds, setSendingRequestIds] = useState<number[]>([]);
-  const [respondingRequestIds, setRespondingRequestIds] = useState<number[]>([]);
-  const [leaderboardMetric, setLeaderboardMetric] = useState<LeaderboardMetric>("level");
-  const [leaderboardPeriod, setLeaderboardPeriod] = useState<LeaderboardPeriod>("weekly");
-  const [leaderboardItems, setLeaderboardItems] = useState<LeaderboardEntry[]>([]);
-  const [leaderboardMeta, setLeaderboardMeta] = useState<LeaderboardMeta | null>(null);
-  const [leaderboardPage, setLeaderboardPage] = useState(1);
-  const [leaderboardHasMore, setLeaderboardHasMore] = useState(false);
-  const [leaderboardLoadingMore, setLeaderboardLoadingMore] = useState(false);
-  const [globalLeaderboardItems, setGlobalLeaderboardItems] = useState<LeaderboardEntry[]>([]);
-  const [globalLeaderboardMeta, setGlobalLeaderboardMeta] = useState<LeaderboardMeta | null>(null);
-  const [globalLeaderboardPage, setGlobalLeaderboardPage] = useState(1);
-  const [globalLeaderboardHasMore, setGlobalLeaderboardHasMore] = useState(false);
-  const [globalLeaderboardLoadingMore, setGlobalLeaderboardLoadingMore] = useState(false);
-  const [leaderboardLoading, setLeaderboardLoading] = useState(false);
-  const [leaderboardError, setLeaderboardError] = useState<string | null>(null);
   const t = useTranslation();
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const [leaderboardRefreshing, setLeaderboardRefreshing] = useState(false);
-  const [shouldRevealSearch, setShouldRevealSearch] = useState(false);
+  const searchInputRef = useRef<TextInput | null>(null);
+  const routeParams = route.params as FriendsRouteParams | undefined;
+  const {
+    activeTab,
+    setActiveTab,
+    openDiscoverTab,
+    friends,
+    incomingRequests,
+    outgoingRequests,
+    searchQuery,
+    setSearchQuery,
+    searchResults,
+    searchSubmitted,
+    friendsLoading,
+    requestsLoading,
+    searchLoading,
+    refreshing,
+    friendsError,
+    requestsError,
+    searchError,
+    sendingIds,
+    respondingIds,
+    searchFocusKey,
+    pendingRequestCount,
+    loadFriends,
+    loadRequests,
+    reloadDiscover,
+    refreshScreen,
+    runSearch,
+    handleSendRequest,
+    handleRespondToRequest,
+  } = useFriendsScreenState({
+    refreshGame,
+    routeParams,
+  });
 
-  useFocusEffect(
-    useCallback(() => {
-      if (activeTab === "friends") {
-        void Promise.all([
-          loadFriends({ page: 1, refresh: false, append: false }),
-          loadFriendRequests(),
-          loadLeaderboard({ page: 1, append: false, scope: "leaderboard" }),
-        ]);
-      } else {
-        void loadLeaderboard({ page: 1, append: false, scope: activeTab });
-      }
-    }, [activeTab, leaderboardMetric, leaderboardPeriod]),
-  );
+  const identityLabel = formatIdentityLabel(profile?.user?.username, profile?.user?.friend_id);
 
   useEffect(() => {
-    const params = route.params as FriendsRouteParams | undefined;
-    if (!params) {
-      return;
-    }
-    if (params.initialTab && tabs.includes(params.initialTab)) {
-      setActiveTab(params.initialTab);
-    }
-    if (params.initialPeriod && periods.includes(params.initialPeriod)) {
-      setLeaderboardPeriod(params.initialPeriod);
-    }
-    if (params.focusSearch) {
-      setShouldRevealSearch(true);
-      if (!params.initialTab || params.initialTab === "friends") {
-        setActiveTab("friends");
-      }
-    }
-  }, [route.params?.requestedAt, route.params?.initialTab, route.params?.initialPeriod, route.params?.focusSearch]);
-
-  useEffect(() => {
-    if (!shouldRevealSearch || activeTab !== "friends") {
+    if (activeTab !== "discover") {
       return;
     }
 
-    const revealTimer = setTimeout(() => {
-      friendsScrollRef.current?.scrollTo({
-        y: Math.max(0, searchSectionYRef.current - 16),
-        animated: true,
-      });
+    const timer = setTimeout(() => {
       searchInputRef.current?.focus();
-      setShouldRevealSearch(false);
-    }, 80);
-
-    return () => clearTimeout(revealTimer);
-  }, [activeTab, shouldRevealSearch]);
-
-  async function loadFriends({ page, refresh, append }: { page: number; refresh: boolean; append: boolean }) {
-    const requestId = ++friendsRequestRef.current;
-
-    if (refresh) {
-      setFriendsRefreshing(true);
-    } else if (append) {
-      setFriendsLoadingMore(true);
-    } else {
-      setFriendsLoading(true);
-    }
-    setFriendsError(null);
-    try {
-      const payload = await fetchFriends(page, FRIENDS_PAGE_SIZE);
-      if (requestId !== friendsRequestRef.current) {
-        return;
-      }
-      setFriends((prev) => (append ? [...prev, ...payload.items] : payload.items));
-      setFriendsPage(payload.pagination.page);
-      setFriendsHasMore(payload.pagination.page < payload.pagination.total_pages);
-    } catch (error) {
-      if (requestId !== friendsRequestRef.current) {
-        return;
-      }
-      setFriendsError(error instanceof Error ? error.message : t("screens.friends.errors.loadFriends"));
-    } finally {
-      if (requestId !== friendsRequestRef.current) {
-        return;
-      }
-      setFriendsLoading(false);
-      setFriendsLoadingMore(false);
-      setFriendsRefreshing(false);
-    }
-  }
-
-  async function loadFriendRequests() {
-    setFriendRequestsLoading(true);
-    setFriendRequestsError(null);
-    try {
-      const payload = await fetchFriendRequests();
-      setFriendRequests(payload.items ?? []);
-    } catch (error) {
-      setFriendRequestsError(error instanceof Error ? error.message : t("screens.friends.errors.loadFriends"));
-    } finally {
-      setFriendRequestsLoading(false);
-    }
-  }
-
-  async function loadLeaderboard({ page, append, scope }: { page: number; append: boolean; scope: LeaderboardScope }) {
-    const requestId = ++leaderboardRequestRef.current;
-
-    if (append) {
-      if (scope === "leaderboard") {
-        setLeaderboardLoadingMore(true);
-      } else {
-        setGlobalLeaderboardLoadingMore(true);
-      }
-    } else {
-      setLeaderboardLoading(true);
-    }
-    setLeaderboardError(null);
-    try {
-      if (scope === "leaderboard") {
-        const payload = await fetchFriendsLeaderboard(leaderboardMetric, page, LEADERBOARD_PAGE_SIZE, leaderboardPeriod);
-        if (requestId !== leaderboardRequestRef.current) {
-          return;
-        }
-        setLeaderboardItems((prev) => (append ? [...prev, ...payload.items] : payload.items));
-        setLeaderboardMeta({
-          period: payload.period,
-          period_started_at: payload.period_started_at,
-          period_ends_at: payload.period_ends_at,
-          event_id: payload.event_id,
-          season_key: payload.season_key,
-        });
-        setLeaderboardPage(payload.pagination.page);
-        setLeaderboardHasMore(payload.pagination.page < payload.pagination.total_pages);
-      } else {
-        const payload = await fetchGlobalLeaderboard(leaderboardMetric, page, LEADERBOARD_PAGE_SIZE, leaderboardPeriod);
-        if (requestId !== leaderboardRequestRef.current) {
-          return;
-        }
-        setGlobalLeaderboardItems((prev) => (append ? [...prev, ...payload.items] : payload.items));
-        setGlobalLeaderboardMeta({
-          period: payload.period,
-          period_started_at: payload.period_started_at,
-          period_ends_at: payload.period_ends_at,
-          event_id: payload.event_id,
-          season_key: payload.season_key,
-        });
-        setGlobalLeaderboardPage(payload.pagination.page);
-        setGlobalLeaderboardHasMore(payload.pagination.page < payload.pagination.total_pages);
-      }
-    } catch (error) {
-      if (requestId !== leaderboardRequestRef.current) {
-        return;
-      }
-      setLeaderboardError(error instanceof Error ? error.message : t("screens.friends.errors.loadLeaderboard"));
-    } finally {
-      if (requestId !== leaderboardRequestRef.current) {
-        return;
-      }
-      setLeaderboardLoading(false);
-      setLeaderboardLoadingMore(false);
-      setGlobalLeaderboardLoadingMore(false);
-    }
-  }
-
-  async function handleRefreshLeaderboard(scope: LeaderboardScope) {
-    try {
-      setLeaderboardRefreshing(true);
-      await loadLeaderboard({ page: 1, append: false, scope });
-    } finally {
-      setLeaderboardRefreshing(false);
-    }
-  }
-
-  async function performSearch(query: string, page: number, append: boolean) {
-    const requestId = ++searchRequestRef.current;
-
-    if (append) {
-      setSearchLoadingMore(true);
-    } else {
-      setSearchLoading(true);
-      setSearchAttempted(true);
-    }
-    setSearchError(null);
-    try {
-      const payload = await searchUsers(query, page, SEARCH_PAGE_SIZE);
-      if (requestId !== searchRequestRef.current) {
-        return;
-      }
-      setSearchResults((prev) => (append ? [...prev, ...payload.items] : payload.items));
-      setSearchActiveQuery(query);
-      setSearchPage(payload.pagination.page);
-      setSearchHasMore(payload.pagination.page < payload.pagination.total_pages);
-    } catch (error) {
-      if (requestId !== searchRequestRef.current) {
-        return;
-      }
-      setSearchError(error instanceof Error ? error.message : t("screens.friends.errors.search"));
-    } finally {
-      if (requestId !== searchRequestRef.current) {
-        return;
-      }
-      setSearchLoading(false);
-      setSearchLoadingMore(false);
-    }
-  }
-
-  function resetSearchState() {
-    searchRequestRef.current += 1;
-    setSearchResults([]);
-    setSearchAttempted(false);
-    setSearchHasMore(false);
-    setSearchPage(1);
-    setSearchActiveQuery("");
-    setSearchError(null);
-  }
-
-  async function handleSearch() {
-    const query = searchQuery.trim();
-    if (!query) {
-      resetSearchState();
-      return;
-    }
-    if (query.length < 2) {
-      setSearchError(t("screens.friends.errors.searchMinLength"));
-      return;
-    }
-
-    await performSearch(query, 1, false);
-  }
-
-  async function handleLoadMoreSearch() {
-    if (searchLoading || searchLoadingMore || !searchHasMore || !searchActiveQuery) {
-      return;
-    }
-    await performSearch(searchActiveQuery, searchPage + 1, true);
-  }
-
-  async function handleLoadMoreFriends() {
-    if (friendsLoading || friendsLoadingMore || !friendsHasMore) {
-      return;
-    }
-    await loadFriends({ page: friendsPage + 1, refresh: false, append: true });
-  }
-
-  async function handleLoadMoreLeaderboard() {
-    if (leaderboardLoading || leaderboardLoadingMore || !leaderboardHasMore) {
-      return;
-    }
-    await loadLeaderboard({ page: leaderboardPage + 1, append: true, scope: "leaderboard" });
-  }
-
-  async function handleLoadMoreGlobalLeaderboard() {
-    if (leaderboardLoading || globalLeaderboardLoadingMore || !globalLeaderboardHasMore) {
-      return;
-    }
-    await loadLeaderboard({ page: globalLeaderboardPage + 1, append: true, scope: "global" });
-  }
-
-  async function handleSendRequest(userId: number) {
-    if (sendingRequestIds.includes(userId)) {
-      return;
-    }
-
-    setSendingRequestIds((prev) => [...prev, userId]);
-    try {
-      const payload = await sendFriendRequest(userId);
-      setSearchResults((prev) => prev.map((user) => (
-        user.id === userId
-          ? { ...user, status: "outgoing_pending", request_id: payload.request.id }
-          : user
-      )));
-      await Promise.all([loadFriendRequests(), refreshGame(true)]);
-    } catch (error) {
-      setSearchError(error instanceof Error ? error.message : t("screens.friends.errors.sendRequest"));
-    } finally {
-      setSendingRequestIds((prev) => prev.filter((id) => id !== userId));
-    }
-  }
-
-  async function handleRespondToFriendRequest(requestId: number, action: "accept" | "decline", userId?: number) {
-    if (respondingRequestIds.includes(requestId)) {
-      return;
-    }
-
-    setRespondingRequestIds((prev) => [...prev, requestId]);
-    setSearchError(null);
-    try {
-      await respondToFriendRequest(requestId, action);
-      setFriendRequests((prev) => prev.filter((request) => request.id !== requestId));
-      setSearchResults((prev) => prev.flatMap((user) => {
-        if (user.request_id !== requestId && user.id !== userId) {
-          return [user];
-        }
-        if (action === "accept") {
-          return [];
-        }
-        return [{ ...user, status: "none", request_id: undefined }];
-      }));
-      await Promise.all([
-        refreshGame(true),
-        ...(action === "accept"
-          ? [
-              loadFriends({ page: 1, refresh: false, append: false }),
-              loadLeaderboard({ page: 1, append: false, scope: "leaderboard" }),
-            ]
-          : []),
-      ]);
-    } catch (error) {
-      setSearchError(error instanceof Error ? error.message : t("screens.friends.errors.sendRequest"));
-    } finally {
-      setRespondingRequestIds((prev) => prev.filter((id) => id !== requestId));
-    }
-  }
-
-  function getMetricLabel(value: LeaderboardMetric) {
-    const key = `screens.leaderboard.metrics.${value}`;
-    const translated = t(key);
-    return translated === key ? value : translated;
-  }
-
-  function getPeriodLabel(value: LeaderboardPeriod) {
-    switch (value) {
-      case "weekly":
-        return translateOrFallback(t, "screens.friends.periods.weekly", "РќРµРґРµР»СЏ");
-      case "season":
-        return translateOrFallback(t, "screens.friends.periods.season", "РЎРµР·РѕРЅ");
-      default:
-        return translateOrFallback(t, "screens.friends.periods.all_time", "Р’СЃРµ РІСЂРµРјСЏ");
-    }
-  }
-
-  function focusSearchInput() {
-    setShouldRevealSearch(true);
-    if (activeTab !== "friends") {
-      setActiveTab("friends");
-    }
-  }
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [activeTab, searchFocusKey]);
 
   async function handleShareIdentity() {
-    if (!currentUserIdentityLabel) {
+    if (!identityLabel) {
       return;
     }
 
@@ -453,289 +83,194 @@ export function FriendsScreen() {
         message: translateOrFallback(
           t,
           "screens.friends.shareIdentityMessage",
-          `РњРѕР№ РєРѕРґ РІ RPG Life: ${currentUserIdentityLabel}. Р”РѕР±Р°РІСЊ РјРµРЅСЏ РІ РґСЂСѓР·СЊСЏ С‡РµСЂРµР· РїРѕРёСЃРє РїРѕ РЅРёРєСѓ РёР»Рё RPG-ID.`,
-          { identity: currentUserIdentityLabel },
+          `Мой код в RPG Life: ${identityLabel}. Добавь меня через поиск по username.`,
+          { identity: identityLabel },
         ),
       });
     } catch {
-      // Best-effort native share: ignore cancellation/system share-sheet issues.
+      // Native share is best-effort.
     }
   }
 
-  const currentLeaderboardItems = activeTab === "leaderboard" ? leaderboardItems : globalLeaderboardItems;
-  const currentLeaderboardMeta = activeTab === "leaderboard" ? leaderboardMeta : globalLeaderboardMeta;
-  const incomingRequests = friendRequests.filter((request) => request.direction === "incoming");
-  const outgoingRequests = friendRequests.filter((request) => request.direction === "outgoing");
-  const pendingRequestCount = friendRequests.length;
-  const currentUserId = profile?.user?.id;
-  const friendsLeaderboardHasPeers =
-    activeTab !== "leaderboard" ||
-    friends.length > 0 ||
-    (currentUserId != null
-      ? currentLeaderboardItems.some((item) => item.user_id !== currentUserId)
-      : currentLeaderboardItems.length > 0);
-  const visibleLeaderboardItems = activeTab === "leaderboard" && !friendsLeaderboardHasPeers ? [] : currentLeaderboardItems;
-  const topLeaderboardEntry = visibleLeaderboardItems[0] ?? null;
-  const topLeaderboardLabel = topLeaderboardEntry ? `#${topLeaderboardEntry.rank} ${topLeaderboardEntry.name}` : EMPTY_VALUE;
-  const leaderboardPeriodLabel = getPeriodLabel(currentLeaderboardMeta?.period ?? leaderboardPeriod);
-  const leaderboardPeriodEndsLabel = currentLeaderboardMeta?.period_ends_at
-    ? new Date(currentLeaderboardMeta.period_ends_at).toLocaleDateString()
-    : null;
-  const leaderboardEmptyActionLabel = activeTab === "leaderboard"
-    ? t("screens.friends.empty.findFriendsAction")
-    : t("common.createGoal");
-  const handleLeaderboardEmptyAction = activeTab === "leaderboard"
-    ? focusSearchInput
-    : () => navigation.navigate("GoalSelect");
-  const currentUserIdentityLabel = formatIdentityLabel(profile?.user?.username, profile?.user?.friend_id);
-  const socialSupportTitle = friends.length === 0
-    ? translateOrFallback(t, "screens.friends.quick.supportTitleStart", "РљР°Рє РЅР°С‡Р°С‚СЊ РІРјРµСЃС‚Рµ")
-    : translateOrFallback(t, "screens.friends.quick.supportTitleActive", "РљР°Рє social РїРѕРјРѕРіР°РµС‚ РґРµСЂР¶Р°С‚СЊ С‚РµРјРї");
-  const socialSupportDescription = friends.length === 0
-    ? translateOrFallback(
-        t,
-        "screens.friends.quick.supportDescriptionStart",
-        "Р—РґРµСЃСЊ РІР°Р¶РЅРµРµ РЅРµ СЃРѕСЂРµРІРЅРѕРІР°РЅРёРµ, Р° РѕС‰СѓС‰РµРЅРёРµ, С‡С‚Рѕ С‚С‹ РёРґРµС€СЊ Рє С†РµР»Рё РЅРµ РІ РѕРґРёРЅРѕС‡РєСѓ.",
-      )
-    : translateOrFallback(
-        t,
-        "screens.friends.quick.supportDescriptionActive",
-        "РСЃРїРѕР»СЊР·СѓР№ РґСЂСѓР·РµР№ РєР°Рє РјСЏРіРєРёР№ РѕСЂРёРµРЅС‚РёСЂ: РІРёРґРµС‚СЊ С‚РµРјРї, РїРѕРґРґРµСЂР¶РёРІР°С‚СЊ СЂРёС‚Рј Рё РЅРµ РІС‹РїР°РґР°С‚СЊ РёР· РїСѓС‚Рё.",
-      );
-  const socialSupportItems = friends.length === 0
-    ? [
-        {
-          title: translateOrFallback(t, "screens.friends.quick.supportStepFindTitle", "РќР°Р№РґРё С‡РµР»РѕРІРµРєР° РїРѕ РЅРёРєСѓ РёР»Рё RPG-ID"),
-          description: translateOrFallback(
-            t,
-            "screens.friends.quick.supportStepFindDescription",
-            "Р”РѕР±Р°РІСЊ РїРµСЂРІРѕРіРѕ Р·РЅР°РєРѕРјРѕРіРѕ, СЃ РєРµРј РїСЂРѕС‰Рµ РґРµСЂР¶Р°С‚СЊ РѕР±С‰РёР№ СЂРёС‚Рј Рё СЃРјРѕС‚СЂРµС‚СЊ РЅР° РїСЂРѕРіСЂРµСЃСЃ Р±РµР· РґР°РІР»РµРЅРёСЏ.",
-          ),
-        },
-        {
-          title: translateOrFallback(t, "screens.friends.quick.supportStepSendTitle", "РћС‚РїСЂР°РІСЊ Р·Р°СЏРІРєСѓ Рё РґРѕР¶РґРёСЃСЊ РѕС‚РІРµС‚Р°"),
-          description: translateOrFallback(
-            t,
-            "screens.friends.quick.supportStepSendDescription",
-            "РџРѕСЃР»Рµ РїСЂРёРЅСЏС‚РёСЏ Р·Р°СЏРІРєРё Сѓ С‚РµР±СЏ РїРѕСЏРІРёС‚СЃСЏ СЃРІРѕР№ РґСЂСѓР¶РµСЃРєРёР№ РєСЂСѓРі Рё РїРѕРЅСЏС‚РЅС‹Р№ social-РєРѕРЅС‚РµРєСЃС‚.",
-          ),
-        },
-        {
-          title: translateOrFallback(t, "screens.friends.quick.supportStepTrackTitle", "РЎРјРѕС‚СЂРё РЅР° РґСЂСѓР¶РµСЃРєРёР№ СЂРµР№С‚РёРЅРі РєР°Рє РЅР° РѕСЂРёРµРЅС‚РёСЂ"),
-          description: translateOrFallback(
-            t,
-            "screens.friends.quick.supportStepTrackDescription",
-            "Р РµР№С‚РёРЅРі РґСЂСѓР·РµР№ РїРѕР»РµР·РµРЅ РЅРµ СЂР°РґРё СЃС‚СЂРµСЃСЃР°, Р° С‡С‚РѕР±С‹ РїРѕРЅРёРјР°С‚СЊ С‚РµРјРї Рё РЅРµ С‚РµСЂСЏС‚СЊ РґРІРёР¶РµРЅРёРµ Рє С†РµР»Рё.",
-          ),
-        },
-      ]
-    : [
-        {
-          title: translateOrFallback(t, "screens.friends.quick.supportStepCheckTitle", "РЎРјРѕС‚СЂРё, РєС‚Рѕ РґРµСЂР¶РёС‚ С‚РµРјРї СЂСЏРґРѕРј"),
-          description: translateOrFallback(
-            t,
-            "screens.friends.quick.supportStepCheckDescription",
-            "Р Р°Р· РІ РґРµРЅСЊ РїСЂРѕРІРµСЂСЏР№ РґСЂСѓР¶РµСЃРєРёР№ СЂРµР№С‚РёРЅРі, С‡С‚РѕР±С‹ СѓРІРёРґРµС‚СЊ Р±Р»РёР·РєРёР№ РѕСЂРёРµРЅС‚РёСЂ, Р° РЅРµ Р°Р±СЃС‚СЂР°РєС‚РЅС‹Р№ С‚РѕРї.",
-          ),
-        },
-        {
-          title: translateOrFallback(t, "screens.friends.quick.supportStepUseTitle", "РСЃРїРѕР»СЊР·СѓР№ СЂРµР№С‚РёРЅРі РєР°Рє РїРѕРґСЃРєР°Р·РєСѓ"),
-          description: translateOrFallback(
-            t,
-            "screens.friends.quick.supportStepUseDescription",
-            "Р•СЃР»Рё РєС‚Рѕ-С‚Рѕ СѓС€РµР» РІРїРµСЂРµРґ, СЌС‚Рѕ СЃРёРіРЅР°Р» РЅРµ СЃСЂР°РІРЅРёРІР°С‚СЊ СЃРµР±СЏ Р¶РµСЃС‚РєРѕ, Р° РІС‹Р±СЂР°С‚СЊ РѕРґРёРЅ СЃР»РµРґСѓСЋС‰РёР№ С€Р°Рі РЅР° СЃРµРіРѕРґРЅСЏ.",
-          ),
-        },
-        {
-          title: translateOrFallback(t, "screens.friends.quick.supportStepShareTitle", "РџРѕРґРґРµСЂР¶РёРІР°Р№С‚Рµ РїСѓС‚СЊ РІРјРµСЃС‚Рµ"),
-          description: translateOrFallback(
-            t,
-            "screens.friends.quick.supportStepShareDescription",
-            "РџРµСЂРµРґР°РІР°Р№ СЃРІРѕР№ РєРѕРґ РЅРѕРІС‹Рј Р»СЋРґСЏРј Рё СЃРѕР±РёСЂР°Р№ РѕРєСЂСѓР¶РµРЅРёРµ, РєРѕС‚РѕСЂРѕРµ РїРѕРјРѕРіР°РµС‚ РІРѕР·РІСЂР°С‰Р°С‚СЊСЃСЏ РІ РїСЂРёР»РѕР¶РµРЅРёРµ СЂРµРіСѓР»СЏСЂРЅРѕ.",
-          ),
-        },
-      ];
-  const socialPulseCard = friends.length === 0
-    ? {
-        title: translateOrFallback(t, "screens.friends.quick.pulseNoFriendsTitle", "Р”РѕР±Р°РІСЊ РїРµСЂРІРѕРіРѕ СЃРѕСЋР·РЅРёРєР°"),
-        description: translateOrFallback(
-          t,
-          "screens.friends.quick.pulseNoFriendsDescription",
-          "РЎ РґСЂСѓР·СЊСЏРјРё РїСЂРѕС‰Рµ РЅРµ Р±СЂРѕСЃР°С‚СЊ С†РµР»СЊ РЅР° РїРѕР»РїСѓС‚Рё: РІРёРґРЅРѕ РѕР±С‰РёР№ С‚РµРјРї, РїСЂРѕС‰Рµ РІРµСЂРЅСѓС‚СЊСЃСЏ РІ СЂРёС‚Рј Рё РґРµР»Р°С‚СЊ СЃР»РµРґСѓСЋС‰РёР№ С€Р°Рі.",
-        ),
-        actionLabel: t("screens.friends.empty.findFriendsAction"),
-        onPress: focusSearchInput,
-      }
-    : pendingRequestCount > 0
-      ? {
-          title: translateOrFallback(t, "screens.friends.quick.pulsePendingTitle", "РЎРІСЏР·Рё СѓР¶Рµ СЃРѕР±РёСЂР°СЋС‚СЃСЏ"),
-          description: translateOrFallback(
-            t,
-            "screens.friends.quick.pulsePendingDescription",
-            `РЈ С‚РµР±СЏ СѓР¶Рµ ${pendingRequestCount} Р·Р°СЏРІРѕРє. РџРѕРєР° Р¶РґРµС€СЊ РѕС‚РІРµС‚, РјРѕР¶РЅРѕ РґРѕР±Р°РІРёС‚СЊ РµС‰Рµ РѕРґРЅРѕРіРѕ С‡РµР»РѕРІРµРєР° Рё СЃРѕР±СЂР°С‚СЊ СЃРІРѕР№ РєСЂСѓРі РїРѕРґРґРµСЂР¶РєРё.`,
-            { count: pendingRequestCount },
-          ),
-          actionLabel: t("screens.friends.empty.findFriendsAction"),
-          onPress: focusSearchInput,
-        }
-      : {
-          title: translateOrFallback(t, "screens.friends.quick.pulseReadyTitle", "Р”РµСЂР¶РёС‚Рµ С‚РµРјРї РІРјРµСЃС‚Рµ"),
-          description: translateOrFallback(
-            t,
-            "screens.friends.quick.pulseReadyDescription",
-            `РЈ С‚РµР±СЏ ${friends.length} РґСЂСѓР·РµР№. Р—Р°РіР»СЏРЅРё РІ РґСЂСѓР¶РµСЃРєРёР№ СЂРµР№С‚РёРЅРі Рё РІС‹Р±РµСЂРё РѕРґРЅРѕРіРѕ С‡РµР»РѕРІРµРєР° РєР°Рє РјСЏРіРєРёР№ РѕСЂРёРµРЅС‚РёСЂ РЅР° СЃРµРіРѕРґРЅСЏ.`,
-            { count: friends.length },
-          ),
-          actionLabel: translateOrFallback(t, "screens.friends.quick.openLeaderboard", "РћС‚РєСЂС‹С‚СЊ СЂРµР№С‚РёРЅРі"),
-          onPress: () => setActiveTab("leaderboard"),
-        };
-  const leaderboardGuide = activeTab === "leaderboard"
-    ? {
-        title: translateOrFallback(t, "screens.friends.quick.friendLeaderboardTitle", "Р”СЂСѓР¶РµСЃРєРёР№ С‚РµРјРї РЅРµРґРµР»Рё"),
-        description: translateOrFallback(
-          t,
-          "screens.friends.quick.friendLeaderboardDescription",
-          "РЎРјРѕС‚СЂРё РЅР° СЂРµР№С‚РёРЅРі РґСЂСѓР·РµР№ РєР°Рє РЅР° РѕСЂРёРµРЅС‚РёСЂ РїРѕ С‚РµРјРїСѓ. Р—РґРµСЃСЊ РІР°Р¶РЅРµРµ Р±Р»РёР·РєРёРµ Р»СЋРґРё Рё РїРѕРЅСЏС‚РЅС‹Р№ СЃР»РµРґСѓСЋС‰РёР№ С€Р°Рі, Р° РЅРµ Р°Р±СЃРѕР»СЋС‚РЅС‹Р№ С‚РѕРї.",
-        ),
-      }
-    : {
-        title: translateOrFallback(t, "screens.friends.quick.globalLeaderboardTitle", "Р“Р»РѕР±Р°Р»СЊРЅС‹Р№ РѕСЂРёРµРЅС‚РёСЂ"),
-        description: translateOrFallback(
-          t,
-          "screens.friends.quick.globalLeaderboardDescription",
-          "Р“Р»РѕР±Р°Р»СЊРЅС‹Р№ СЂРµР№С‚РёРЅРі РїРѕР»РµР·РµРЅ РєР°Рє С„РѕРЅ Рё РІРґРѕС…РЅРѕРІРµРЅРёРµ. Р”Р»СЏ РµР¶РµРґРЅРµРІРЅРѕРіРѕ СЂРёС‚РјР° РѕСЂРёРµРЅС‚РёСЂСѓР№СЃСЏ РІ РїРµСЂРІСѓСЋ РѕС‡РµСЂРµРґСЊ РЅР° РґСЂСѓР·РµР№ Рё СЃРІРѕР№ РїСѓС‚СЊ.",
-        ),
-      };
-
   return (
-    <Screen title={t("screens.friends.title")} subtitle={t("screens.friends.subtitle")} scrollable={false}>
-      <View style={styles.tabs}>
-        {tabs.map((tab) => (
-          <Pressable
-            key={tab}
-            style={[styles.tab, activeTab === tab ? styles.tabActive : null]}
-            onPress={() => setActiveTab(tab)}
-          >
-            <Text style={[styles.tabText, activeTab === tab ? styles.tabTextActive : null]}>
-              {t(`screens.friends.tabs.${tab}`)}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
+    <Screen
+      title={t("screens.friends.title")}
+      subtitle={translateOrFallback(t, "screens.friends.subtitle", "Друзья, заявки и поиск игроков в едином social-разделе.")}
+      scrollable={false}
+    >
+      <ScrollView
+        style={styles.content}
+        contentContainerStyle={styles.contentBody}
+        keyboardShouldPersistTaps="handled"
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void refreshScreen()} tintColor={colors.primary} />}
+      >
+        <FriendsSummaryCard
+          t={t}
+          friendsCount={friends.length}
+          incomingCount={incomingRequests.length}
+          outgoingCount={outgoingRequests.length}
+          identityLabel={identityLabel}
+          onFindFriends={() => openDiscoverTab(true)}
+          onShareIdentity={identityLabel ? handleShareIdentity : undefined}
+        />
 
-      {activeTab === "friends" && (
-        <ScrollView
-          ref={friendsScrollRef}
-          style={styles.content}
-          contentContainerStyle={styles.contentBody}
-          keyboardShouldPersistTaps="handled"
-          refreshControl={
-            <RefreshControl
-              refreshing={friendsRefreshing}
-              onRefresh={() => Promise.all([
-                loadFriends({ page: 1, refresh: true, append: false }),
-                loadFriendRequests(),
-                loadLeaderboard({ page: 1, append: false, scope: "leaderboard" }),
-              ])}
-              tintColor={colors.primary}
-            />
-          }
-        >
-          <Card>
-            <Text style={styles.sectionTitle}>{translateOrFallback(t, "screens.friends.quick.pulseTitle", "РЎРѕС†РёР°Р»СЊРЅР°СЏ СЃРІРѕРґРєР°")}</Text>
-            <Text style={styles.pulseTitle}>{socialPulseCard.title}</Text>
-            <Text style={styles.pulseDescription}>{socialPulseCard.description}</Text>
-            <Pressable style={styles.pulseButton} onPress={socialPulseCard.onPress}>
-              <Text style={styles.pulseButtonText}>{socialPulseCard.actionLabel}</Text>
-            </Pressable>
-          </Card>
+        <FriendsTabBar
+          activeTab={activeTab}
+          pendingRequestCount={pendingRequestCount}
+          onChange={(tab) => {
+            if (tab === "discover") {
+              openDiscoverTab(false);
+              return;
+            }
+            setActiveTab(tab);
+          }}
+        />
 
-          <Card>
-            <Text style={styles.sectionTitle}>{socialSupportTitle}</Text>
-            <Text style={styles.pulseDescription}>{socialSupportDescription}</Text>
-            <View style={styles.supportList}>
-              {socialSupportItems.map((item, index) => (
-                <View key={`${item.title}-${index}`} style={styles.supportItem}>
-                  <View style={styles.supportStepBadge}>
-                    <Text style={styles.supportStepText}>{index + 1}</Text>
-                  </View>
-                  <View style={styles.supportCopy}>
-                    <Text style={styles.supportTitle}>{item.title}</Text>
-                    <Text style={styles.supportDescription}>{item.description}</Text>
-                  </View>
-                </View>
-              ))}
+        {activeTab === "friends" ? (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>{translateOrFallback(t, "screens.friends.myFriends", "Мои друзья")}</Text>
+              <Button
+                label={translateOrFallback(t, "screens.friends.findFriendsTitle", "Найти друзей")}
+                icon="account-plus-outline"
+                onPress={() => openDiscoverTab(true)}
+                variant="secondary"
+                style={styles.headerButton}
+              />
             </View>
-          </Card>
 
-          <View style={styles.summaryRow}>
-            <View style={styles.summaryChip}>
-              <Text style={styles.summaryLabel}>{t("screens.friends.myFriends")}</Text>
-              <Text style={styles.summaryValue}>{friends.length}</Text>
-            </View>
-            <View style={styles.summaryChip}>
-              <Text style={styles.summaryLabel}>{t("screens.friends.searchResults")}</Text>
-              <Text style={styles.summaryValue}>{searchResults.length}</Text>
-            </View>
-            <View style={styles.summaryChip}>
-              <Text style={styles.summaryLabel}>{translateOrFallback(t, "screens.friends.pendingTotal", "РћР¶РёРґР°СЋС‚ РѕС‚РІРµС‚Р°")}</Text>
-              <Text style={styles.summaryValue}>{pendingRequestCount}</Text>
-            </View>
+            {!!friendsError ? (
+              <StateBlock
+                tone="warning"
+                icon="alert-circle"
+                title={t("screens.friends.errorTitle")}
+                description={friendsError}
+                actionLabel={t("common.retry")}
+                onAction={() => void loadFriends()}
+              />
+            ) : null}
+
+            {friendsLoading ? (
+              <StateBlock tone="info" icon="timer-sand" title={t("common.loading")} />
+            ) : null}
+
+            {!friendsLoading && friends.length === 0 ? (
+              <StateBlock
+                icon="account-multiple-plus"
+                title={translateOrFallback(t, "screens.friends.empty.friendsTitle", "Пока друзей нет")}
+                description={translateOrFallback(
+                  t,
+                  "screens.friends.empty.friendsDescription",
+                  "Добавь союзников по username, чтобы видеть их уровень, рейтинг и статус активности.",
+                )}
+                actionLabel={translateOrFallback(t, "screens.friends.findFriendsTitle", "Найти друзей")}
+                onAction={() => openDiscoverTab(true)}
+              />
+            ) : null}
+
+            {friends.map((friend) => (
+              <FriendCard key={friend.id} friend={friend} t={t} />
+            ))}
           </View>
+        ) : null}
 
-          <View
-            style={styles.section}
-            onLayout={(event) => {
-              searchSectionYRef.current = event.nativeEvent.layout.y;
-            }}
-          >
-            <Text style={styles.sectionTitle}>
-              {translateOrFallback(t, "screens.friends.findFriendsTitle", "РќР°Р№С‚Рё РґСЂСѓР·РµР№")}
-            </Text>
-            <Text style={styles.searchHint}>
-              {translateOrFallback(
-                t,
-                "screens.friends.searchHint",
-                "РС‰Рё Р»СЋРґРµР№ РїРѕ РЅРёРєСѓ РёР»Рё РїРѕ РїСѓР±Р»РёС‡РЅРѕРјСѓ ID С„РѕСЂРјР°С‚Р° RPG-000123.",
-              )}
-            </Text>
-            {currentUserIdentityLabel ? (
-              <View style={styles.identityCard}>
-                <Text style={styles.identityLabel}>
-                  {translateOrFallback(t, "screens.friends.shareIdentityLabel", "РўРІРѕР№ РєРѕРґ РґР»СЏ РґСЂСѓР·РµР№")}
-                </Text>
-                <Text style={styles.identityValue}>{currentUserIdentityLabel}</Text>
-                <Pressable style={styles.identityActionButton} onPress={handleShareIdentity}>
-                  <Text style={styles.identityActionText}>
-                    {translateOrFallback(t, "screens.friends.shareIdentityAction", "РџРѕРґРµР»РёС‚СЊСЃСЏ РєРѕРґРѕРј")}
-                  </Text>
-                </Pressable>
+        {activeTab === "requests" ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Заявки в друзья</Text>
+
+            {!!requestsError ? (
+              <StateBlock
+                tone="warning"
+                icon="alert-circle"
+                title={t("screens.friends.errorTitle")}
+                description={requestsError}
+                actionLabel={t("common.retry")}
+                onAction={() => void loadRequests()}
+              />
+            ) : null}
+
+            {requestsLoading ? (
+              <StateBlock tone="info" icon="timer-sand" title={t("common.loading")} />
+            ) : null}
+
+            {!requestsLoading && incomingRequests.length === 0 && outgoingRequests.length === 0 ? (
+              <StateBlock
+                icon="email-outline"
+                title="Заявок пока нет"
+                description="Когда кто-то отправит запрос в друзья, он появится здесь. Исходящие заявки тоже хранятся в этом разделе."
+              />
+            ) : null}
+
+            {incomingRequests.length > 0 ? (
+              <View style={styles.block}>
+                <Text style={styles.blockTitle}>Входящие</Text>
+                {incomingRequests.map((request) => (
+                  <FriendRequestCard
+                    key={request.id}
+                    request={request}
+                    t={t}
+                    loading={respondingIds.includes(request.id)}
+                    onAccept={() => void handleRespondToRequest(request.id, "accept", request.user.id)}
+                    onDecline={() => void handleRespondToRequest(request.id, "decline", request.user.id)}
+                  />
+                ))}
               </View>
             ) : null}
-            <Text style={styles.sectionTitleHidden}>
-              {translateOrFallback(t, "screens.friends.findFriendsTitle", "РќР°Р№С‚Рё РґСЂСѓР·РµР№")}
-            </Text>
-            <View style={styles.searchContainer}>
-              <TextInput
-                ref={searchInputRef}
-                style={styles.searchInput}
-                placeholder={t("screens.friends.searchPlaceholder")}
-                value={searchQuery}
-                onChangeText={(value) => {
-                  setSearchQuery(value);
-                  if (!value.trim()) {
-                    resetSearchState();
-                  }
-                }}
-                onSubmitEditing={handleSearch}
-                returnKeyType="search"
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
-              <Pressable style={styles.searchButton} onPress={handleSearch} disabled={searchLoading}>
-                <Text style={styles.searchButtonText}>{searchLoading ? t("common.loading") : t("common.search")}</Text>
-              </Pressable>
-            </View>
+
+            {outgoingRequests.length > 0 ? (
+              <View style={styles.block}>
+                <Text style={styles.blockTitle}>Исходящие</Text>
+                {outgoingRequests.map((request) => (
+                  <FriendRequestCard
+                    key={request.id}
+                    request={request}
+                    t={t}
+                  />
+                ))}
+              </View>
+            ) : null}
+          </View>
+        ) : null}
+
+        {activeTab === "discover" ? (
+          <View style={styles.section}>
+            <Card tone="subtle">
+              <Text style={styles.sectionTitle}>{translateOrFallback(t, "screens.friends.findFriendsTitle", "Найти друзей")}</Text>
+              <Text style={styles.searchHint}>
+                Ищи по username. Если игрок уже у тебя в друзьях, есть входящая заявка или запрос уже отправлен, нужный статус появится прямо в результатах.
+              </Text>
+              <View style={styles.searchRow}>
+                <TextInput
+                  ref={searchInputRef}
+                  value={searchQuery}
+                  onChangeText={setSearchQuery}
+                  placeholder={translateOrFallback(t, "screens.friends.searchPlaceholder", "Поиск по username")}
+                  placeholderTextColor={colors.textDim}
+                  style={styles.searchInput}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  returnKeyType="search"
+                  onSubmitEditing={() => void runSearch(searchQuery)}
+                />
+                <Button
+                  label={t("common.search")}
+                  icon="magnify"
+                  onPress={() => void runSearch(searchQuery)}
+                  style={styles.searchButton}
+                />
+              </View>
+              {searchQuery.trim() ? (
+                <Button
+                  label="Очистить поиск"
+                  icon="close-circle-outline"
+                  onPress={() => {
+                    setSearchQuery("");
+                    void runSearch("");
+                  }}
+                  variant="secondary"
+                />
+              ) : null}
+            </Card>
 
             {!!searchError ? (
               <StateBlock
@@ -744,712 +279,116 @@ export function FriendsScreen() {
                 title={t("screens.friends.errorTitle")}
                 description={searchError}
                 actionLabel={t("common.retry")}
-                onAction={handleSearch}
+                onAction={() => void reloadDiscover()}
               />
             ) : null}
 
-            {searchResults.length > 0 ? (
-              <View style={styles.section}>
-                <Text style={styles.sectionTitle}>{t("screens.friends.searchResults")}</Text>
-                {searchResults.map((user) => {
-                  const isSending = sendingRequestIds.includes(user.id);
-                  const identityLabel = formatIdentityLabel(user.username, user.friend_id);
-                  return (
-                    <Card key={user.id}>
-                      <View style={styles.userRow}>
-                        <View style={styles.userInfo}>
-                          <Text style={styles.userName}>{user.name}</Text>
-                          {identityLabel ? <Text style={styles.userEmail}>{identityLabel}</Text> : null}
-                        </View>
-                        {user.status === "none" ? (
-                          <Pressable
-                            style={[styles.actionButton, isSending ? styles.actionButtonDisabled : null]}
-                            onPress={() => handleSendRequest(user.id)}
-                            disabled={isSending}
-                          >
-                            <Text style={styles.actionButtonText}>
-                              {isSending ? t("common.loading") : t("screens.friends.addFriend")}
-                            </Text>
-                          </Pressable>
-                        ) : null}
-                        {user.status === "outgoing_pending" ? (
-                          <View style={styles.pendingBadge}>
-                            <Text style={styles.pendingText}>{t("screens.friends.requestPending")}</Text>
-                          </View>
-                        ) : null}
-                        {user.status === "incoming_pending" ? (
-                          <View style={styles.requestActions}>
-                            <Pressable
-                              style={[
-                                styles.actionButton,
-                                user.request_id && respondingRequestIds.includes(user.request_id) ? styles.actionButtonDisabled : null,
-                              ]}
-                              onPress={() => user.request_id && handleRespondToFriendRequest(user.request_id, "accept", user.id)}
-                              disabled={!user.request_id || respondingRequestIds.includes(user.request_id)}
-                            >
-                              <Text style={styles.actionButtonText}>
-                                {translateOrFallback(t, "screens.friends.acceptRequest", "Р СџРЎР‚Р С‘Р Р…РЎРЏРЎвЂљРЎРЉ")}
-                              </Text>
-                            </Pressable>
-                            <Pressable
-                              style={[
-                                styles.secondaryButton,
-                                user.request_id && respondingRequestIds.includes(user.request_id) ? styles.actionButtonDisabled : null,
-                              ]}
-                              onPress={() => user.request_id && handleRespondToFriendRequest(user.request_id, "decline", user.id)}
-                              disabled={!user.request_id || respondingRequestIds.includes(user.request_id)}
-                            >
-                              <Text style={styles.secondaryButtonText}>
-                                {translateOrFallback(t, "screens.friends.declineRequest", "Р С›РЎвЂљР С”Р В»Р С•Р Р…Р С‘РЎвЂљРЎРЉ")}
-                              </Text>
-                            </Pressable>
-                          </View>
-                        ) : null}
-                      </View>
-                    </Card>
-                  );
-                })}
-              </View>
+            {searchLoading ? (
+              <StateBlock tone="info" icon="timer-sand" title={t("common.loading")} />
             ) : null}
 
-            {searchHasMore ? (
-              <Pressable style={styles.loadMoreButton} onPress={handleLoadMoreSearch} disabled={searchLoadingMore}>
-                <Text style={styles.loadMoreButtonText}>{searchLoadingMore ? t("common.loading") : t("common.loadMore")}</Text>
-              </Pressable>
-            ) : null}
-
-            {searchAttempted && !searchLoading && searchResults.length === 0 ? (
+            {!searchLoading && !searchSubmitted ? (
               <StateBlock
                 icon="account-search-outline"
-                title={t("screens.friends.empty.searchTitle")}
-                description={t("screens.friends.empty.searchDescription")}
-                actionLabel={t("screens.friends.empty.findFriendsAction")}
-                onAction={focusSearchInput}
+                title="Введите username"
+                description="Поиск работает по нику пользователя. Самого себя добавить не получится, а для уже существующих связей мы покажем корректный статус."
               />
             ) : null}
-          </View>
 
-          {!!friendRequestsError ? (
-            <StateBlock
-              tone="warning"
-              icon="alert-circle"
-              title={t("screens.friends.errorTitle")}
-              description={friendRequestsError}
-              actionLabel={t("common.retry")}
-              onAction={loadFriendRequests}
-            />
-          ) : null}
-
-          {friendRequestsLoading ? <StateBlock tone="info" icon="timer-sand" title={t("common.loading")} /> : null}
-
-          {incomingRequests.length > 0 ? (
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>
-                {translateOrFallback(t, "screens.friends.incomingRequests", "Р’С…РѕРґСЏС‰РёРµ Р·Р°СЏРІРєРё")}
-              </Text>
-              {incomingRequests.map((request) => {
-                const isResponding = respondingRequestIds.includes(request.id);
-                const identityLabel = formatIdentityLabel(request.user.username, request.user.friend_id);
-                return (
-                  <Card key={request.id}>
-                    <View style={styles.requestCard}>
-                      <View style={styles.userInfo}>
-                        <Text style={styles.userName}>{request.user.name}</Text>
-                        {identityLabel ? <Text style={styles.userEmail}>{identityLabel}</Text> : null}
-                      </View>
-                      <View style={styles.requestActions}>
-                        <Pressable
-                          style={[styles.actionButton, isResponding ? styles.actionButtonDisabled : null]}
-                          onPress={() => handleRespondToFriendRequest(request.id, "accept", request.user.id)}
-                          disabled={isResponding}
-                        >
-                          <Text style={styles.actionButtonText}>
-                            {isResponding
-                              ? t("common.loading")
-                              : translateOrFallback(t, "screens.friends.acceptRequest", "РџСЂРёРЅСЏС‚СЊ")}
-                          </Text>
-                        </Pressable>
-                        <Pressable
-                          style={[styles.secondaryButton, isResponding ? styles.actionButtonDisabled : null]}
-                          onPress={() => handleRespondToFriendRequest(request.id, "decline", request.user.id)}
-                          disabled={isResponding}
-                        >
-                          <Text style={styles.secondaryButtonText}>
-                            {translateOrFallback(t, "screens.friends.declineRequest", "РћС‚РєР»РѕРЅРёС‚СЊ")}
-                          </Text>
-                        </Pressable>
-                      </View>
-                    </View>
-                  </Card>
-                );
-              })}
-            </View>
-          ) : null}
-
-          {outgoingRequests.length > 0 ? (
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>
-                {translateOrFallback(t, "screens.friends.outgoingRequests", "РћС‚РїСЂР°РІР»РµРЅРЅС‹Рµ Р·Р°СЏРІРєРё")}
-              </Text>
-              {outgoingRequests.map((request) => (
-                <Card key={request.id}>
-                  <View style={styles.userRow}>
-                    <View style={styles.userInfo}>
-                      <Text style={styles.userName}>{request.user.name}</Text>
-                      {formatIdentityLabel(request.user.username, request.user.friend_id) ? (
-                        <Text style={styles.userEmail}>{formatIdentityLabel(request.user.username, request.user.friend_id)}</Text>
-                      ) : null}
-                    </View>
-                    <View style={styles.pendingBadge}>
-                      <Text style={styles.pendingText}>{t("screens.friends.requestPending")}</Text>
-                    </View>
-                  </View>
-                </Card>
-              ))}
-            </View>
-          ) : null}
-
-
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>{t("screens.friends.myFriends")}</Text>
-            {!!friendsError ? (
+            {!searchLoading && searchSubmitted && searchResults.length === 0 ? (
               <StateBlock
-                tone="warning"
-                icon="alert-circle"
-                title={t("screens.friends.errorTitle")}
-                description={friendsError}
-                actionLabel={t("common.retry")}
-                onAction={() => loadFriends({ page: 1, refresh: false, append: false })}
+                icon="account-search-outline"
+                title={translateOrFallback(t, "screens.friends.empty.searchTitle", "Никого не нашли")}
+                description={translateOrFallback(
+                  t,
+                  "screens.friends.empty.searchDescription",
+                  "Попробуй другой username. Если пользователь удалён или недоступен, сервер вернёт пустой результат или ошибку.",
+                )}
               />
             ) : null}
-            {friendsLoading ? <StateBlock tone="info" icon="timer-sand" title={t("common.loading")} /> : null}
-            {!friendsLoading && friends.length === 0 ? (
-              <StateBlock
-                icon="account-multiple-plus"
-                title={t("screens.friends.empty.friendsTitle")}
-                description={t("screens.friends.empty.friendsDescription")}
-                actionLabel={t("screens.friends.empty.findFriendsAction")}
-                onAction={focusSearchInput}
-              />
-            ) : null}
-            {friends.map((friend) => (
-              <Card key={friend.id}>
-                <View style={styles.friendRow}>
-                  <View style={styles.friendInfo}>
-                    <Text style={styles.friendName}>{friend.name}</Text>
-                    {formatIdentityLabel(friend.username, friend.friend_id) ? (
-                      <Text style={styles.friendSince}>{formatIdentityLabel(friend.username, friend.friend_id)}</Text>
-                    ) : null}
-                    <Text style={styles.friendStats}>
-                      {t("screens.friends.friendStats", {
-                        level: friend.stats.level ?? 1,
-                        quests: friend.stats.quests_completed ?? 0,
-                        wins: friend.stats.challenge_wins ?? 0,
-                      })}
-                    </Text>
-                    <Text style={styles.friendSince}>
-                      {t("screens.friends.friendsSince")}: {new Date(friend.friends_since).toLocaleDateString()}
-                    </Text>
-                  </View>
-                </View>
-              </Card>
-            ))}
-            {friendsHasMore ? (
-              <Pressable style={styles.loadMoreButton} onPress={handleLoadMoreFriends} disabled={friendsLoadingMore}>
-                <Text style={styles.loadMoreButtonText}>{friendsLoadingMore ? t("common.loading") : t("common.loadMore")}</Text>
-              </Pressable>
-            ) : null}
+
+            {searchResults.map((user) => {
+              const isSending = sendingIds.includes(user.id);
+              const isResponding = user.request_id != null && respondingIds.includes(user.request_id);
+              return (
+                <FriendSearchResultCard
+                  key={user.id}
+                  user={user}
+                  t={t}
+                  sending={isSending}
+                  responding={isResponding}
+                  onAdd={() => void handleSendRequest(user.id)}
+                  onAccept={user.request_id ? () => void handleRespondToRequest(user.request_id!, "accept", user.id) : undefined}
+                  onDecline={user.request_id ? () => void handleRespondToRequest(user.request_id!, "decline", user.id) : undefined}
+                />
+              );
+            })}
           </View>
-        </ScrollView>
-      )}
-
-      {(activeTab === "leaderboard" || activeTab === "global") && (
-        <ScrollView
-          style={styles.content}
-          contentContainerStyle={styles.contentBody}
-          keyboardShouldPersistTaps="handled"
-          refreshControl={
-            <RefreshControl
-              refreshing={leaderboardRefreshing}
-              onRefresh={() => handleRefreshLeaderboard(activeTab)}
-              tintColor={colors.primary}
-            />
-          }
-        >
-          <Card>
-            <Text style={styles.sectionTitle}>{leaderboardGuide.title}</Text>
-            <Text style={styles.pulseDescription}>{leaderboardGuide.description}</Text>
-          </Card>
-
-          <View style={styles.summaryRow}>
-            <View style={styles.summaryChip}>
-              <Text style={styles.summaryLabel}>{t("screens.leaderboard.fields.score")}</Text>
-              <Text style={styles.summaryValue}>{getMetricLabel(leaderboardMetric)}</Text>
-            </View>
-            <View style={styles.summaryChip}>
-              <Text style={styles.summaryLabel}>{translateOrFallback(t, "screens.friends.periodLabel", "РџРµСЂРёРѕРґ")}</Text>
-              <Text style={styles.summaryValue}>{leaderboardPeriodLabel}</Text>
-            </View>
-            <View style={styles.summaryChip}>
-              <Text style={styles.summaryLabel}>
-                {activeTab === "leaderboard"
-                  ? translateOrFallback(t, "screens.friends.summary.participants", "РЈС‡Р°СЃС‚РЅРёРєРѕРІ")
-                  : t("navigation.leaderboard")}
-              </Text>
-              <Text style={styles.summaryValue}>{visibleLeaderboardItems.length}</Text>
-            </View>
-            <View style={styles.summaryChip}>
-              <Text style={styles.summaryLabel}>
-                {activeTab === "leaderboard"
-                  ? translateOrFallback(t, "screens.friends.summary.friendTarget", "РћСЂРёРµРЅС‚РёСЂ РЅРµРґРµР»Рё")
-                  : translateOrFallback(t, "screens.friends.summary.globalTarget", "Р›СѓС‡С€РёР№ СЂРµР·СѓР»СЊС‚Р°С‚")}
-              </Text>
-              <Text style={styles.summaryValue} numberOfLines={1}>
-                {topLeaderboardLabel}
-              </Text>
-            </View>
-          </View>
-          {leaderboardPeriodEndsLabel ? (
-            <Text style={styles.periodHint}>
-              {translateOrFallback(t, "screens.friends.periodEnds", `РћРєРЅРѕ Р·Р°РєР°РЅС‡РёРІР°РµС‚СЃСЏ ${leaderboardPeriodEndsLabel}`, {
-                date: leaderboardPeriodEndsLabel,
-              })}
-            </Text>
-          ) : null}
-
-          {!!leaderboardError ? (
-            <StateBlock
-              tone="warning"
-              icon="alert-circle"
-              title={t("screens.friends.errorTitle")}
-              description={leaderboardError}
-              actionLabel={t("common.retry")}
-              onAction={() => loadLeaderboard({ page: 1, append: false, scope: activeTab })}
-            />
-          ) : null}
-          <View style={styles.filters}>
-            {metrics.map((metric) => (
-              <Pressable
-                key={metric}
-                style={[styles.filter, leaderboardMetric === metric ? styles.filterActive : null]}
-                onPress={() => setLeaderboardMetric(metric)}
-              >
-                <Text style={[styles.filterText, leaderboardMetric === metric ? styles.filterTextActive : null]}>
-                  {getMetricLabel(metric)}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
-          <View style={styles.filters}>
-            {periods.map((period) => (
-              <Pressable
-                key={period}
-                style={[styles.filter, leaderboardPeriod === period ? styles.filterActive : null]}
-                onPress={() => setLeaderboardPeriod(period)}
-              >
-                <Text style={[styles.filterText, leaderboardPeriod === period ? styles.filterTextActive : null]}>
-                  {getPeriodLabel(period)}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
-
-          {leaderboardLoading ? <StateBlock tone="info" icon="timer-sand" title={t("common.loading")} /> : null}
-          {!leaderboardLoading && visibleLeaderboardItems.length === 0 ? (
-            <StateBlock
-              icon="flag-checkered"
-              title={t("screens.friends.empty.leaderboardTitle")}
-              description={t("screens.friends.empty.leaderboardDescription")}
-              actionLabel={leaderboardEmptyActionLabel}
-              onAction={handleLeaderboardEmptyAction}
-            />
-          ) : null}
-
-          {visibleLeaderboardItems.map((item) => (
-            <Card key={item.user_id}>
-              <Text style={styles.title}>
-                #{item.rank} {item.name}
-              </Text>
-              {formatIdentityLabel(item.username, item.friend_id) ? (
-                <Text style={styles.meta}>{formatIdentityLabel(item.username, item.friend_id)}</Text>
-              ) : null}
-              <Text style={styles.subTitle}>
-                {t("screens.leaderboard.fields.class")}: {item.class_display_name ?? item.class_name ?? EMPTY_VALUE}
-                {LEADERBOARD_SEPARATOR}
-                {t("screens.leaderboard.fields.level")}: {item.class_level ?? item.level}
-              </Text>
-              <Text style={styles.meta}>
-                {t("screens.leaderboard.fields.goal")}: {item.goal_type ?? EMPTY_VALUE}
-                {item.goal_progress_percent != null
-                  ? ` (${item.goal_progress_percent}%${item.goal_target_xp ? `, ${item.goal_cycle_xp}/${item.goal_target_xp} XP` : ""})`
-                  : ""}
-              </Text>
-              <Text style={styles.meta}>{t("screens.leaderboard.fields.score")}: {item.score}</Text>
-              <Text style={styles.meta}>{t("screens.leaderboard.fields.quests")}: {item.quests_completed}</Text>
-              <Text style={styles.meta}>{t("screens.leaderboard.fields.steps")}: {item.steps}</Text>
-              <Text style={styles.meta}>{t("screens.leaderboard.fields.challengeWins")}: {item.challenge_wins}</Text>
-            </Card>
-          ))}
-          {activeTab === "leaderboard" && leaderboardHasMore ? (
-            <Pressable style={styles.loadMoreButton} onPress={handleLoadMoreLeaderboard} disabled={leaderboardLoadingMore}>
-              <Text style={styles.loadMoreButtonText}>{leaderboardLoadingMore ? t("common.loading") : t("common.loadMore")}</Text>
-            </Pressable>
-          ) : null}
-          {activeTab === "global" && globalLeaderboardHasMore ? (
-            <Pressable style={styles.loadMoreButton} onPress={handleLoadMoreGlobalLeaderboard} disabled={globalLeaderboardLoadingMore}>
-              <Text style={styles.loadMoreButtonText}>{globalLeaderboardLoadingMore ? t("common.loading") : t("common.loadMore")}</Text>
-            </Pressable>
-          ) : null}
-        </ScrollView>
-      )}
+        ) : null}
+      </ScrollView>
     </Screen>
   );
 }
 
 function createStyles(colors: ReturnType<typeof useThemeColors>) {
   return StyleSheet.create({
-    tabs: {
-      flexDirection: "row",
-      marginBottom: 16,
-    },
-    tab: {
-      flex: 1,
-      paddingVertical: 12,
-      alignItems: "center",
-      borderBottomWidth: 2,
-      borderBottomColor: colors.border,
-    },
-    tabActive: {
-      borderBottomColor: colors.primary,
-    },
-    tabText: {
-      fontSize: 16,
-      color: colors.textDim,
-    },
-    tabTextActive: {
-      color: colors.primary,
-      fontWeight: "bold",
-    },
     content: {
       flex: 1,
     },
     contentBody: {
       paddingBottom: 28,
-    },
-    summaryRow: {
-      flexDirection: "row",
-      flexWrap: "wrap",
-      gap: 8,
-      marginBottom: 16,
-    },
-    summaryChip: {
-      flexGrow: 1,
-      minWidth: 96,
-      borderWidth: 1,
-      borderColor: colors.border,
-      borderRadius: 10,
-      backgroundColor: colors.backgroundRaised,
-      paddingHorizontal: 12,
-      paddingVertical: 10,
-      gap: 2,
-    },
-    summaryLabel: {
-      fontSize: 11,
-      color: colors.textDim,
-      fontWeight: "700",
-    },
-    summaryValue: {
-      fontSize: 15,
-      color: colors.text,
-      fontWeight: "800",
-    },
-    periodHint: {
-      color: colors.textDim,
-      fontSize: 13,
-      marginBottom: 12,
-    },
-    searchHint: {
-      color: colors.textDim,
-      fontSize: 14,
-      lineHeight: 20,
-      marginBottom: 12,
-    },
-    identityCard: {
-      borderWidth: 1,
-      borderColor: colors.border,
-      borderRadius: 10,
-      backgroundColor: colors.backgroundRaised,
-      paddingHorizontal: 12,
-      paddingVertical: 10,
-      gap: 4,
-      marginBottom: 12,
-    },
-    identityLabel: {
-      fontSize: 12,
-      color: colors.textDim,
-      fontWeight: "700",
-    },
-    identityValue: {
-      fontSize: 15,
-      color: colors.text,
-      fontWeight: "800",
-    },
-    identityActionButton: {
-      alignSelf: "flex-start",
-      marginTop: 4,
-      paddingHorizontal: 12,
-      paddingVertical: 8,
-      borderRadius: 999,
-      borderWidth: 1,
-      borderColor: colors.primary,
-      backgroundColor: colors.background,
-    },
-    identityActionText: {
-      color: colors.primary,
-      fontSize: 13,
-      fontWeight: "700",
-    },
-    searchContainer: {
-      flexDirection: "row",
-      marginBottom: 16,
-    },
-    searchInput: {
-      flex: 1,
-      borderWidth: 1,
-      borderColor: colors.border,
-      borderRadius: 8,
-      padding: 12,
-      marginRight: 8,
-      backgroundColor: colors.backgroundRaised,
-      color: colors.text,
-    },
-    searchButton: {
-      backgroundColor: colors.primary,
-      paddingHorizontal: 16,
-      paddingVertical: 12,
-      borderRadius: 8,
-      justifyContent: "center",
-    },
-    searchButtonText: {
-      color: colors.text,
-      fontWeight: "bold",
-    },
-    filters: {
-      flexDirection: "row",
-      flexWrap: "wrap",
-      marginBottom: 16,
-    },
-    filter: {
-      paddingHorizontal: 12,
-      paddingVertical: 8,
-      marginRight: 8,
-      marginBottom: 8,
-      borderWidth: 1,
-      borderColor: colors.border,
-      borderRadius: 6,
-    },
-    filterActive: {
-      borderColor: colors.primary,
-      backgroundColor: colors.primary,
-    },
-    filterText: {
-      color: colors.textDim,
-    },
-    filterTextActive: {
-      color: colors.text,
-      fontWeight: "bold",
+      gap: 14,
     },
     section: {
-      marginBottom: 24,
+      gap: 12,
     },
-    sectionTitle: {
-      fontSize: 18,
-      fontWeight: "bold",
-      color: colors.text,
-      marginBottom: 8,
-    },
-    sectionTitleHidden: {
-      fontSize: 0,
-      lineHeight: 0,
-      color: "transparent",
-      marginBottom: 0,
-    },
-    userRow: {
+    sectionHeader: {
       flexDirection: "row",
       justifyContent: "space-between",
       alignItems: "center",
-      gap: 12,
-    },
-    requestCard: {
-      gap: 12,
-    },
-    userInfo: {
-      flex: 1,
-    },
-    userName: {
-      fontSize: 16,
-      fontWeight: "bold",
-      color: colors.text,
-    },
-    userEmail: {
-      fontSize: 14,
-      color: colors.textDim,
-    },
-    actionButton: {
-      backgroundColor: colors.primary,
-      paddingHorizontal: 12,
-      paddingVertical: 8,
-      borderRadius: 6,
-    },
-    secondaryButton: {
-      backgroundColor: colors.backgroundRaised,
-      borderWidth: 1,
-      borderColor: colors.border,
-      paddingHorizontal: 12,
-      paddingVertical: 8,
-      borderRadius: 6,
-    },
-    actionButtonDisabled: {
-      opacity: 0.72,
-    },
-    actionButtonText: {
-      color: colors.text,
-      fontSize: 14,
-    },
-    secondaryButtonText: {
-      color: colors.text,
-      fontSize: 14,
-    },
-    requestActions: {
-      flexDirection: "row",
+      gap: 10,
       flexWrap: "wrap",
-      gap: 8,
     },
-    loadMoreButton: {
-      alignSelf: "center",
-      backgroundColor: colors.backgroundRaised,
-      borderWidth: 1,
-      borderColor: colors.border,
-      borderRadius: 8,
-      paddingHorizontal: 14,
-      paddingVertical: 10,
-      marginBottom: 14,
-    },
-    loadMoreButtonText: {
+    sectionTitle: {
       color: colors.text,
-      fontSize: 14,
-      fontWeight: "600",
+      fontSize: 19,
+      fontWeight: "900",
     },
-    pendingText: {
-      fontSize: 12,
-      color: colors.primary,
-      fontWeight: "700",
+    headerButton: {
+      minWidth: 160,
     },
-    pendingBadge: {
-      borderWidth: 1,
-      borderColor: colors.primary,
-      backgroundColor: colors.backgroundRaised,
-      borderRadius: 999,
-      paddingHorizontal: 10,
-      paddingVertical: 6,
+    block: {
+      gap: 10,
     },
-    friendRow: {
-      flexDirection: "row",
-      alignItems: "center",
-    },
-    friendInfo: {
-      flex: 1,
-      gap: 4,
-    },
-    friendName: {
-      fontSize: 16,
-      fontWeight: "bold",
+    blockTitle: {
       color: colors.text,
-    },
-    friendStats: {
-      fontSize: 13,
-      color: colors.textMuted,
-    },
-    friendSince: {
-      fontSize: 14,
-      color: colors.textDim,
-    },
-    title: {
-      fontSize: 16,
-      fontWeight: "bold",
-      color: colors.text,
-    },
-    pulseTitle: {
       fontSize: 16,
       fontWeight: "800",
-      color: colors.text,
-      marginBottom: 6,
     },
-    pulseDescription: {
-      fontSize: 14,
+    searchHint: {
       color: colors.textMuted,
+      fontSize: 14,
       lineHeight: 20,
-      marginBottom: 12,
     },
-    pulseButton: {
-      alignSelf: "flex-start",
-      backgroundColor: colors.primary,
-      borderRadius: 8,
-      paddingHorizontal: 14,
-      paddingVertical: 10,
-    },
-    pulseButtonText: {
-      color: colors.text,
-      fontWeight: "700",
-    },
-    supportList: {
-      gap: 10,
-      marginTop: 12,
-    },
-    supportItem: {
+    searchRow: {
       flexDirection: "row",
-      gap: 10,
-      alignItems: "flex-start",
-    },
-    supportStepBadge: {
-      width: 26,
-      height: 26,
-      borderRadius: 13,
       alignItems: "center",
-      justifyContent: "center",
-      backgroundColor: colors.backgroundRaised,
+      gap: 10,
+    },
+    searchInput: {
+      flex: 1,
+      minHeight: 52,
+      borderRadius: radii.md,
       borderWidth: 1,
       borderColor: colors.border,
-    },
-    supportStepText: {
-      color: colors.primary,
-      fontSize: 13,
-      fontWeight: "800",
-    },
-    supportCopy: {
-      flex: 1,
-      gap: 2,
-    },
-    supportTitle: {
+      backgroundColor: colors.backgroundRaised,
       color: colors.text,
-      fontSize: 14,
-      fontWeight: "700",
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+      fontSize: 15,
     },
-    supportDescription: {
-      color: colors.textDim,
-      fontSize: 13,
-      lineHeight: 18,
-    },
-    subTitle: {
-      fontSize: 13,
-      color: colors.textMuted,
-      marginTop: 2,
-      marginBottom: 4,
-    },
-    meta: {
-      fontSize: 14,
-      color: colors.textDim,
+    searchButton: {
+      minWidth: 120,
     },
   });
 }
-

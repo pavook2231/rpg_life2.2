@@ -334,3 +334,25 @@ def test_get_leaderboard_returns_period_metadata(db_session) -> None:
     assert payload["period"] == "weekly"
     assert payload["period_started_at"] is not None
     assert payload["items"][0]["user_id"] == user.id
+
+
+def test_get_leaderboard_me_matches_rank_from_list(db_session) -> None:
+    current = _create_user(db_session, "leaderboard-me-current@example.com")
+    leader = _create_user(db_session, "leaderboard-me-leader@example.com")
+    current_progress = _create_progress(db_session, current.id)
+    leader_progress = _create_progress(db_session, leader.id)
+
+    current_progress.level = 4
+    current_progress.current_xp = 80
+    leader_progress.level = 6
+    leader_progress.current_xp = 30
+    db_session.commit()
+
+    payload = mobile_service.get_leaderboard(db_session, current, "global", "power", 1, 20, "all_time")
+    me_payload = mobile_service.get_leaderboard_me(db_session, current, "global", "power", "all_time")
+    expected_entry = next(item for item in payload["items"] if item["user_id"] == current.id)
+
+    assert me_payload["item"]["user_id"] == current.id
+    assert me_payload["item"]["rank"] == expected_entry["rank"]
+    assert me_payload["item"]["score"] == expected_entry["score"]
+    assert me_payload["item"]["is_current_user"] is True

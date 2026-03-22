@@ -2,7 +2,8 @@ import pytest
 from fastapi import HTTPException
 
 from app.beta_content import CHEST_CATALOG
-from app.models import CharacterEquipment, User, UserClassProgress, UserInventory
+from app import item_service
+from app.models import CharacterEquipment, Item, User, UserClassProgress, UserInventory
 from app.schemas.beta_schema import ChestOpenSchema
 from app.services import beta_service, inventory_service, mobile_service
 from app.items_data import ITEMS
@@ -339,4 +340,34 @@ def test_build_character_context_prunes_stale_off_hand_reference(db_session) -> 
 
     assert context["equipment"] == {}
     assert equipment_row.off_hand_id is None
+
+
+def test_sync_catalog_repairs_legacy_duplicate_item_ids(db_session) -> None:
+    user = _create_user(db_session, "shop-repair@example.com")
+    _create_progress(db_session, user.id, crystals=500)
+
+    legacy_item = Item(
+        name="Ржавый меч",
+        description="legacy duplicate",
+        type="weapon",
+        rarity="common",
+        icon="legacy-sword",
+        price_crystals=1,
+        required_level=1,
+    )
+    db_session.add(legacy_item)
+    db_session.flush()
+
+    inventory_row = UserInventory(user_id=user.id, item_id=legacy_item.id, quantity=1)
+    db_session.add(inventory_row)
+    db_session.commit()
+    db_session.refresh(inventory_row)
+
+    canonical_item = item_service.ensure_catalog_item(db_session, 101)
+    db_session.commit()
+    db_session.refresh(inventory_row)
+
+    assert canonical_item.id == 101
+    assert inventory_row.item_id == 101
+    assert db_session.query(Item).filter(Item.id == legacy_item.id).count() == 0
 

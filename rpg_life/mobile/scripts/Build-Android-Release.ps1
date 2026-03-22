@@ -1,6 +1,6 @@
 param(
-  [string]$VersionName = "1.1",
-  [int]$VersionCode = 4,
+  [string]$VersionName = "1.2",
+  [int]$VersionCode = 5,
   [string]$Architectures = "arm64-v8a",
   [int]$MaxWorkers = 2,
   [switch]$CleanBuild,

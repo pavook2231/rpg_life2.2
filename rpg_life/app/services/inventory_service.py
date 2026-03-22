@@ -1,4 +1,6 @@
 from datetime import datetime, timedelta
+import logging
+
 from fastapi import HTTPException
 from sqlalchemy.orm import Session, joinedload
 
@@ -17,10 +19,11 @@ from app.equipment_service import (
     sync_equipped_inventory_flags,
     unequip_item,
 )
-from app.item_service import EquipmentError as ItemEquipmentError, buy_item, sell_item
-from app.items_data import ITEMS
+from app.item_service import EquipmentError as ItemEquipmentError, buy_item, sell_item, sync_catalog_items
 from app.models import CharacterEquipment, Item, User, UserClassProgress, UserInventory
 from app.text_utils import normalize_item_model, normalize_nested_strings
+
+logger = logging.getLogger(__name__)
 
 SHOP_ROTATION_HOURS = 12
 ITEM_BONUS_FIELDS = (
@@ -97,6 +100,24 @@ def _build_stats_record(bonuses: dict) -> dict:
     return {field: value for field, value in bonuses.items() if value}
 
 
+def _build_canonical_stats_payload(
+    bonuses: dict,
+    weapon_stats: dict | None,
+    armor_stats: dict | None,
+) -> dict:
+    payload = _build_stats_record(bonuses)
+    payload["attack"] = int((weapon_stats or {}).get("damage_max") or 0)
+    payload["defense"] = int((armor_stats or {}).get("armor_value") or 0)
+    payload["hp"] = int(bonuses.get("health_bonus") or 0)
+    if weapon_stats and weapon_stats.get("damage_min") is not None:
+        payload["damage_min"] = int(weapon_stats["damage_min"])
+    if weapon_stats and weapon_stats.get("damage_max") is not None:
+        payload["damage_max"] = int(weapon_stats["damage_max"])
+    if armor_stats and armor_stats.get("armor_value") is not None:
+        payload["armor_value"] = int(armor_stats["armor_value"])
+    return payload
+
+
 def serialize_weapon_stats_payload(stats) -> dict | None:
     if not stats:
         return None
@@ -154,6 +175,8 @@ def serialize_armor_stats_payload(stats) -> dict | None:
 def serialize_item_payload(source: Item | dict) -> dict:
     if isinstance(source, dict):
         bonuses = _extract_bonus_fields(source)
+        weapon_stats = serialize_weapon_stats_payload(source.get("weapon_stats"))
+        armor_stats = serialize_armor_stats_payload(source.get("armor_stats"))
         payload = {
             "id": source.get("id"),
             "name": source.get("name"),
@@ -162,18 +185,22 @@ def serialize_item_payload(source: Item | dict) -> dict:
             "subclass": source.get("subclass"),
             "slot": source.get("slot"),
             "rarity": source.get("rarity"),
+            "image": source.get("image") or source.get("icon"),
             "icon": source.get("icon"),
             "required_level": source.get("required_level", 1),
             "required_class": source.get("required_class"),
             "set_name": source.get("set_name"),
+            "price": source.get("price", source.get("price_crystals", 0)),
             "price_crystals": source.get("price_crystals", 0),
             **bonuses,
-            "stats": _build_stats_record(bonuses),
+            "stats": _build_canonical_stats_payload(bonuses, weapon_stats, armor_stats),
         }
         return normalize_nested_strings(payload)
 
     item = normalize_item_model(source)
     bonuses = _extract_bonus_fields(item)
+    weapon_stats = serialize_weapon_stats_payload(item.weapon_stats)
+    armor_stats = serialize_armor_stats_payload(item.armor_stats)
     payload = {
         "id": item.id,
         "name": item.name,
@@ -182,13 +209,15 @@ def serialize_item_payload(source: Item | dict) -> dict:
         "subclass": item.subclass,
         "slot": item.slot,
         "rarity": item.rarity,
+        "image": item.icon,
         "icon": item.icon,
         "required_level": item.required_level,
         "required_class": item.required_class,
         "set_name": item.set_name,
+        "price": item.price_crystals,
         "price_crystals": item.price_crystals,
         **bonuses,
-        "stats": _build_stats_record(bonuses),
+        "stats": _build_canonical_stats_payload(bonuses, weapon_stats, armor_stats),
     }
     return normalize_nested_strings(payload)
 
@@ -234,12 +263,46 @@ def _build_shop_chests() -> list[dict]:
     return chest_items
 
 
-def _build_shop_catalog(level: int, _seed: int, class_name: str | None = None) -> list[dict]:
+def _serialize_db_shop_item(item: Item) -> dict:
+    normalized_item = normalize_item_model(item)
+    payload = serialize_item_payload(normalized_item)
+    payload["weapon_stats"] = serialize_weapon_stats_payload(normalized_item.weapon_stats)
+    payload["armor_stats"] = serialize_armor_stats_payload(normalized_item.armor_stats)
+    return normalize_nested_strings(payload)
+
+
+def _build_shop_catalog(db: Session, class_name: str | None = None) -> list[dict]:
+    sync_catalog_items(db)
+    catalog_rows = (
+        db.query(Item)
+        .options(joinedload(Item.weapon_stats), joinedload(Item.armor_stats))
+        .filter(Item.type.in_(["weapon", "armor", "accessory"]), Item.is_beta_item == False)
+        .order_by(Item.id.asc())
+        .all()
+    )
+
     all_by_type: dict[str, list[dict]] = {}
-    for item in ITEMS:
-        item_type = item.get("type", "")
+    for item in catalog_rows:
+        serialized_item = _serialize_db_shop_item(item)
+        item_type = serialized_item.get("type", "")
         if item_type:
-            all_by_type.setdefault(item_type, []).append(item)
+            all_by_type.setdefault(item_type, []).append(serialized_item)
+
+    shop_items: list[dict] = []
+    for full_candidates in all_by_type.values():
+        sorted_candidates = sorted(
+            full_candidates,
+            key=lambda entry: (
+                -score_item_for_class(entry, class_name),
+                entry.get("required_level") or 0,
+                entry.get("price_crystals") or 0,
+                entry.get("id") or 0,
+            ),
+        )
+        shop_items.extend(sorted_candidates)
+
+    shop_items.extend(_build_shop_chests())
+    return shop_items
 
     shop_items: list[dict] = []
     for item_type, full_candidates in all_by_type.items():
@@ -271,10 +334,9 @@ def _resolve_shop_items(db: Session, current_user: User, level: int, force_refre
         if cached and cached.get("items"):
             return cached["items"], rotation_end
 
-    seed = (current_user.id * 100_003) + (level * 97) + int(rotation_start.timestamp())
-    items = _serialize_shop_items(_build_shop_catalog(level, seed, class_name))
+    items = _serialize_shop_items(_build_shop_catalog(db, class_name))
     ttl = max(int((rotation_end - utc_now()).total_seconds()), 60)
-    cache_set_json(cache_key, {"items": items, "seed": seed}, ttl=ttl)
+    cache_set_json(cache_key, {"items": items}, ttl=ttl)
     return items, rotation_end
 
 
@@ -289,11 +351,29 @@ def _get_shop_meta(next_rotation_at: datetime) -> dict:
     }
 
 
-def serialize_inventory_item_entry(inv: UserInventory, *, is_equipped: bool) -> dict:
+def _validate_inventory_item_reference(inv: UserInventory) -> Item:
+    if inv.item is None:
+        logger.error("Inventory row references missing item: inventory_id=%s item_id=%s", inv.id, inv.item_id)
+        raise HTTPException(status_code=500, detail="Inventory item reference is invalid")
+
     item = normalize_item_model(inv.item)
+    if inv.item_id != item.id:
+        logger.error(
+            "Inventory row item mismatch detected: inventory_id=%s stored_item_id=%s resolved_item_id=%s",
+            inv.id,
+            inv.item_id,
+            item.id,
+        )
+        raise HTTPException(status_code=500, detail="Inventory item data is inconsistent")
+    return item
+
+
+def serialize_inventory_item_entry(inv: UserInventory, *, is_equipped: bool) -> dict:
+    item = _validate_inventory_item_reference(inv)
     return normalize_nested_strings(
         {
             "id": inv.id,
+            "inventory_id": inv.id,
             "item_id": inv.item_id,
             "quantity": inv.quantity,
             "is_equipped": is_equipped,
@@ -306,6 +386,7 @@ def serialize_inventory_item_entry(inv: UserInventory, *, is_equipped: bool) -> 
 
 
 def build_character_inventory_context(db: Session, current_user: User, request) -> dict:
+    sync_catalog_items(db)
     classes = crud.get_all_unlocked_classes(db, current_user.id)
     if not classes:
         raise HTTPException(status_code=404, detail="Персонаж не найден")
@@ -324,7 +405,7 @@ def build_character_inventory_context(db: Session, current_user: User, request) 
     )
 
     for inventory_item in inventory:
-        normalize_item_model(inventory_item.item)
+        _validate_inventory_item_reference(inventory_item)
 
     equipped_ids = {entry["inventory_id"] for entry in equipment_data["equipment"].values()}
     bag_items = [item for item in inventory if item.id not in equipped_ids]
@@ -342,6 +423,7 @@ def build_character_inventory_context(db: Session, current_user: User, request) 
 
 
 def get_shop_context(db: Session, current_user: User) -> dict:
+    sync_catalog_items(db)
     progress = _get_main_progress(db, current_user.id)
     level = progress.level if progress else 1
     items, next_rotation_at = _resolve_shop_items(db, current_user, level)
@@ -458,6 +540,7 @@ def equip_inventory_item(db: Session, current_user: User, inventory_id: int, slo
 
 
 def get_inventory_payload(db: Session, current_user: User) -> dict:
+    sync_catalog_items(db)
     inventory = (
         db.query(UserInventory)
         .options(
@@ -514,6 +597,7 @@ def sell_inventory_item(db: Session, current_user: User, inventory_id: int) -> d
 
 
 def get_inventory_item_detail(db: Session, current_user: User, inventory_id: int) -> dict:
+    sync_catalog_items(db)
     inventory_item = (
         db.query(UserInventory)
         .options(
@@ -526,10 +610,9 @@ def get_inventory_item_detail(db: Session, current_user: User, inventory_id: int
     if not inventory_item:
         raise HTTPException(status_code=404, detail="Предмет не найден")
 
-    item = normalize_item_model(inventory_item.item)
+    item = _validate_inventory_item_reference(inventory_item)
     equipped_ids = get_equipped_inventory_ids(db, current_user.id)
     payload = serialize_inventory_item_entry(inventory_item, is_equipped=inventory_item.id in equipped_ids)
-    payload["inventory_id"] = payload.pop("id")
     payload["sell_price"] = max(1, int((item.price_crystals or 0) * 0.5))
     return payload
 

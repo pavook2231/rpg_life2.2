@@ -86,8 +86,8 @@ def hasReleaseSigning = releaseStoreFile && releaseStorePassword && releaseKeyAl
  * this variant is about 6MiB larger per architecture than default.
  */
 def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
-def appVersionCode = Integer.parseInt(((System.getenv("RPG_LIFE_VERSION_CODE") ?: "3") as String).trim())
-def appVersionName = ((System.getenv("RPG_LIFE_VERSION_NAME") ?: "2.2") as String).trim()
+def appVersionCode = Integer.parseInt(((System.getenv("RPG_LIFE_VERSION_CODE") ?: "5") as String).trim())
+def appVersionName = ((System.getenv("RPG_LIFE_VERSION_NAME") ?: "1.2") as String).trim()
 
 android {
     ndkVersion rootProject.ext.ndkVersion

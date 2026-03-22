@@ -2,7 +2,8 @@ import { useNavigation } from "@react-navigation/native";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
 
-import { buyShopItem, fetchShop, type ShopItemPayload, type ShopPayload } from "../api/game";
+import { buyShopItem, fetchShop } from "../features/items/itemService";
+import type { ShopItemPayload, ShopPayload } from "../features/items/types";
 import { Screen } from "../components/Screen";
 import { StateBlock } from "../components/StateBlock";
 import { useFeedback } from "../context/FeedbackContext";

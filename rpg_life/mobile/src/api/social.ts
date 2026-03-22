@@ -1,19 +1,18 @@
 import { apiRequest } from "./client";
 import type { LeaderboardPeriod, LeaderboardResponse } from "./game";
+import type {
+  FriendItem,
+  FriendRequestItem,
+  SocialUserPreview,
+  UserSearchResult,
+} from "../features/friends/types";
 
-export type FriendItem = {
-  id: number;
-  name: string;
-  username?: string | null;
-  friend_id?: string | null;
-  friends_since: string;
-  stats: {
-    level?: number;
-    quests_completed?: number;
-    steps?: number;
-    challenge_wins?: number;
-  };
-};
+export type {
+  FriendItem,
+  FriendRequestItem,
+  SocialUserPreview,
+  UserSearchResult,
+} from "../features/friends/types";
 
 export type CoopQuest = {
   id: number;
@@ -53,20 +52,6 @@ export type ChallengeInvitation = {
   responded_at?: string | null;
 };
 
-export type FriendRequestItem = {
-  id: number;
-  status: "pending" | "accepted" | "declined";
-  direction: "incoming" | "outgoing";
-  created_at?: string | null;
-  responded_at?: string | null;
-  user: {
-    id: number;
-    name: string;
-    username?: string | null;
-    friend_id?: string | null;
-  };
-};
-
 export function fetchFriends(page = 1, pageSize = 30) {
   return apiRequest<{
     items: FriendItem[];
@@ -76,7 +61,7 @@ export function fetchFriends(page = 1, pageSize = 30) {
       total_items: number;
       total_pages: number;
     };
-  }>(`/social/friends/list?page=${page}&page_size=${pageSize}`);
+  }>(`/social/friends?page=${page}&page_size=${pageSize}`);
 }
 
 export function fetchCoopQuests(page = 1, pageSize = 20, status?: string) {
@@ -108,15 +93,6 @@ export function createCoopQuest(payload: {
   });
 }
 
-export type UserSearchResult = {
-  id: number;
-  name: string;
-  username?: string | null;
-  friend_id?: string | null;
-  status: "none" | "outgoing_pending" | "incoming_pending";
-  request_id?: number;
-};
-
 export function searchUsers(query: string, page = 1, pageSize = 20) {
   return apiRequest<{
     items: UserSearchResult[];
@@ -135,10 +111,10 @@ export function sendFriendRequest(receiverId: number) {
     request: {
       id: number;
       status: string;
-      receiver: { id: number; name: string; username?: string | null; friend_id?: string | null };
+      receiver: SocialUserPreview;
       created_at: string;
     };
-  }>(`/social/friends/request`, {
+  }>(`/social/friends/add`, {
     method: "POST",
     body: JSON.stringify({ receiver_id: receiverId }),
   });
@@ -148,14 +124,26 @@ export function fetchFriendRequests(status = "pending") {
   return apiRequest<{ items: FriendRequestItem[] }>(`/social/friends/requests?status=${encodeURIComponent(status)}`);
 }
 
-export function respondToFriendRequest(requestId: number, action: "accept" | "decline") {
+export function acceptFriendRequest(requestId: number) {
   return apiRequest<{ ok: boolean; request_id: number; status: string }>(`/social/friends/accept`, {
     method: "POST",
     body: JSON.stringify({
       request_id: requestId,
-      action,
     }),
   });
+}
+
+export function declineFriendRequest(requestId: number) {
+  return apiRequest<{ ok: boolean; request_id: number; status: string }>(`/social/friends/decline`, {
+    method: "POST",
+    body: JSON.stringify({
+      request_id: requestId,
+    }),
+  });
+}
+
+export function respondToFriendRequest(requestId: number, action: "accept" | "decline") {
+  return action === "accept" ? acceptFriendRequest(requestId) : declineFriendRequest(requestId);
 }
 
 export function fetchFriendsLeaderboard(

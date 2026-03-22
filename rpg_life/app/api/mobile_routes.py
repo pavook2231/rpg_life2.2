@@ -878,6 +878,17 @@ async def get_inventory(
     return success_response(mobile_service.get_inventory(db, current_user, page, limit, sort))
 
 
+@router.get("/users/me/items", summary="Current user inventory")
+async def get_current_user_items(
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    sort: str = "acquired_at",
+    db: Session = Depends(get_db),
+    current_user: User = Depends(auth.get_current_user),
+):
+    return success_response(mobile_service.get_user_items(db, current_user, page, limit, sort))
+
+
 @router.post("/inventory/equip", summary="Р­РєРёРїРёСЂРѕРІР°С‚СЊ РїСЂРµРґРјРµС‚")
 async def equip_inventory_item(
     payload: InventoryActionSchema,
@@ -887,6 +898,18 @@ async def equip_inventory_item(
     return success_response(
         mobile_service.equip_item(db, current_user, payload.inventory_id, payload.slot or "", payload.class_progress_id),
         "РџСЂРµРґРјРµС‚ СЌРєРёРїРёСЂРѕРІР°РЅ",
+    )
+
+
+@router.post("/items/equip", summary="Equip item from inventory")
+async def equip_item_alias(
+    payload: InventoryActionSchema,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(auth.get_current_user),
+):
+    return success_response(
+        mobile_service.equip_user_item(db, current_user, payload.inventory_id, payload.slot or "", payload.class_progress_id),
+        "Item equipped",
     )
 
 
@@ -911,7 +934,7 @@ async def get_challenges(
 @router.get("/leaderboard", summary="РўР°Р±Р»РёС†Р° Р»РёРґРµСЂРѕРІ")
 async def get_leaderboard(
     scope: str = Query("global", pattern="^(global|friends)$"),
-    metric: str = Query("level"),
+    metric: str = Query("power"),
     period: str = Query("all_time", pattern="^(all_time|weekly|season)$"),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
@@ -919,6 +942,29 @@ async def get_leaderboard(
     current_user: User = Depends(auth.get_current_user),
 ):
     return success_response(mobile_service.get_leaderboard(db, current_user, scope, metric, page, limit, period))
+
+
+@router.get("/leaderboard/friends", summary="Р РµР№С‚РёРЅРі РґСЂСѓР·РµР№")
+async def get_friends_leaderboard(
+    metric: str = Query("power"),
+    period: str = Query("all_time", pattern="^(all_time|weekly|season)$"),
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(auth.get_current_user),
+):
+    return success_response(mobile_service.get_leaderboard(db, current_user, "friends", metric, page, limit, period))
+
+
+@router.get("/leaderboard/me", summary="Р’Р°С€Рµ РјРµСЃС‚Рѕ РІ Р»РёРґРµСЂР±РѕСЂРґРµ")
+async def get_leaderboard_me(
+    scope: str = Query("global", pattern="^(global|friends)$"),
+    metric: str = Query("power"),
+    period: str = Query("all_time", pattern="^(all_time|weekly|season)$"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(auth.get_current_user),
+):
+    return success_response(mobile_service.get_leaderboard_me(db, current_user, scope, metric, period))
 
 
 @router.get("/events", summary="РЎРѕР±С‹С‚РёСЏ")
@@ -944,6 +990,11 @@ async def get_shop(db: Session = Depends(get_db), current_user: User = Depends(a
     return success_response(mobile_service.get_shop(db, current_user))
 
 
+@router.get("/items", summary="Canonical item catalog")
+async def get_items_catalog(db: Session = Depends(get_db), current_user: User = Depends(auth.get_current_user)):
+    return success_response(mobile_service.get_items_catalog(db, current_user))
+
+
 @router.post("/shop/refresh", summary="Refresh shop")
 async def refresh_shop(db: Session = Depends(get_db), current_user: User = Depends(auth.get_current_user)):
     return success_response(mobile_service.refresh_shop(db, current_user), "Shop refreshed")
@@ -956,6 +1007,15 @@ async def buy_shop_item(
     current_user: User = Depends(auth.get_current_user),
 ):
     return success_response(mobile_service.buy_shop_item(db, current_user, payload.item_id), "РџРѕРєСѓРїРєР° РІС‹РїРѕР»РЅРµРЅР°")
+
+
+@router.post("/items/buy", summary="Buy item from canonical catalog")
+async def buy_item_alias(
+    payload: ShopPurchaseSchema,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(auth.get_current_user),
+):
+    return success_response(mobile_service.buy_catalog_item(db, current_user, payload.item_id), "Item purchased")
 
 
 @router.get("/character/equipment", summary="РћР±Р·РѕСЂ СЌРєРёРїРёСЂРѕРІРєРё")

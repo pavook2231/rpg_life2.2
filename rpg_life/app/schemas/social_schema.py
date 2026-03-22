@@ -24,7 +24,7 @@ class FriendRequestCreateSchema(BaseModel):
 
 class FriendRequestRespondSchema(BaseModel):
     request_id: int
-    action: Literal["accept", "decline"]
+    action: Literal["accept", "decline"] = "accept"
 
 
 class PvpChallengeCreateSchema(BaseModel):

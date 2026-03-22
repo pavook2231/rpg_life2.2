@@ -7,7 +7,7 @@ from app import crud
 from app.achievements import ACHIEVEMENTS
 from app.core.cache import cache_get_json, cache_set_json, invalidate_leaderboard_cache
 from app.core.dates import utc_now
-from app.item_service import SET_BONUSES, calculate_set_bonus
+from app.item_service import calculate_set_bonus, sync_catalog_items
 from app.models import DailyBonus, DailySteps, Item, User, UserClassProgress, UserInventory
 from app.stat_effects import StatEffects
 from app.services import character_service, engagement_service, health_service, inventory_service, quest_service, social_service
@@ -292,6 +292,7 @@ def regenerate_today_quests(db: Session, current_user: User) -> dict:
 
 
 def get_inventory(db: Session, current_user: User, page: int, limit: int, sort: str) -> dict:
+    sync_catalog_items(db)
     query = (
         db.query(UserInventory)
         .options(
@@ -405,7 +406,23 @@ def get_leaderboard(
     if scope == "friends":
         payload = social_service.get_friends_leaderboard(db, current_user, metric, page, limit, period)
     else:
-        payload = social_service.get_global_leaderboard(db, metric, page, limit, period)
+        payload = social_service.get_global_leaderboard(db, metric, page, limit, period, current_user.id)
+    cache_set_json(cache_key, payload, ttl=60)
+    return payload
+
+
+def get_leaderboard_me(
+    db: Session,
+    current_user: User,
+    scope: str,
+    metric: str,
+    period: str = "all_time",
+) -> dict:
+    cache_key = f"leaderboard:{scope}:{metric}:{period}:me:{current_user.id}"
+    cached = cache_get_json(cache_key)
+    if cached:
+        return cached
+    payload = social_service.get_leaderboard_me(db, current_user, scope, metric, period)
     cache_set_json(cache_key, payload, ttl=60)
     return payload
 
@@ -428,12 +445,28 @@ def get_shop(db: Session, current_user: User) -> dict:
     return normalize_nested_strings(inventory_service.get_shop_context(db, current_user))
 
 
+def get_items_catalog(db: Session, current_user: User) -> dict:
+    return get_shop(db, current_user)
+
+
 def refresh_shop(db: Session, current_user: User) -> dict:
     return normalize_nested_strings(inventory_service.refresh_shop_context(db, current_user))
 
 
 def buy_shop_item(db: Session, current_user: User, item_id: int) -> dict:
     return normalize_nested_strings(inventory_service.buy_shop_item(db, current_user, item_id))
+
+
+def buy_catalog_item(db: Session, current_user: User, item_id: int) -> dict:
+    return buy_shop_item(db, current_user, item_id)
+
+
+def get_user_items(db: Session, current_user: User, page: int, limit: int, sort: str) -> dict:
+    return get_inventory(db, current_user, page, limit, sort)
+
+
+def equip_user_item(db: Session, current_user: User, inventory_id: int, slot: str, class_progress_id: int | None) -> dict:
+    return equip_item(db, current_user, inventory_id, slot, class_progress_id)
 
 
 def get_inventory_item_detail(db: Session, current_user: User, inventory_id: int) -> dict:

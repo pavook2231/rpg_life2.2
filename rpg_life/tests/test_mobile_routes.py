@@ -27,6 +27,18 @@ def test_leaderboard_endpoint_requires_authenticated_user() -> None:
     assert auth.get_current_user in dependency_calls_for(router, "/api/v1/leaderboard")
 
 
+def test_leaderboard_me_endpoint_requires_authenticated_user() -> None:
+    assert auth.get_current_user in dependency_calls_for(router, "/api/v1/leaderboard/me")
+
+
+def test_items_catalog_endpoint_requires_authenticated_user() -> None:
+    assert auth.get_current_user in dependency_calls_for(router, "/api/v1/items")
+
+
+def test_current_user_items_endpoint_requires_authenticated_user() -> None:
+    assert auth.get_current_user in dependency_calls_for(router, "/api/v1/users/me/items")
+
+
 def test_leaderboard_endpoint_forwards_period_to_service(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
@@ -69,6 +81,196 @@ def test_leaderboard_endpoint_forwards_period_to_service(monkeypatch) -> None:
     }
     assert body["status"] == "success"
     assert body["data"]["period"] == "weekly"
+
+
+def test_leaderboard_friends_alias_forwards_scope_to_service(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_get_leaderboard(db, current_user, scope, metric, page, limit, period):
+        captured.update({
+            "db": db,
+            "current_user": current_user,
+            "scope": scope,
+            "metric": metric,
+            "page": page,
+            "limit": limit,
+            "period": period,
+        })
+        return {"metric": metric, "period": period, "items": []}
+
+    monkeypatch.setattr(mobile_routes.mobile_service, "get_leaderboard", fake_get_leaderboard)
+
+    response = asyncio.run(
+        mobile_routes.get_friends_leaderboard(
+            metric="power",
+            period="all_time",
+            page=3,
+            limit=12,
+            db="demo-db",
+            current_user="demo-user",
+        )
+    )
+    body = json.loads(response.body.decode("utf-8"))
+
+    assert response.status_code == 200
+    assert captured == {
+        "db": "demo-db",
+        "current_user": "demo-user",
+        "scope": "friends",
+        "metric": "power",
+        "page": 3,
+        "limit": 12,
+        "period": "all_time",
+    }
+    assert body["status"] == "success"
+
+
+def test_leaderboard_me_route_forwards_scope_to_service(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_get_leaderboard_me(db, current_user, scope, metric, period):
+        captured.update({
+            "db": db,
+            "current_user": current_user,
+            "scope": scope,
+            "metric": metric,
+            "period": period,
+        })
+        return {"scope": scope, "metric": metric, "item": {"user_id": 4, "rank": 9, "score": 1200}}
+
+    monkeypatch.setattr(mobile_routes.mobile_service, "get_leaderboard_me", fake_get_leaderboard_me)
+
+    response = asyncio.run(
+        mobile_routes.get_leaderboard_me(
+            scope="friends",
+            metric="power",
+            period="all_time",
+            db="demo-db",
+            current_user="demo-user",
+        )
+    )
+    body = json.loads(response.body.decode("utf-8"))
+
+    assert response.status_code == 200
+    assert captured == {
+        "db": "demo-db",
+        "current_user": "demo-user",
+        "scope": "friends",
+        "metric": "power",
+        "period": "all_time",
+    }
+    assert body["data"]["item"]["rank"] == 9
+
+
+def test_items_catalog_route_forwards_to_mobile_service(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_get_items_catalog(db, current_user):
+        captured["db"] = db
+        captured["current_user"] = current_user
+        return {"items": [], "character_level": 1}
+
+    monkeypatch.setattr(mobile_routes.mobile_service, "get_items_catalog", fake_get_items_catalog)
+
+    response = asyncio.run(mobile_routes.get_items_catalog(db="demo-db", current_user="demo-user"))
+    body = json.loads(response.body.decode("utf-8"))
+
+    assert captured == {"db": "demo-db", "current_user": "demo-user"}
+    assert response.status_code == 200
+    assert body["status"] == "success"
+
+
+def test_current_user_items_route_forwards_pagination_to_service(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_get_user_items(db, current_user, page, limit, sort):
+        captured.update({
+            "db": db,
+            "current_user": current_user,
+            "page": page,
+            "limit": limit,
+            "sort": sort,
+        })
+        return {"items": [], "pagination": {"page": page, "limit": limit, "total_items": 0, "total_pages": 1}}
+
+    monkeypatch.setattr(mobile_routes.mobile_service, "get_user_items", fake_get_user_items)
+
+    response = asyncio.run(
+        mobile_routes.get_current_user_items(page=2, limit=15, sort="id", db="demo-db", current_user="demo-user")
+    )
+    body = json.loads(response.body.decode("utf-8"))
+
+    assert captured == {
+        "db": "demo-db",
+        "current_user": "demo-user",
+        "page": 2,
+        "limit": 15,
+        "sort": "id",
+    }
+    assert response.status_code == 200
+    assert body["data"]["pagination"]["page"] == 2
+
+
+def test_items_buy_alias_forwards_item_id_to_mobile_service(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_buy_catalog_item(db, current_user, item_id):
+        captured.update({
+            "db": db,
+            "current_user": current_user,
+            "item_id": item_id,
+        })
+        return {"ok": True, "kind": "item"}
+
+    monkeypatch.setattr(mobile_routes.mobile_service, "buy_catalog_item", fake_buy_catalog_item)
+
+    response = asyncio.run(
+        mobile_routes.buy_item_alias(
+            payload=mobile_routes.ShopPurchaseSchema(item_id=205),
+            db="demo-db",
+            current_user="demo-user",
+        )
+    )
+    body = json.loads(response.body.decode("utf-8"))
+
+    assert captured == {"db": "demo-db", "current_user": "demo-user", "item_id": 205}
+    assert response.status_code == 200
+    assert body["data"]["ok"] is True
+
+
+def test_items_equip_alias_forwards_payload_to_mobile_service(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_equip_user_item(db, current_user, inventory_id, slot, class_progress_id):
+        captured.update({
+            "db": db,
+            "current_user": current_user,
+            "inventory_id": inventory_id,
+            "slot": slot,
+            "class_progress_id": class_progress_id,
+        })
+        return {"ok": True}
+
+    monkeypatch.setattr(mobile_routes.mobile_service, "equip_user_item", fake_equip_user_item)
+
+    response = asyncio.run(
+        mobile_routes.equip_item_alias(
+            payload=mobile_routes.InventoryActionSchema(inventory_id=12, slot="main_hand", class_progress_id=7),
+            db="demo-db",
+            current_user="demo-user",
+        )
+    )
+    body = json.loads(response.body.decode("utf-8"))
+
+    assert captured == {
+        "db": "demo-db",
+        "current_user": "demo-user",
+        "inventory_id": 12,
+        "slot": "main_hand",
+        "class_progress_id": 7,
+    }
+    assert response.status_code == 200
+    assert body["data"]["ok"] is True
 
 
 def test_auth_logout_route_uses_rate_limit_and_service(monkeypatch) -> None:

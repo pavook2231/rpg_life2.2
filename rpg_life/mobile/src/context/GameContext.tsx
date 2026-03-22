@@ -6,15 +6,14 @@ import {
   type DailyLimitsPayload,
   fetchAchievements,
   fetchBootstrap,
-  fetchEquipmentOverview,
-  fetchInventory,
   syncTodaySteps,
   type AchievementItem,
   type CharacterProfilePayload,
   type HealthStatePayload,
-  type InventoryItem,
   type ProfilePayload,
 } from "../api/game";
+import { fetchEquipmentOverview, fetchInventory } from "../features/items/itemService";
+import type { InventoryItem } from "../features/items/types";
 import { getTodayStepsSnapshot, type StepTrackingState, watchTodaySteps } from "../lib/pedometer";
 import { getLastPedometerSyncState, saveLastPedometerSyncState } from "../storage/pedometerSyncStorage";
 import { useAuth } from "./AuthContext";

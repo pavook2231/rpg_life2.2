@@ -1,13 +1,24 @@
 import { apiRequest } from "./client";
-import { apiRootRequest } from "./client";
 import { fetchWithTtlCache, queueIfOffline } from "../lib/offline";
 import {
-  mapChestRewardToCatalog,
-  mapInventoryDetailToCatalog,
-  mapInventoryEntryToCatalog,
-  mapPayloadItemToCatalog,
-  mapShopItemToCatalog,
-} from "../lib/itemCatalog";
+  buyShopItem as buyCanonicalShopItem,
+  equipInventoryItem as equipCanonicalInventoryItem,
+  fetchEquipmentOverview as fetchCanonicalEquipmentOverview,
+  fetchInventory as fetchCanonicalInventory,
+  fetchInventoryItemDetail as fetchCanonicalInventoryItemDetail,
+  fetchShop as fetchCanonicalShop,
+  openChest as openCanonicalChest,
+  refreshShop as refreshCanonicalShop,
+  sellInventoryItem as sellCanonicalInventoryItem,
+  unequipInventoryItem as unequipCanonicalInventoryItem,
+} from "../features/items/itemService";
+import { normalizeChestRewardItem } from "../features/items/itemStore";
+import type {
+  InventoryItem as CanonicalInventoryItem,
+  ShopItemPayload as CanonicalShopItemPayload,
+  ShopPayload as CanonicalShopPayload,
+  ShopPurchasePayload as CanonicalShopPurchasePayload,
+} from "../features/items/types";
 
 export type SecondarySkillItem = {
   id: "discipline" | "focus" | "energy" | "charisma" | "luck";
@@ -48,6 +59,8 @@ export type StepsSyncPayload = {
 };
 
 export type LeaderboardPeriod = "all_time" | "weekly" | "season";
+export type LeaderboardScope = "global" | "friends";
+export type LeaderboardMetric = "power" | "level" | "quests" | "steps" | "challenge_wins";
 
 export type LeaderboardEntry = {
   user_id: number;
@@ -57,6 +70,8 @@ export type LeaderboardEntry = {
   rank: number;
   score: number;
   level: number;
+  current_xp?: number | null;
+  power_rating?: number | null;
   quests_completed: number;
   steps: number;
   challenge_wins: number;
@@ -67,6 +82,7 @@ export type LeaderboardEntry = {
   goal_progress_percent?: number | null;
   goal_cycle_xp?: number | null;
   goal_target_xp?: number | null;
+  is_current_user?: boolean;
 };
 
 export type LeaderboardResponse = {
@@ -83,6 +99,17 @@ export type LeaderboardResponse = {
     total_items: number;
     total_pages: number;
   };
+};
+
+export type LeaderboardMeResponse = {
+  scope: LeaderboardScope;
+  metric: LeaderboardMetric;
+  period: LeaderboardPeriod;
+  period_started_at?: string | null;
+  period_ends_at?: string | null;
+  event_id?: number | null;
+  season_key?: string | null;
+  item: LeaderboardEntry;
 };
 
 export type SocialPulseIdentity = {
@@ -243,53 +270,7 @@ export type GoalStatePayload = {
   health?: HealthStatePayload;
 };
 
-export type InventoryItem = {
-  id: number;
-  item_id: number;
-  quantity: number;
-  is_equipped: boolean;
-  acquired_at?: string | null;
-  item: {
-    id?: number;
-    name: string;
-    description?: string;
-    rarity: string;
-    icon: string;
-    type: string;
-    subclass?: string | null;
-    slot: string | null;
-      strength_bonus?: number;
-      agility_bonus?: number;
-      intellect_bonus?: number;
-      stamina_bonus?: number;
-      critical_bonus?: number;
-      luck_bonus?: number;
-      xp_bonus?: number;
-    crystal_bonus?: number;
-    health_bonus?: number;
-    required_level?: number;
-    required_class?: string | null;
-    set_name?: string | null;
-    price_crystals?: number;
-    stats?: Record<string, number> | null;
-  };
-  weapon_stats?: {
-    weapon_type?: string;
-    weapon_category?: string;
-    damage_min: number;
-    damage_max: number;
-    speed?: number;
-    dps?: number;
-    critical_strike_chance?: number;
-    required_strength?: number;
-    required_agility?: number;
-    required_intellect?: number;
-  } | null;
-  armor_stats?: {
-    armor_value: number;
-    slot?: string;
-  } | null;
-};
+export type InventoryItem = CanonicalInventoryItem;
 
 export type ChallengeItem = {
   id: number;
@@ -374,75 +355,9 @@ export type QuestCompletionPayload = {
   level_ups?: unknown[] | null;
 };
 
-export type ShopItemPayload = {
-  id: number;
-  name: string;
-  description: string;
-  type: string;
-  slot?: string | null;
-  subclass?: string | null;
-  icon: string;
-  rarity: string;
-  price_crystals: number;
-  required_level: number;
-  required_class?: string | null;
-  set_name?: string | null;
-  strength_bonus?: number;
-  agility_bonus?: number;
-  intellect_bonus?: number;
-  stamina_bonus?: number;
-  critical_bonus?: number;
-  luck_bonus?: number;
-  xp_bonus?: number;
-  crystal_bonus?: number;
-  health_bonus?: number;
-  chest_name?: string;
-  stats?: Record<string, number>;
-  weapon_stats?: {
-    weapon_type?: string;
-    weapon_category?: string;
-    damage_min: number;
-    damage_max: number;
-    speed?: number;
-    dps?: number;
-    critical_strike_chance?: number;
-    required_strength?: number;
-    required_agility?: number;
-    required_intellect?: number;
-  } | null;
-  armor_stats?: {
-    armor_type?: string;
-    armor_value: number;
-    slot?: string;
-    dodge_chance?: number;
-    block_chance?: number;
-  } | null;
-};
-
-export type ShopPurchasePayload = {
-  ok: boolean;
-  kind: "item" | "chest";
-  chest_name?: string;
-  inventory_id?: number;
-  chest_item?: {
-    id?: number | null;
-    name: string;
-    rarity: string;
-    icon: string;
-  } | null;
-};
-
-export type ShopPayload = {
-  items: ShopItemPayload[];
-  crystals: number;
-  character_level: number;
-  refresh_cost: number;
-  refresh_cooldown_seconds: number;
-  refresh_available_at?: string | null;
-  refresh_remaining_seconds: number;
-  can_refresh: boolean;
-  next_rotation_at: string;
-};
+export type ShopItemPayload = CanonicalShopItemPayload;
+export type ShopPurchasePayload = CanonicalShopPurchasePayload;
+export type ShopPayload = CanonicalShopPayload;
 
 export type RewardsSummaryPayload = {
   daily_bonus: {
@@ -707,10 +622,10 @@ export function completeQuest(questId: number) {
         loot_drop: payload.loot_drop
           ? {
               ...payload.loot_drop,
-              ...(mapChestRewardToCatalog({
+              ...normalizeChestRewardItem({
                 name: payload.loot_drop.name ?? "Награда",
                 icon: payload.loot_drop.icon ?? undefined,
-              }) as { name: string; icon?: string; rarity?: string }),
+              }),
             }
           : payload.loot_drop,
         daily_chest: payload.daily_chest?.item
@@ -718,10 +633,10 @@ export function completeQuest(questId: number) {
               ...payload.daily_chest,
               item: {
                 ...payload.daily_chest.item,
-                ...(mapChestRewardToCatalog({
+                ...normalizeChestRewardItem({
                   name: payload.daily_chest.item.name ?? "Награда",
                   icon: payload.daily_chest.item.icon ?? undefined,
-                }) as { name: string; icon?: string; rarity?: string }),
+                }),
               },
             }
           : payload.daily_chest,
@@ -730,10 +645,10 @@ export function completeQuest(questId: number) {
               ...payload.chest_item,
               item: {
                 ...payload.chest_item.item,
-                ...(mapChestRewardToCatalog({
+                ...normalizeChestRewardItem({
                   name: payload.chest_item.item.name ?? "Награда",
                   icon: payload.chest_item.item.icon ?? undefined,
-                }) as { name: string; icon?: string; rarity?: string }),
+                }),
               },
             }
           : payload.chest_item,
@@ -748,134 +663,27 @@ export function deleteQuest(questId: number) {
 }
 
 export function fetchInventory(page = 1, limit = 20, options: CachedRequestOptions = {}) {
-  return fetchWithTtlCache(`inventory:${page}:${limit}`, async () => {
-    const payload = await apiRequest<{
-      items: InventoryItem[];
-      pagination: {
-        page: number;
-        limit: number;
-        total_items: number;
-        total_pages: number;
-      };
-    }>(`/inventory?page=${page}&limit=${limit}`);
-
-    return {
-      ...payload,
-      items: (payload.items ?? []).map((item) => mapInventoryEntryToCatalog(item)),
-    };
-  }, {
-    ttlMs: CACHE_TTL.inventory,
-    forceRefresh: options.forceRefresh,
-  });
+  return fetchCanonicalInventory(page, limit, options);
 }
 
 export function fetchInventoryItemDetail(inventoryId: number) {
-  return apiRequest<{
-    inventory_id: number;
-    is_equipped: boolean;
-    sell_price: number;
-    item: InventoryItem["item"];
-    weapon_stats?: InventoryItem["weapon_stats"];
-    armor_stats?: InventoryItem["armor_stats"];
-  }>(`/inventory/${inventoryId}`).then((payload) => mapInventoryDetailToCatalog(payload));
+  return fetchCanonicalInventoryItemDetail(inventoryId);
 }
 
 export function equipInventoryItem(inventoryId: number, slot: string, classProgressId?: number) {
-  return apiRequest("/inventory/equip", {
-    method: "POST",
-    body: JSON.stringify({
-      inventory_id: inventoryId,
-      slot,
-      class_progress_id: classProgressId ?? null
-    })
-  });
+  return equipCanonicalInventoryItem(inventoryId, slot, classProgressId);
 }
 
 export function unequipInventoryItem(inventoryId: number) {
-  return apiRequest("/inventory/unequip", {
-    method: "POST",
-    body: JSON.stringify({ inventory_id: inventoryId })
-  });
+  return unequipCanonicalInventoryItem(inventoryId);
 }
 
 export function sellInventoryItem(inventoryId: number) {
-  return apiRequest<{ ok: boolean; crystals_earned?: number }>("/inventory/sell", {
-    method: "POST",
-    body: JSON.stringify({ inventory_id: inventoryId })
-  });
+  return sellCanonicalInventoryItem(inventoryId);
 }
 
 export function fetchEquipmentOverview(options: CachedRequestOptions = {}) {
-  return fetchWithTtlCache("equipment-overview", async () => {
-    const payload = await apiRequest<{
-      class_info: {
-        id: number;
-        class_name: string;
-        display_name: string | null;
-        level: number;
-        current_xp: number;
-        crystals: number;
-        strength: number;
-        agility: number;
-        intellect: number;
-        stamina: number;
-      };
-      equipment_totals: {
-        strength: number;
-        agility: number;
-        intellect: number;
-        stamina: number;
-        critical_chance: number;
-        luck: number;
-        health: number;
-        armor: number;
-        damage_min: number;
-        damage_max: number;
-        dps: number;
-      };
-      reward_effects: {
-        xp_bonus_percent: number;
-        gold_bonus_percent: number;
-        crit_reward_chance_percent: number;
-        loot_bonus_percent: number;
-        armor_reduction_percent?: number;
-        system_daily_cap?: number;
-      };
-      equipment: Array<{
-        slot: string;
-        inventory_id: number;
-        item: InventoryItem["item"];
-        weapon_stats?: InventoryItem["weapon_stats"];
-        armor_stats?: InventoryItem["armor_stats"];
-      }>;
-      bag_items: InventoryItem[];
-      set_bonuses?: Array<{
-        set_name: string;
-        name: string;
-        description: string;
-        active_pieces: number;
-        bonus: Record<string, number>;
-      }>;
-      secondary_skills?: SecondarySkillsPayload;
-    }>("/character/equipment");
-
-    return {
-      ...payload,
-      equipment: (payload.equipment ?? []).map((entry) => {
-        const mappedItem = mapPayloadItemToCatalog(entry.item);
-        return {
-          ...entry,
-          item: mappedItem,
-          weapon_stats: entry.weapon_stats,
-          armor_stats: entry.armor_stats,
-        };
-      }),
-      bag_items: (payload.bag_items ?? []).map((entry) => mapInventoryEntryToCatalog(entry)),
-    };
-  }, {
-    ttlMs: CACHE_TTL.equipmentOverview,
-    forceRefresh: options.forceRefresh,
-  });
+  return fetchCanonicalEquipmentOverview(options);
 }
 
 export function fetchChallenges(page = 1, limit = 20, options: CachedRequestOptions = {}) {
@@ -916,8 +724,8 @@ export function joinChallenge(challengeId: number) {
 }
 
 export function fetchLeaderboard(
-  metric = "level",
-  scope = "global",
+  metric: LeaderboardMetric = "power",
+  scope: LeaderboardScope = "global",
   page = 1,
   limit = 20,
   period: LeaderboardPeriod = "all_time",
@@ -925,6 +733,35 @@ export function fetchLeaderboard(
 ) {
   return fetchWithTtlCache(`leaderboard:${metric}:${scope}:${period}:${page}:${limit}`, () => apiRequest<LeaderboardResponse>(
     `/leaderboard?metric=${metric}&scope=${scope}&period=${period}&page=${page}&limit=${limit}`
+  ), {
+    ttlMs: CACHE_TTL.leaderboard,
+    forceRefresh: options.forceRefresh,
+  });
+}
+
+export function fetchFriendsLeaderboardPage(
+  metric: LeaderboardMetric = "power",
+  page = 1,
+  limit = 20,
+  period: LeaderboardPeriod = "all_time",
+  options: CachedRequestOptions = {},
+) {
+  return fetchWithTtlCache(`leaderboard:${metric}:friends:${period}:${page}:${limit}`, () => apiRequest<LeaderboardResponse>(
+    `/leaderboard/friends?metric=${metric}&period=${period}&page=${page}&limit=${limit}`
+  ), {
+    ttlMs: CACHE_TTL.leaderboard,
+    forceRefresh: options.forceRefresh,
+  });
+}
+
+export function fetchLeaderboardMe(
+  scope: LeaderboardScope = "global",
+  metric: LeaderboardMetric = "power",
+  period: LeaderboardPeriod = "all_time",
+  options: CachedRequestOptions = {},
+) {
+  return fetchWithTtlCache(`leaderboard:${metric}:${scope}:${period}:me`, () => apiRequest<LeaderboardMeResponse>(
+    `/leaderboard/me?scope=${scope}&metric=${metric}&period=${period}`
   ), {
     ttlMs: CACHE_TTL.leaderboard,
     forceRefresh: options.forceRefresh,
@@ -1025,60 +862,19 @@ export function fetchAchievements(options: CachedRequestOptions = {}) {
 }
 
 export function fetchShop(options: CachedRequestOptions = {}) {
-  return fetchWithTtlCache("shop", async () => {
-    const payload = await apiRequest<ShopPayload>("/shop");
-    return {
-      ...payload,
-      items: (payload.items ?? []).map((item) => mapShopItemToCatalog(item)),
-    };
-  }, {
-    ttlMs: CACHE_TTL.shop,
-    forceRefresh: options.forceRefresh,
-  });
+  return fetchCanonicalShop(options);
 }
 
 export function refreshShop() {
-  return apiRequest<ShopPayload>("/shop/refresh", {
-    method: "POST",
-  }).then((payload) => ({
-    ...payload,
-    items: (payload.items ?? []).map((item) => mapShopItemToCatalog(item)),
-  }));
+  return refreshCanonicalShop();
 }
 
 export function buyShopItem(itemId: number) {
-  return apiRequest<ShopPurchasePayload>("/shop/buy", {
-    method: "POST",
-    body: JSON.stringify({ item_id: itemId })
-  });
+  return buyCanonicalShopItem(itemId);
 }
 
 export function openChest(payload: { inventory_id?: number | null; chest_id?: number | null; chest_name?: string | null }) {
-  return queueIfOffline(
-    () =>
-      apiRootRequest<{
-        item: {
-          id: number;
-          name: string;
-          slot?: string | null;
-          rarity: string;
-          icon: string;
-          power?: number | null;
-        };
-        rarity: string;
-        chest_name?: string;
-        chest_rarity?: string;
-        luck_bonus_percent?: number;
-        opened_from_inventory?: boolean;
-      }>("/chests/open", {
-        method: "POST",
-        body: JSON.stringify(payload),
-      }).then((result) => ({
-        ...result,
-        item: mapChestRewardToCatalog(result.item),
-      })),
-    { type: "open_chest", payload },
-  );
+  return openCanonicalChest(payload);
 }
 
 export function updateProfile(payload: {

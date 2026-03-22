@@ -7,7 +7,7 @@ import {
   openChest,
   sellInventoryItem,
   unequipInventoryItem,
-} from "../api/game";
+} from "../features/items/itemService";
 import {
   CharacterView,
   CHARACTER_EQUIPMENT_ASSETS,

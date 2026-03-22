@@ -9,8 +9,8 @@ import {
   openChest,
   sellInventoryItem,
   unequipInventoryItem,
-  type InventoryItem,
-} from "../api/game";
+} from "../features/items/itemService";
+import type { InventoryItem } from "../features/items/types";
 import { Screen } from "../components/Screen";
 import { useGameProgress } from "../context/GameContext";
 import { useGameInventoryEquipment } from "../context/GameContext";

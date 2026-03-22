@@ -11,8 +11,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.beta_content import BETA_ITEMS, CHEST_CATALOG, beta_boss_catalog
 from app.chest_items import build_chest_grant_payload, grant_chest_to_user
 from app.core.dates import utc_now
-from app.item_service import ensure_catalog_item
-from app.items_data import ITEMS
+from app.item_service import sync_catalog_items
 from app.models import (
     Boss,
     Challenge,
@@ -27,7 +26,7 @@ from app.models import (
     UserItem,
 )
 from app.stat_effects import StatEffects
-from . import notification_service
+from . import inventory_service, notification_service
 
 logger = logging.getLogger(__name__)
 
@@ -84,14 +83,9 @@ def _get_main_progress(db: Session, user_id: int) -> UserClassProgress | None:
 
 
 def _serialize_item(item: Item) -> dict:
-    return {
-        "id": item.id,
-        "name": item.name,
-        "slot": item.slot,
-        "rarity": item.rarity,
-        "icon": item.icon,
-        "power": item.power,
-    }
+    payload = inventory_service.serialize_item_payload(item)
+    payload["power"] = item.power
+    return payload
 
 
 def _serialize_chest(chest: Chest) -> dict:
@@ -245,17 +239,8 @@ def _draw_rarity(chest_name: str, luck_bonus: float = 0.0) -> str:
     return "common"
 
 
-def _loot_candidates(rarity: str, max_level: int) -> list[int]:
-    return [
-        int(item["id"])
-        for item in ITEMS
-        if (item.get("rarity") or "common") == rarity
-        and int(item.get("required_level") or 1) <= max_level
-        and (item.get("type") or "") in {"weapon", "armor", "accessory"}
-    ]
-
-
 def _require_loot_item(db: Session, user_id: int, rarity: str, level: int) -> Item:
+    sync_catalog_items(db)
     max_level = max(1, level + 2)
     rarity_start = RARITY_FALLBACK_ORDER.index(rarity) if rarity in RARITY_FALLBACK_ORDER else len(RARITY_FALLBACK_ORDER) - 1
     rarity_chain = RARITY_FALLBACK_ORDER[rarity_start:]
@@ -267,13 +252,20 @@ def _require_loot_item(db: Session, user_id: int, rarity: str, level: int) -> It
     }
 
     for index, rarity_key in enumerate(rarity_chain):
-        candidates = _loot_candidates(rarity_key, max_level)
-        if not candidates and index == 0:
-            # Keep chest rarity meaningful even for low-level players.
-            candidates = _loot_candidates(rarity_key, 999)
+        level_limit = 999 if index == 0 else max_level
+        candidates = (
+            db.query(Item)
+            .filter(
+                Item.rarity == rarity_key,
+                Item.required_level <= level_limit,
+                Item.type.in_(["weapon", "armor", "accessory"]),
+                Item.is_beta_item == False,
+            )
+            .order_by(Item.required_level.asc(), Item.id.asc())
+            .all()
+        )
         random.shuffle(candidates)
-        for item_id in candidates:
-            item = ensure_catalog_item(db, item_id)
+        for item in candidates:
             if item.is_unique and item.id in owned_item_ids:
                 continue
             return item

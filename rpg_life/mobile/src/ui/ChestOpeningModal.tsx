@@ -10,7 +10,7 @@ import {
   useWindowDimensions,
 } from "react-native";
 
-import { getUnifiedItemCatalog } from "../lib/itemCatalog";
+import { getCachedCatalogItems } from "../features/items/itemStore";
 import { getRarityColor, getRarityLabel, normalizeItemText } from "../lib/gameUi";
 import { Button } from "./Button";
 import { GameIcon } from "./GameIcon";
@@ -50,13 +50,13 @@ const WINNER_INDEX = 22;
 const REEL_SIZE = 28;
 
 function buildPool() {
-  const entries = getUnifiedItemCatalog().filter((item) => item.category !== "chest");
+  const entries = getCachedCatalogItems().filter((item) => item.type !== "chest");
   return entries.map((item) => ({
     id: item.id,
     name: item.name,
-    icon: item.iconName,
+    icon: item.image || item.icon,
     rarity: item.rarity,
-    type: item.category,
+    type: item.type,
     slot: item.slot,
     subclass: item.subclass,
   }));

@@ -268,11 +268,9 @@ def get_crafting_overview(db: Session, current_user: User) -> dict:
         .order_by(ItemUpgradePath.id.asc())
         .all()
     )
-    path_by_name = {}
+    path_by_item_id = {}
     for path in upgrade_paths:
-        from_item_data = find_catalog_item_data(path.from_item_id)
-        if from_item_data:
-            path_by_name[from_item_data["name"]] = path
+        path_by_item_id[path.from_item_id] = path
 
     owned_items = (
         db.query(UserInventory)
@@ -284,7 +282,7 @@ def get_crafting_overview(db: Session, current_user: User) -> dict:
     for inventory_item in owned_items:
         if inventory_item.item is None:
             continue
-        path = path_by_name.get(inventory_item.item.name)
+        path = path_by_item_id.get(inventory_item.item_id)
         if path is None:
             continue
         upgrades.append(_upgrade_payload(path, inventory_item.id))
@@ -345,12 +343,12 @@ def upgrade_item(db: Session, current_user: User, inventory_id: int) -> dict:
     if inventory_item is None or inventory_item.item is None:
         raise HTTPException(status_code=404, detail="Inventory item not found")
 
-    upgrade_entry = None
-    for path in db.query(ItemUpgradePath).options(joinedload(ItemUpgradePath.resource)).all():
-        from_item_data = find_catalog_item_data(path.from_item_id)
-        if from_item_data and from_item_data["name"] == inventory_item.item.name:
-            upgrade_entry = path
-            break
+    upgrade_entry = (
+        db.query(ItemUpgradePath)
+        .options(joinedload(ItemUpgradePath.resource))
+        .filter(ItemUpgradePath.from_item_id == inventory_item.item_id)
+        .first()
+    )
     if upgrade_entry is None:
         raise HTTPException(status_code=400, detail="This item cannot be upgraded")
 

@@ -2,6 +2,7 @@ from datetime import timedelta
 
 import pytest
 
+from app.core.config import get_total_xp_for_level
 from app.core.dates import utc_now
 from app.models import DailySteps, Friendship, GameEvent, User, UserClassProgress
 from app.schemas.social_schema import CoopQuestCreateSchema
@@ -106,6 +107,17 @@ def test_search_users_matches_public_friend_id(db_session) -> None:
     assert payload["items"][0]["friend_id"] == "RPG-000002"
 
 
+def test_search_users_marks_existing_friend_as_friend_status(db_session) -> None:
+    seeker = _create_user(db_session, "friend-search-owner@example.com")
+    target = _create_user(db_session, "friend-search-target@example.com")
+    _make_friends(db_session, seeker.id, target.id)
+
+    payload = social_service.search_users(db_session, seeker, "friend-search-target", page=1, page_size=20)
+
+    assert payload["items"][0]["id"] == target.id
+    assert payload["items"][0]["status"] == "friend"
+
+
 def test_list_friends_invalid_search_does_not_return_full_roster(db_session) -> None:
     owner = _create_user(db_session, "friends-owner@example.com")
     friend = _create_user(db_session, "friends-target@example.com")
@@ -115,6 +127,47 @@ def test_list_friends_invalid_search_does_not_return_full_roster(db_session) -> 
 
     assert payload["items"] == []
     assert payload["pagination"]["total_items"] == 0
+
+
+def test_list_friends_includes_presence_status_and_rating_rank(db_session) -> None:
+    owner = _create_user(db_session, "friends-presence-owner@example.com")
+    leader = _create_user(db_session, "friends-presence-leader@example.com")
+    sleeper = _create_user(db_session, "friends-presence-sleeper@example.com")
+    leader_progress = _create_progress(db_session, leader.id)
+    sleeper_progress = _create_progress(db_session, sleeper.id)
+
+    leader_progress.level = 9
+    leader_progress.last_activity = utc_now()
+    sleeper_progress.level = 4
+    sleeper_progress.last_activity = utc_now() - timedelta(hours=3)
+    db_session.commit()
+
+    _make_friends(db_session, owner.id, leader.id)
+    _make_friends(db_session, owner.id, sleeper.id)
+
+    payload = social_service.list_friends(db_session, owner, page=1, page_size=20)
+    items_by_id = {item["id"]: item for item in payload["items"]}
+
+    assert items_by_id[leader.id]["presence_status"] == "online"
+    assert items_by_id[sleeper.id]["presence_status"] == "offline"
+    assert items_by_id[leader.id]["rating_rank"] == 1
+    assert items_by_id[sleeper.id]["rating_rank"] == 2
+    assert items_by_id[leader.id]["class_name"] == "warrior"
+
+
+def test_list_friends_omits_inactive_friend_and_cleans_stale_link(db_session) -> None:
+    owner = _create_user(db_session, "friends-stale-owner@example.com")
+    removed = _create_user(db_session, "friends-stale-removed@example.com")
+    _make_friends(db_session, owner.id, removed.id)
+
+    removed.is_active = False
+    db_session.commit()
+
+    payload = social_service.list_friends(db_session, owner, page=1, page_size=20)
+    remaining_links = db_session.query(Friendship).filter(Friendship.user_id == owner.id).count()
+
+    assert payload["items"] == []
+    assert remaining_links == 0
 
 
 def test_social_payloads_do_not_expose_email(db_session) -> None:
@@ -237,6 +290,35 @@ def test_friends_leaderboard_includes_current_user_without_friends(db_session) -
     assert leaderboard["items"][0]["rank"] == 1
     assert leaderboard["items"][0]["username"] == "solo"
     assert leaderboard["items"][0]["friend_id"] == "RPG-000001"
+
+
+def test_power_leaderboard_uses_progress_power_and_shares_rank_for_ties(db_session) -> None:
+    leader = _create_user(db_session, "power-leader@example.com")
+    rival = _create_user(db_session, "power-rival@example.com")
+    runner = _create_user(db_session, "power-runner@example.com")
+    leader_progress = _create_progress(db_session, leader.id)
+    rival_progress = _create_progress(db_session, rival.id)
+    runner_progress = _create_progress(db_session, runner.id)
+
+    leader_progress.level = 5
+    leader_progress.current_xp = 220
+    rival_progress.level = 5
+    rival_progress.current_xp = 220
+    runner_progress.level = 4
+    runner_progress.current_xp = 75
+    db_session.commit()
+
+    leaderboard = social_service.get_global_leaderboard(db_session, "power", page=1, page_size=20)
+    items = leaderboard["items"]
+    expected_power = get_total_xp_for_level(5) + 220
+
+    assert {items[0]["user_id"], items[1]["user_id"]} == {leader.id, rival.id}
+    assert items[0]["score"] == expected_power
+    assert items[1]["score"] == expected_power
+    assert items[0]["rank"] == 1
+    assert items[1]["rank"] == 1
+    assert items[2]["user_id"] == runner.id
+    assert items[2]["rank"] == 3
 
 
 def test_weekly_leaderboard_ignores_stale_steps(db_session) -> None:

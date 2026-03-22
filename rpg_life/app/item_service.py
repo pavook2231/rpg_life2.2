@@ -1,34 +1,308 @@
-﻿# /app/item_service.py
-from sqlalchemy.orm import Session
-from .models import (
-    Item, UserInventory, CharacterEquipment, User, UserClassProgress,
-    ItemWeaponStats, ItemArmorStats, ItemUniqueAbility
-)
-from .items_data import SET_BONUSES
-from .text_utils import normalize_nested_strings
+from __future__ import annotations
+
 import logging
+
+from sqlalchemy.orm import Session
+
+from .equipment_service import EquipmentError
+from .items_data import ITEMS, SET_BONUSES
+from .models import (
+    CharacterEquipment,
+    Item,
+    ItemArmorStats,
+    ItemUniqueAbility,
+    ItemWeaponStats,
+    UserClassProgress,
+    UserInventory,
+    UserItem,
+)
+from .text_utils import normalize_nested_strings
 
 logger = logging.getLogger(__name__)
 
 SLOT_FIELDS = [
-    "head_id", "neck_id", "shoulders_id", "back_id", "chest_id", "wrist_id",
-    "hands_id", "waist_id", "legs_id", "feet_id", "ring1_id", "ring2_id",
-    "trinket1_id", "trinket2_id", "main_hand_id", "off_hand_id", "ranged_id",
+    "head_id",
+    "neck_id",
+    "shoulders_id",
+    "back_id",
+    "chest_id",
+    "wrist_id",
+    "hands_id",
+    "waist_id",
+    "legs_id",
+    "feet_id",
+    "ring1_id",
+    "ring2_id",
+    "trinket1_id",
+    "trinket2_id",
+    "main_hand_id",
+    "off_hand_id",
+    "ranged_id",
 ]
 
-# РљР»Р°СЃСЃ РѕС€РёР±РєРё РґР»СЏ СЌРєРёРїРёСЂРѕРІРєРё
-class EquipmentError(Exception):
-    pass
+ITEM_BONUS_FIELDS = (
+    "strength_bonus",
+    "agility_bonus",
+    "intellect_bonus",
+    "stamina_bonus",
+    "xp_bonus",
+    "crystal_bonus",
+    "critical_bonus",
+    "luck_bonus",
+    "health_bonus",
+)
+
+ABILITY_ALLOWED_KEYS = {
+    "name",
+    "description",
+    "ability_type",
+    "effect_strength",
+    "effect_agility",
+    "effect_intellect",
+    "effect_xp_bonus",
+    "effect_crystal_bonus",
+    "effect_critical_bonus",
+    "effect_luck_bonus",
+    "cooldown",
+    "duration",
+    "mana_cost",
+    "proc_chance",
+    "proc_effect",
+}
+
+_RAW_CATALOG = normalize_nested_strings(ITEMS)
+
+
+def _normalize_catalog_item(raw_item: dict) -> dict:
+    stats = raw_item.get("stats") if isinstance(raw_item.get("stats"), dict) else {}
+    bonuses = {
+        field: stats.get(field, raw_item.get(field, 0)) or 0
+        for field in ITEM_BONUS_FIELDS
+    }
+    weapon_stats = dict(raw_item.get("weapon_stats") or {}) or None
+    armor_stats = dict(raw_item.get("armor_stats") or {}) or None
+    unique_ability = dict(raw_item.get("unique_ability") or {}) or None
+
+    if unique_ability:
+        if "critical_bonus" in unique_ability and "effect_critical_bonus" not in unique_ability:
+            unique_ability["effect_critical_bonus"] = unique_ability.get("critical_bonus")
+        if "luck_bonus" in unique_ability and "effect_luck_bonus" not in unique_ability:
+            unique_ability["effect_luck_bonus"] = unique_ability.get("luck_bonus")
+        unique_ability = {key: value for key, value in unique_ability.items() if key in ABILITY_ALLOWED_KEYS}
+
+    power = int(raw_item.get("power") or 0)
+    if not power and weapon_stats:
+        power = int(weapon_stats.get("damage_max") or weapon_stats.get("damage_min") or 0)
+    if not power and armor_stats:
+        power = int(armor_stats.get("armor_value") or 0)
+    if not power:
+        power = int(
+            bonuses["strength_bonus"]
+            + bonuses["agility_bonus"]
+            + bonuses["intellect_bonus"]
+            + bonuses["stamina_bonus"]
+            + bonuses["health_bonus"] / 10
+        )
+
+    return {
+        "id": int(raw_item["id"]),
+        "name": raw_item["name"],
+        "description": raw_item.get("description") or "",
+        "type": raw_item.get("type") or "misc",
+        "subclass": raw_item.get("subclass"),
+        "slot": raw_item.get("slot"),
+        "rarity": raw_item.get("rarity") or "common",
+        "power": power,
+        "set_name": raw_item.get("set_name"),
+        "set_pieces": int(raw_item.get("set_pieces") or 1),
+        "icon": raw_item.get("icon") or "package-variant",
+        "price_crystals": int(raw_item.get("price_crystals") or 0),
+        "required_level": int(raw_item.get("required_level") or 1),
+        "required_class": raw_item.get("required_class"),
+        "is_unique": bool(raw_item.get("is_unique", False)),
+        "is_beta_item": bool(raw_item.get("is_beta_item", False)),
+        "bonuses": bonuses,
+        "weapon_stats": weapon_stats,
+        "armor_stats": armor_stats,
+        "unique_ability": unique_ability,
+    }
+
+
+CATALOG_ITEMS_BY_ID = {
+    item["id"]: item
+    for item in (_normalize_catalog_item(raw_item) for raw_item in _RAW_CATALOG)
+}
+
+
+def iter_catalog_items() -> list[dict]:
+    return [dict(item) for item in CATALOG_ITEMS_BY_ID.values()]
 
 
 def find_catalog_item_data(item_id: int) -> dict | None:
-    from .items_data import ITEMS
+    item = CATALOG_ITEMS_BY_ID.get(int(item_id))
+    return dict(item) if item else None
 
-    items_catalog = normalize_nested_strings(ITEMS)
-    for item in items_catalog:
-        if item.get("id") == item_id:
-            return item
-    return None
+
+def _apply_catalog_definition(item: Item, item_data: dict) -> None:
+    bonuses = item_data["bonuses"]
+    item.name = item_data["name"]
+    item.description = item_data["description"]
+    item.type = item_data["type"]
+    item.subclass = item_data["subclass"]
+    item.slot = item_data["slot"]
+    item.rarity = item_data["rarity"]
+    item.power = item_data["power"]
+    item.set_name = item_data["set_name"]
+    item.set_pieces = item_data["set_pieces"]
+    item.icon = item_data["icon"]
+    item.price_crystals = item_data["price_crystals"]
+    item.required_level = item_data["required_level"]
+    item.required_class = item_data["required_class"]
+    item.is_unique = item_data["is_unique"]
+    item.is_beta_item = item_data["is_beta_item"]
+
+    for field, value in bonuses.items():
+        setattr(item, field, value)
+
+
+def _ensure_weapon_stats_row(db: Session, item: Item, weapon_stats_data: dict | None) -> None:
+    existing = db.query(ItemWeaponStats).filter(ItemWeaponStats.item_id == item.id).first()
+    if weapon_stats_data is None:
+        if existing is not None:
+            db.delete(existing)
+        return
+
+    if existing is None:
+        existing = ItemWeaponStats(item_id=item.id)
+        db.add(existing)
+
+    for field in (
+        "weapon_type",
+        "weapon_category",
+        "damage_min",
+        "damage_max",
+        "speed",
+        "dps",
+        "required_strength",
+        "required_agility",
+        "required_intellect",
+        "range",
+        "critical_strike_chance",
+        "critical_strike_damage",
+    ):
+        if field in weapon_stats_data:
+            setattr(existing, field, weapon_stats_data.get(field))
+
+
+def _ensure_armor_stats_row(db: Session, item: Item, armor_stats_data: dict | None) -> None:
+    existing = db.query(ItemArmorStats).filter(ItemArmorStats.item_id == item.id).first()
+    if armor_stats_data is None:
+        if existing is not None:
+            db.delete(existing)
+        return
+
+    if existing is None:
+        existing = ItemArmorStats(item_id=item.id)
+        db.add(existing)
+
+    for field in ("armor_type", "armor_value", "slot", "dodge_chance", "block_chance"):
+        if field in armor_stats_data:
+            setattr(existing, field, armor_stats_data.get(field))
+
+
+def _ensure_ability_rows(db: Session, item: Item, ability_data: dict | None) -> None:
+    existing_rows = db.query(ItemUniqueAbility).filter(ItemUniqueAbility.item_id == item.id).all()
+    if ability_data is None:
+        for row in existing_rows:
+            db.delete(row)
+        return
+
+    if existing_rows:
+        row = existing_rows[0]
+        for extra_row in existing_rows[1:]:
+            db.delete(extra_row)
+    else:
+        row = ItemUniqueAbility(item_id=item.id)
+        db.add(row)
+
+    for field in ABILITY_ALLOWED_KEYS:
+        if field in ability_data:
+            setattr(row, field, ability_data.get(field))
+
+
+def _merge_legacy_item(db: Session, canonical_item: Item, legacy_item: Item) -> None:
+    if legacy_item.id == canonical_item.id:
+        return
+
+    logger.warning(
+        "Repairing legacy item duplicate: canonical_id=%s legacy_id=%s name=%s",
+        canonical_item.id,
+        legacy_item.id,
+        canonical_item.name,
+    )
+
+    db.query(UserInventory).filter(UserInventory.item_id == legacy_item.id).update(
+        {UserInventory.item_id: canonical_item.id},
+        synchronize_session=False,
+    )
+    db.query(UserItem).filter(UserItem.item_id == legacy_item.id).update(
+        {UserItem.item_id: canonical_item.id},
+        synchronize_session=False,
+    )
+
+    legacy_weapon = db.query(ItemWeaponStats).filter(ItemWeaponStats.item_id == legacy_item.id).first()
+    if legacy_weapon is not None:
+        canonical_weapon = db.query(ItemWeaponStats).filter(ItemWeaponStats.item_id == canonical_item.id).first()
+        if canonical_weapon is None:
+            legacy_weapon.item_id = canonical_item.id
+        else:
+            db.delete(legacy_weapon)
+
+    legacy_armor = db.query(ItemArmorStats).filter(ItemArmorStats.item_id == legacy_item.id).first()
+    if legacy_armor is not None:
+        canonical_armor = db.query(ItemArmorStats).filter(ItemArmorStats.item_id == canonical_item.id).first()
+        if canonical_armor is None:
+            legacy_armor.item_id = canonical_item.id
+        else:
+            db.delete(legacy_armor)
+
+    db.query(ItemUniqueAbility).filter(ItemUniqueAbility.item_id == legacy_item.id).update(
+        {ItemUniqueAbility.item_id: canonical_item.id},
+        synchronize_session=False,
+    )
+
+    db.delete(legacy_item)
+
+
+def _upsert_catalog_item(db: Session, item_data: dict) -> Item:
+    item = db.query(Item).filter(Item.id == item_data["id"]).first()
+    if item is None:
+        item = Item(id=item_data["id"])
+        db.add(item)
+        db.flush()
+
+    _apply_catalog_definition(item, item_data)
+    db.flush()
+
+    legacy_items = (
+        db.query(Item)
+        .filter(Item.name == item_data["name"], Item.id != item.id)
+        .all()
+    )
+    for legacy_item in legacy_items:
+        _merge_legacy_item(db, item, legacy_item)
+
+    _ensure_weapon_stats_row(db, item, item_data["weapon_stats"])
+    _ensure_armor_stats_row(db, item, item_data["armor_stats"])
+    _ensure_ability_rows(db, item, item_data["unique_ability"])
+    db.flush()
+    return item
+
+
+def sync_catalog_items(db: Session) -> None:
+    for item_id in sorted(CATALOG_ITEMS_BY_ID):
+        _upsert_catalog_item(db, CATALOG_ITEMS_BY_ID[item_id])
+    db.flush()
 
 
 def ensure_catalog_item(db: Session, item_id: int) -> Item:
@@ -36,251 +310,91 @@ def ensure_catalog_item(db: Session, item_id: int) -> Item:
     if not item_data:
         raise EquipmentError(f"Catalog item not found: {item_id}")
 
-    item = db.query(Item).filter(Item.name == item_data["name"]).first()
-    if item:
-        return item
+    return _upsert_catalog_item(db, item_data)
 
-    item = Item(
-        name=item_data["name"],
-        description=item_data["description"],
-        type=item_data["type"],
-        subclass=item_data.get("subclass"),
-        slot=item_data.get("slot"),
-        rarity=item_data["rarity"],
-        strength_bonus=item_data.get("stats", {}).get("strength_bonus", 0) if isinstance(item_data.get("stats"), dict) else item_data.get("strength_bonus", 0),
-        agility_bonus=item_data.get("stats", {}).get("agility_bonus", 0) if isinstance(item_data.get("stats"), dict) else item_data.get("agility_bonus", 0),
-        intellect_bonus=item_data.get("stats", {}).get("intellect_bonus", 0) if isinstance(item_data.get("stats"), dict) else item_data.get("intellect_bonus", 0),
-        stamina_bonus=item_data.get("stats", {}).get("stamina_bonus", 0) if isinstance(item_data.get("stats"), dict) else 0,
-        xp_bonus=item_data.get("stats", {}).get("xp_bonus", 0) if isinstance(item_data.get("stats"), dict) else item_data.get("xp_bonus", 0),
-        crystal_bonus=item_data.get("stats", {}).get("crystal_bonus", 0) if isinstance(item_data.get("stats"), dict) else item_data.get("crystal_bonus", 0),
-        critical_bonus=item_data.get("stats", {}).get("critical_bonus", 0) if isinstance(item_data.get("stats"), dict) else item_data.get("critical_bonus", 0),
-        luck_bonus=item_data.get("stats", {}).get("luck_bonus", 0) if isinstance(item_data.get("stats"), dict) else item_data.get("luck_bonus", 0),
-        set_name=item_data.get("set_name"),
-        set_pieces=item_data.get("set_pieces", 1),
-        icon=item_data.get("icon", "СЂСџвЂњВ¦"),
-        price_crystals=item_data.get("price_crystals", 0),
-        required_level=item_data.get("required_level", 1),
-        required_class=item_data.get("required_class"),
-        is_unique=item_data.get("is_unique", False),
-    )
-    db.add(item)
-    db.flush()
 
-    if "weapon_stats" in item_data:
-        db.add(ItemWeaponStats(item_id=item.id, **item_data["weapon_stats"]))
-    if "armor_stats" in item_data:
-        db.add(ItemArmorStats(item_id=item.id, **item_data["armor_stats"]))
-    if "unique_ability" in item_data:
-        raw_ability = dict(item_data["unique_ability"])
-        if "critical_bonus" in raw_ability and "effect_critical_bonus" not in raw_ability:
-            raw_ability["effect_critical_bonus"] = raw_ability.get("critical_bonus")
-        if "luck_bonus" in raw_ability and "effect_luck_bonus" not in raw_ability:
-            raw_ability["effect_luck_bonus"] = raw_ability.get("luck_bonus")
-        allowed_keys = {
-            "name",
-            "description",
-            "ability_type",
-            "effect_strength",
-            "effect_agility",
-            "effect_intellect",
-            "effect_xp_bonus",
-            "effect_crystal_bonus",
-            "effect_critical_bonus",
-            "effect_luck_bonus",
-            "cooldown",
-            "duration",
-            "mana_cost",
-            "proc_chance",
-            "proc_effect",
-        }
-        ability_payload = {k: v for k, v in raw_ability.items() if k in allowed_keys}
-        db.add(ItemUniqueAbility(item_id=item.id, **ability_payload))
-
-    db.flush()
-    return item
-
-# === Р¤РЈРќРљР¦РР Р”Р›РЇ РџРћРљРЈРџРљР ===
 def buy_item(db: Session, user_id: int, item_id: int) -> bool:
-    """РџРѕРєСѓРїРєР° РїСЂРµРґРјРµС‚Р° Р·Р° Р·РѕР»РѕС‚Рѕ"""
-    item_data = find_catalog_item_data(item_id)
-    
-    if not item_data:
-        logger.warning("РџСЂРµРґРјРµС‚ РЅРµ РЅР°Р№РґРµРЅ РІ РєР°С‚Р°Р»РѕРіРµ: item_id=%s", item_id)
-        return False
-    
-    # РџСЂРѕРІРµСЂСЏРµРј, РµСЃС‚СЊ Р»Рё СѓР¶Рµ С‚Р°РєРѕР№ РїСЂРµРґРјРµС‚ РІ Р±Р°Р·Рµ РґР°РЅРЅС‹С…
-    item = db.query(Item).filter(Item.name == item_data["name"]).first()
-    if not item:
-        # РЎРѕР·РґР°РµРј РїСЂРµРґРјРµС‚ РІ Р±Р°Р·Рµ РґР°РЅРЅС‹С…
-        item = Item(
-            name=item_data["name"],
-            description=item_data["description"],
-            type=item_data["type"],
-            subclass=item_data.get("subclass"),
-            slot=item_data.get("slot"),
-            rarity=item_data["rarity"],
-            strength_bonus=item_data.get("stats", {}).get("strength_bonus", 0) if isinstance(item_data.get("stats"), dict) else item_data.get("strength_bonus", 0),
-            agility_bonus=item_data.get("stats", {}).get("agility_bonus", 0) if isinstance(item_data.get("stats"), dict) else item_data.get("agility_bonus", 0),
-            intellect_bonus=item_data.get("stats", {}).get("intellect_bonus", 0) if isinstance(item_data.get("stats"), dict) else item_data.get("intellect_bonus", 0),
-            stamina_bonus=item_data.get("stats", {}).get("stamina_bonus", 0) if isinstance(item_data.get("stats"), dict) else 0,
-            xp_bonus=item_data.get("stats", {}).get("xp_bonus", 0) if isinstance(item_data.get("stats"), dict) else item_data.get("xp_bonus", 0),
-            crystal_bonus=item_data.get("stats", {}).get("crystal_bonus", 0) if isinstance(item_data.get("stats"), dict) else item_data.get("crystal_bonus", 0),
-            critical_bonus=item_data.get("stats", {}).get("critical_bonus", 0) if isinstance(item_data.get("stats"), dict) else item_data.get("critical_bonus", 0),
-            luck_bonus=item_data.get("stats", {}).get("luck_bonus", 0) if isinstance(item_data.get("stats"), dict) else item_data.get("luck_bonus", 0),
-            set_name=item_data.get("set_name"),
-            set_pieces=item_data.get("set_pieces", 1),
-            icon=item_data.get("icon", "рџ“¦"),
-            price_crystals=item_data.get("price_crystals", 0),
-            required_level=item_data.get("required_level", 1),
-            required_class=item_data.get("required_class"),
-            is_unique=item_data.get("is_unique", False)
-        )
-        db.add(item)
-        db.flush()
-        
-        # Р”РѕР±Р°РІР»СЏРµРј СЃС‚Р°С‚РёСЃС‚РёРєСѓ РѕСЂСѓР¶РёСЏ, РµСЃР»Рё РµСЃС‚СЊ
-        if "weapon_stats" in item_data:
-            weapon_stats = ItemWeaponStats(
-                item_id=item.id,
-                **item_data["weapon_stats"]
-            )
-            db.add(weapon_stats)
-        
-        # Р”РѕР±Р°РІР»СЏРµРј СЃС‚Р°С‚РёСЃС‚РёРєСѓ Р±СЂРѕРЅРё, РµСЃР»Рё РµСЃС‚СЊ
-        if "armor_stats" in item_data:
-            armor_stats = ItemArmorStats(
-                item_id=item.id,
-                **item_data["armor_stats"]
-            )
-            db.add(armor_stats)
-        
-        # Р”РѕР±Р°РІР»СЏРµРј СѓРЅРёРєР°Р»СЊРЅС‹Рµ СЃРїРѕСЃРѕР±РЅРѕСЃС‚Рё, РµСЃР»Рё РµСЃС‚СЊ
-        if "unique_ability" in item_data:
-            raw_ability = dict(item_data["unique_ability"])
-            if "critical_bonus" in raw_ability and "effect_critical_bonus" not in raw_ability:
-                raw_ability["effect_critical_bonus"] = raw_ability.get("critical_bonus")
-            if "luck_bonus" in raw_ability and "effect_luck_bonus" not in raw_ability:
-                raw_ability["effect_luck_bonus"] = raw_ability.get("luck_bonus")
+    sync_catalog_items(db)
 
-            allowed_keys = {
-                "name",
-                "description",
-                "ability_type",
-                "effect_strength",
-                "effect_agility",
-                "effect_intellect",
-                "effect_xp_bonus",
-                "effect_crystal_bonus",
-                "effect_critical_bonus",
-                "effect_luck_bonus",
-                "cooldown",
-                "duration",
-                "mana_cost",
-                "proc_chance",
-                "proc_effect",
-            }
-            ability_payload = {k: v for k, v in raw_ability.items() if k in allowed_keys}
-            ability = ItemUniqueAbility(item_id=item.id, **ability_payload)
-            db.add(ability)
-        
-        db.flush()
-        logger.info("РЎРѕР·РґР°РЅ РЅРѕРІС‹Р№ РїСЂРµРґРјРµС‚ РІ Р‘Р”: name=%s id=%s", item.name, item.id)
-    
-    user_progress = db.query(UserClassProgress).filter(
-        UserClassProgress.user_id == user_id,
-        UserClassProgress.is_unlocked == True
-    ).first()
-    
-    if not user_progress:
-        logger.warning("РџСЂРѕРіСЂРµСЃСЃ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ РЅРµ РЅР°Р№РґРµРЅ: user_id=%s", user_id)
+    try:
+        item = ensure_catalog_item(db, item_id)
+    except EquipmentError:
+        logger.warning("Catalog item not found for purchase: item_id=%s", item_id)
         return False
-    
-    logger.debug(
-        "РџРѕРїС‹С‚РєР° РїРѕРєСѓРїРєРё РїСЂРµРґРјРµС‚Р°: user_id=%s crystals=%s price=%s item_id=%s",
-        user_id,
-        user_progress.crystals,
-        item.price_crystals,
-        item.id,
+
+    user_progress = (
+        db.query(UserClassProgress)
+        .filter(UserClassProgress.user_id == user_id, UserClassProgress.is_unlocked == True)
+        .order_by(UserClassProgress.id.asc())
+        .first()
     )
-    
+    if user_progress is None:
+        logger.warning("Character progress not found for purchase: user_id=%s", user_id)
+        return False
+
     if user_progress.level < (item.required_level or 1):
         logger.info(
-            "РџРѕРєСѓРїРєР° РѕС‚РєР»РѕРЅРµРЅР° (РЅРµРґРѕСЃС‚Р°С‚РѕС‡РЅС‹Р№ СѓСЂРѕРІРµРЅСЊ): user_id=%s level=%s required_level=%s item_id=%s",
+            "Purchase rejected because of level requirement: user_id=%s item_id=%s level=%s required_level=%s",
             user_id,
+            item.id,
             user_progress.level,
             item.required_level,
-            item.id,
         )
         return False
 
-    if user_progress.crystals < item.price_crystals:
+    if user_progress.crystals < (item.price_crystals or 0):
         logger.info(
-            "РџРѕРєСѓРїРєР° РѕС‚РєР»РѕРЅРµРЅР° (РЅРµРґРѕСЃС‚Р°С‚РѕС‡РЅРѕ РєСЂРёСЃС‚Р°Р»Р»РѕРІ): user_id=%s crystals=%s price=%s item_id=%s",
+            "Purchase rejected because of insufficient crystals: user_id=%s item_id=%s crystals=%s price=%s",
             user_id,
+            item.id,
             user_progress.crystals,
             item.price_crystals,
-            item.id,
         )
         return False
-    
-    # РџСЂРѕРІРµСЂСЏРµРј, РµСЃС‚СЊ Р»Рё СѓР¶Рµ С‚Р°РєРѕР№ РїСЂРµРґРјРµС‚ Сѓ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ (РµСЃР»Рё СѓРЅРёРєР°Р»СЊРЅС‹Р№)
+
     if item.is_unique:
-        existing = db.query(UserInventory).filter(
-            UserInventory.user_id == user_id,
-            UserInventory.item_id == item.id
-        ).first()
-        if existing:
-            logger.info("РџРѕРєСѓРїРєР° РѕС‚РєР»РѕРЅРµРЅР° (СѓРЅРёРєР°Р»СЊРЅС‹Р№ РїСЂРµРґРјРµС‚ СѓР¶Рµ РµСЃС‚СЊ): user_id=%s item_id=%s", user_id, item.id)
+        existing = (
+            db.query(UserInventory)
+            .filter(UserInventory.user_id == user_id, UserInventory.item_id == item.id)
+            .first()
+        )
+        if existing is not None:
+            logger.info("Purchase rejected because unique item already owned: user_id=%s item_id=%s", user_id, item.id)
             return False
-    
-    # РЎРїРёСЃС‹РІР°РµРј Р·РѕР»РѕС‚Рѕ
-    user_progress.crystals -= item.price_crystals
-    logger.info(
-        "РљСЂРёСЃС‚Р°Р»Р»С‹ СЃРїРёСЃР°РЅС‹: user_id=%s deducted=%s remaining=%s item_id=%s",
-        user_id,
-        item.price_crystals,
-        user_progress.crystals,
-        item.id,
-    )
-    
-    # Р”РѕР±Р°РІР»СЏРµРј РІ РёРЅРІРµРЅС‚Р°СЂСЊ
-    inventory_item = UserInventory(
-        user_id=user_id,
-        item_id=item.id,
-        quantity=1
-    )
+
+    user_progress.crystals -= item.price_crystals or 0
+    inventory_item = UserInventory(user_id=user_id, item_id=item.id, quantity=1, is_equipped=False)
     db.add(inventory_item)
     db.commit()
-    
-    logger.info("РџСЂРµРґРјРµС‚ РєСѓРїР»РµРЅ: user_id=%s item_id=%s name=%s", user_id, item.id, item.name)
+    logger.info("Item purchased: user_id=%s item_id=%s inventory_id=%s", user_id, item.id, inventory_item.id)
     return True
 
 
 def sell_item(db: Session, user_id: int, inventory_id: int) -> dict | None:
-    inventory_item = db.query(UserInventory).filter(
-        UserInventory.id == inventory_id,
-        UserInventory.user_id == user_id,
-    ).first()
-
+    inventory_item = (
+        db.query(UserInventory)
+        .filter(UserInventory.id == inventory_id, UserInventory.user_id == user_id)
+        .first()
+    )
     if not inventory_item or not inventory_item.item:
         return None
 
-    equipped_rows = db.query(CharacterEquipment).filter(
-        CharacterEquipment.user_id == user_id
-    ).all()
+    equipped_rows = db.query(CharacterEquipment).filter(CharacterEquipment.user_id == user_id).all()
     is_equipped = any(
         getattr(equipment, slot) == inventory_id
         for equipment in equipped_rows
         for slot in SLOT_FIELDS
     )
     if is_equipped:
-        raise EquipmentError("РЎРЅР°С‡Р°Р»Р° СЃРЅРёРјРёС‚Рµ РїСЂРµРґРјРµС‚")
+        raise EquipmentError("Сначала снимите предмет")
 
-    progress = db.query(UserClassProgress).filter(
-        UserClassProgress.user_id == user_id,
-        UserClassProgress.is_unlocked == True,
-    ).first()
-    if not progress:
+    progress = (
+        db.query(UserClassProgress)
+        .filter(UserClassProgress.user_id == user_id, UserClassProgress.is_unlocked == True)
+        .order_by(UserClassProgress.id.asc())
+        .first()
+    )
+    if progress is None:
         return None
 
     item = inventory_item.item
@@ -292,345 +406,65 @@ def sell_item(db: Session, user_id: int, inventory_id: int) -> dict | None:
         "sell_price": sell_price,
         "new_crystals": progress.crystals,
     }
-
     db.delete(inventory_item)
     db.commit()
     return payload
 
-# === Р¤РЈРќРљР¦РР Р”Р›РЇ Р­РљРРџРР РћР’РљР ===
-def get_or_create_character_equipment(db: Session, user_id: int, class_progress_id: int):
-    """РџРѕР»СѓС‡РёС‚СЊ РёР»Рё СЃРѕР·РґР°С‚СЊ Р·Р°РїРёСЃСЊ СЌРєРёРїРёСЂРѕРІРєРё РґР»СЏ РїРµСЂСЃРѕРЅР°Р¶Р°"""
-    equipment = db.query(CharacterEquipment).filter(
-        CharacterEquipment.user_id == user_id,
-        CharacterEquipment.class_progress_id == class_progress_id
-    ).first()
-    
-    if not equipment:
-        equipment = CharacterEquipment(
-            user_id=user_id,
-            class_progress_id=class_progress_id
-        )
-        db.add(equipment)
-        db.flush()
-        logger.info(f"РЎРѕР·РґР°РЅР° СЌРєРёРїРёСЂРѕРІРєР° РґР»СЏ РїРµСЂСЃРѕРЅР°Р¶Р° {class_progress_id}")
-    
-    return equipment
 
-def can_equip_item(db: Session, user_id: int, class_progress_id: int, inventory_id: int, target_slot: str) -> tuple[bool, str]:
-    """РџСЂРѕРІРµСЂРёС‚СЊ, РјРѕР¶РЅРѕ Р»Рё СЌРєРёРїРёСЂРѕРІР°С‚СЊ РїСЂРµРґРјРµС‚ РІ СѓРєР°Р·Р°РЅРЅС‹Р№ СЃР»РѕС‚"""
-    inventory_item = db.query(UserInventory).filter(
-        UserInventory.id == inventory_id,
-        UserInventory.user_id == user_id
-    ).first()
-    
-    if not inventory_item:
-        return False, "РџСЂРµРґРјРµС‚ РЅРµ РЅР°Р№РґРµРЅ РІ РёРЅРІРµРЅС‚Р°СЂРµ"
-    
-    item = inventory_item.item
-    
-    # РџСЂРѕРІРµСЂРєР° СѓСЂРѕРІРЅСЏ
-    progress = db.query(UserClassProgress).filter(
-        UserClassProgress.id == class_progress_id
-    ).first()
-    
-    if progress and item.required_level > progress.level:
-        return False, f"РўСЂРµР±СѓРµС‚СЃСЏ СѓСЂРѕРІРµРЅСЊ {item.required_level}"
-    
-    # РџСЂРѕРІРµСЂРєР° РєР»Р°СЃСЃР°
-    if item.required_class and progress and item.required_class != progress.class_name:
-        return False, f"Р­С‚РѕС‚ РїСЂРµРґРјРµС‚ С‚РѕР»СЊРєРѕ РґР»СЏ РєР»Р°СЃСЃР° {item.required_class}"
-    
-    # РџСЂРѕРІРµСЂРєР° СЃРѕРІРјРµСЃС‚РёРјРѕСЃС‚Рё СЃР»РѕС‚Р°
-    slot_compatibility = {
-        "head": ["armor"],
-        "neck": ["accessory"],
-        "shoulders": ["armor"],
-        "back": ["armor"],
-        "chest": ["armor"],
-        "wrist": ["armor"],
-        "hands": ["armor"],
-        "waist": ["armor"],
-        "legs": ["armor"],
-        "feet": ["armor"],
-        "ring1": ["accessory"],
-        "ring2": ["accessory"],
-        "trinket1": ["accessory"],
-        "trinket2": ["accessory"],
-        "main_hand": ["weapon"],
-        "off_hand": ["weapon", "armor"],  # РњРѕР¶РЅРѕ С‰РёС‚ РёР»Рё РѕСЂСѓР¶РёРµ
-        "ranged": ["weapon"]
-    }
-    
-    if target_slot not in slot_compatibility:
-        return False, f"РќРµРёР·РІРµСЃС‚РЅС‹Р№ СЃР»РѕС‚ {target_slot}"
-    
-    if item.type not in slot_compatibility[target_slot]:
-        return False, f"РџСЂРµРґРјРµС‚ С‚РёРїР° {item.type} РЅРµР»СЊР·СЏ СЌРєРёРїРёСЂРѕРІР°С‚СЊ РІ СЃР»РѕС‚ {target_slot}"
-    
-    # РџРѕР»СѓС‡Р°РµРј СЃС‚Р°С‚РёСЃС‚РёРєСѓ РѕСЂСѓР¶РёСЏ
-    weapon_stats = db.query(ItemWeaponStats).filter(
-        ItemWeaponStats.item_id == item.id
-    ).first()
-    
-    # РЎРїРµС†РёР°Р»СЊРЅС‹Рµ РїСЂР°РІРёР»Р° РґР»СЏ РѕСЂСѓР¶РёСЏ
-    if item.type == "weapon" and weapon_stats:
-        equipment = get_or_create_character_equipment(db, user_id, class_progress_id)
-        
-        # РџСЂРѕРІРµСЂРєР° РґРІСѓСЂСѓС‡РЅРѕРіРѕ РѕСЂСѓР¶РёСЏ
-        if weapon_stats.weapon_category == "two_hand":
-            if target_slot == "main_hand":
-                if equipment.off_hand_id:
-                    return False, "Р”РІСѓСЂСѓС‡РЅРѕРµ РѕСЂСѓР¶РёРµ РЅРµР»СЊР·СЏ РёСЃРїРѕР»СЊР·РѕРІР°С‚СЊ СЃ РїСЂРµРґРјРµС‚РѕРј РІ РґСЂСѓРіРѕР№ СЂСѓРєРµ"
-            elif target_slot == "off_hand":
-                return False, "Р”РІСѓСЂСѓС‡РЅРѕРµ РѕСЂСѓР¶РёРµ РјРѕР¶РЅРѕ СЌРєРёРїРёСЂРѕРІР°С‚СЊ С‚РѕР»СЊРєРѕ РІ РѕСЃРЅРѕРІРЅСѓСЋ СЂСѓРєСѓ"
-        
-        # РџСЂРѕРІРµСЂРєР° Р»СѓРєРѕРІ/Р°СЂР±Р°Р»РµС‚РѕРІ
-        if weapon_stats.weapon_category == "ranged":
-            if target_slot != "ranged":
-                return False, "Р”Р°Р»СЊРЅРѕР±РѕР№РЅРѕРµ РѕСЂСѓР¶РёРµ РјРѕР¶РЅРѕ СЌРєРёРїРёСЂРѕРІР°С‚СЊ С‚РѕР»СЊРєРѕ РІ СЃР»РѕС‚ РґР°Р»СЊРЅРµРіРѕ Р±РѕСЏ"
-    
-    return True, "OK"
-
-def equip_item(db: Session, user_id: int, class_progress_id: int, inventory_id: int, target_slot: str) -> bool:
-    """Р­РєРёРїРёСЂРѕРІРєР° РїСЂРµРґРјРµС‚Р°"""
-    # РџСЂРѕРІРµСЂСЏРµРј РІРѕР·РјРѕР¶РЅРѕСЃС‚СЊ СЌРєРёРїРёСЂРѕРІРєРё
-    can_equip, message = can_equip_item(db, user_id, class_progress_id, inventory_id, target_slot)
-    if not can_equip:
-        raise EquipmentError(message)
-    
-    inventory_item = db.query(UserInventory).filter(
-        UserInventory.id == inventory_id,
-        UserInventory.user_id == user_id
-    ).first()
-    
-    if not inventory_item:
-        return False
-    
-    equipment = get_or_create_character_equipment(db, user_id, class_progress_id)
-    
-    # РџРѕР»СѓС‡Р°РµРј СЃС‚Р°С‚РёСЃС‚РёРєСѓ РѕСЂСѓР¶РёСЏ
-    weapon_stats = db.query(ItemWeaponStats).filter(
-        ItemWeaponStats.item_id == inventory_item.item_id
-    ).first()
-    
-    # Р•СЃР»Рё СЌС‚Рѕ РґРІСѓСЂСѓС‡РЅРѕРµ РѕСЂСѓР¶РёРµ, РѕС‡РёС‰Р°РµРј off_hand
-    if weapon_stats and weapon_stats.weapon_category == "two_hand":
-        if equipment.off_hand_id:
-            old_off_hand = db.query(UserInventory).filter(
-                UserInventory.id == equipment.off_hand_id
-            ).first()
-            if old_off_hand:
-                old_off_hand.is_equipped = False
-            equipment.off_hand_id = None
-    
-    # РЎРЅРёРјР°РµРј СЃС‚Р°СЂС‹Р№ РїСЂРµРґРјРµС‚ РІ СЌС‚РѕРј СЃР»РѕС‚Рµ
-    old_item_id = getattr(equipment, f"{target_slot}_id")
-    if old_item_id:
-        old_item = db.query(UserInventory).filter(
-            UserInventory.id == old_item_id
-        ).first()
-        if old_item:
-            old_item.is_equipped = False
-    
-    # Р­РєРёРїРёСЂСѓРµРј РЅРѕРІС‹Р№
-    setattr(equipment, f"{target_slot}_id", inventory_id)
-    inventory_item.is_equipped = True
-    
-    # РџРµСЂРµСЃС‡РёС‚С‹РІР°РµРј РѕР±С‰РёРµ СЃС‚Р°С‚С‹
-    recalculate_total_stats(db, equipment)
-    
-    db.commit()
-    logger.info(f"РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ {user_id} СЌРєРёРїРёСЂРѕРІР°Р» РїСЂРµРґРјРµС‚ {inventory_item.item.name} РІ СЃР»РѕС‚ {target_slot}")
-    return True
-
-def unequip_item(db: Session, user_id: int, class_progress_id: int, slot: str) -> bool:
-    """РЎРЅСЏС‚СЊ РїСЂРµРґРјРµС‚ РёР· СѓРєР°Р·Р°РЅРЅРѕРіРѕ СЃР»РѕС‚Р°"""
-    equipment = get_or_create_character_equipment(db, user_id, class_progress_id)
-    
-    inventory_id = getattr(equipment, f"{slot}_id")
-    if not inventory_id:
-        return False
-    
-    inventory_item = db.query(UserInventory).filter(
-        UserInventory.id == inventory_id
-    ).first()
-    
-    if inventory_item:
-        inventory_item.is_equipped = False
-    
-    setattr(equipment, f"{slot}_id", None)
-    
-    # РџРµСЂРµСЃС‡РёС‚С‹РІР°РµРј СЃС‚Р°С‚С‹
-    recalculate_total_stats(db, equipment)
-    
-    db.commit()
-    logger.info(f"РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ {user_id} СЃРЅСЏР» РїСЂРµРґРјРµС‚ РёР· СЃР»РѕС‚Р° {slot}")
-    return True
-
-def recalculate_total_stats(db: Session, equipment: CharacterEquipment):
-    """РџРµСЂРµСЃС‡РёС‚Р°С‚СЊ РѕР±С‰РёРµ СЃС‚Р°С‚С‹ РїРµСЂСЃРѕРЅР°Р¶Р° РѕС‚ РІСЃРµР№ СЌРєРёРїРёСЂРѕРІРєРё"""
-    total_strength = 0
-    total_agility = 0
-    total_intellect = 0
-    total_stamina = 0
-    total_armor = 0
-    total_dps = 0
-    
-    # РЎРѕР±РёСЂР°РµРј РІСЃРµ СЌРєРёРїРёСЂРѕРІР°РЅРЅС‹Рµ РїСЂРµРґРјРµС‚С‹
-    slots = [
-        'head', 'neck', 'shoulders', 'back', 'chest', 'wrist',
-        'hands', 'waist', 'legs', 'feet', 'ring1', 'ring2',
-        'trinket1', 'trinket2', 'main_hand', 'off_hand', 'ranged'
-    ]
-    
-    for slot in slots:
-        inv_id = getattr(equipment, f"{slot}_id")
-        if inv_id:
-            inv_item = db.query(UserInventory).filter(
-                UserInventory.id == inv_id
-            ).first()
-            
-            if inv_item and inv_item.item:
-                item = inv_item.item
-                total_strength += item.strength_bonus or 0
-                total_agility += item.agility_bonus or 0
-                total_intellect += item.intellect_bonus or 0
-                total_stamina += item.stamina_bonus or 0
-                
-                # Р‘СЂРѕРЅСЏ
-                armor_stats = db.query(ItemArmorStats).filter(
-                    ItemArmorStats.item_id == item.id
-                ).first()
-                if armor_stats:
-                    total_armor += armor_stats.armor_value or 0
-                
-                # РћСЂСѓР¶РёРµ
-                weapon_stats = db.query(ItemWeaponStats).filter(
-                    ItemWeaponStats.item_id == item.id
-                ).first()
-                if weapon_stats:
-                    total_dps += weapon_stats.dps or 0
-    
-    equipment.total_strength = total_strength
-    equipment.total_agility = total_agility
-    equipment.total_intellect = total_intellect
-    equipment.total_stamina = total_stamina
-    equipment.total_armor = total_armor
-    equipment.total_dps = total_dps
-    
-    # Р Р°СЃСЃС‡РёС‚С‹РІР°РµРј Р·РґРѕСЂРѕРІСЊРµ (Р±Р°Р·РѕРІРѕРµ 100 + СЃС‚Р°РјРёРЅР° * 10)
-    equipment.total_health = 100 + (total_stamina * 10)
-
-def get_equipped_items(db: Session, user_id: int, class_progress_id: int):
-    """РџРѕР»СѓС‡РёС‚СЊ РІСЃРµ СЌРєРёРїРёСЂРѕРІР°РЅРЅС‹Рµ РїСЂРµРґРјРµС‚С‹ СЃРѕ СЃС‚Р°С‚Р°РјРё"""
-    equipment = get_or_create_character_equipment(db, user_id, class_progress_id)
-    
-    result = {}
-    slots = [
-        'head', 'neck', 'shoulders', 'back', 'chest', 'wrist',
-        'hands', 'waist', 'legs', 'feet', 'ring1', 'ring2',
-        'trinket1', 'trinket2', 'main_hand', 'off_hand', 'ranged'
-    ]
-    
-    for slot in slots:
-        inv_id = getattr(equipment, f"{slot}_id")
-        if inv_id:
-            inv_item = db.query(UserInventory).filter(
-                UserInventory.id == inv_id
-            ).first()
-            if inv_item:
-                item = inv_item.item
-                weapon_stats = db.query(ItemWeaponStats).filter(
-                    ItemWeaponStats.item_id == item.id
-                ).first()
-                armor_stats = db.query(ItemArmorStats).filter(
-                    ItemArmorStats.item_id == item.id
-                ).first()
-                abilities = db.query(ItemUniqueAbility).filter(
-                    ItemUniqueAbility.item_id == item.id
-                ).all()
-                
-                result[slot] = {
-                    "inventory_id": inv_item.id,
-                    "item": item,
-                    "weapon_stats": weapon_stats,
-                    "armor_stats": armor_stats,
-                    "abilities": abilities
-                }
-    
-    return {
-        "equipment": result,
-        "totals": {
-            "strength": equipment.total_strength,
-            "agility": equipment.total_agility,
-            "intellect": equipment.total_intellect,
-            "stamina": equipment.total_stamina,
-            "armor": equipment.total_armor,
-            "dps": equipment.total_dps,
-            "health": equipment.total_health
-        }
-    }
-
-def calculate_set_bonus(db: Session, user_id: int):
-    """Р Р°СЃСЃС‡РёС‚С‹РІР°РµС‚ Р±РѕРЅСѓСЃС‹ РѕС‚ СЌРєРёРїРёСЂРѕРІР°РЅРЅС‹С… СЃРµС‚РѕРІ"""
+def calculate_set_bonus(db: Session, user_id: int) -> dict:
     equipment = db.query(CharacterEquipment).filter(CharacterEquipment.user_id == user_id).first()
-    if not equipment:
+    if equipment is None:
         return {}
-    
-    # РЎРѕР±РёСЂР°РµРј РІСЃРµ СЌРєРёРїРёСЂРѕРІР°РЅРЅС‹Рµ РїСЂРµРґРјРµС‚С‹
-    equipped_items = []
-    for slot in ['head_id', 'neck_id', 'shoulders_id', 'back_id', 'chest_id', 
-                 'wrist_id', 'hands_id', 'waist_id', 'legs_id', 'feet_id',
-                 'ring1_id', 'ring2_id', 'trinket1_id', 'trinket2_id',
-                 'main_hand_id', 'off_hand_id', 'ranged_id']:
-        item_id = getattr(equipment, slot)
-        if item_id:
-            inv_item = db.query(UserInventory).filter(
-                UserInventory.id == item_id,
-                UserInventory.user_id == user_id
-            ).first()
-            if inv_item and inv_item.item:
-                equipped_items.append(inv_item.item)
-    
-    # Р“СЂСѓРїРїРёСЂСѓРµРј РїРѕ СЃРµС‚Р°Рј
-    sets = {}
+
+    equipped_items: list[Item] = []
+    for slot in SLOT_FIELDS:
+        inventory_id = getattr(equipment, slot)
+        if not inventory_id:
+            continue
+        inventory_item = (
+            db.query(UserInventory)
+            .filter(UserInventory.id == inventory_id, UserInventory.user_id == user_id)
+            .first()
+        )
+        if inventory_item and inventory_item.item:
+            equipped_items.append(inventory_item.item)
+
+    sets: dict[str, dict] = {}
     for item in equipped_items:
-        if item.set_name:
-            if item.set_name not in sets:
-                sets[item.set_name] = {
-                    'pieces': [],
-                    'total': item.set_pieces
-                }
-            sets[item.set_name]['pieces'].append(item)
-    
-    # Р Р°СЃСЃС‡РёС‚С‹РІР°РµРј Р±РѕРЅСѓСЃС‹
+        if not item.set_name:
+            continue
+        if item.set_name not in sets:
+            sets[item.set_name] = {
+                "pieces": [],
+                "total": item.set_pieces,
+            }
+        sets[item.set_name]["pieces"].append(item)
+
     bonuses = {}
     for set_name, data in sets.items():
-        piece_count = len(data['pieces'])
-        if set_name in SET_BONUSES:
-            set_bonus = SET_BONUSES[set_name]
-            # РќР°С…РѕРґРёРј РјР°РєСЃРёРјР°Р»СЊРЅС‹Р№ Р±РѕРЅСѓСЃ РґР»СЏ РЅР°РґРµС‚РѕРіРѕ РєРѕР»РёС‡РµСЃС‚РІР° С‡Р°СЃС‚РµР№
-            max_pieces = 0
-            for pieces_needed in set_bonus["pieces"].keys():
-                if piece_count >= pieces_needed and pieces_needed > max_pieces:
-                    max_pieces = pieces_needed
-            
-            if max_pieces > 0:
-                bonuses[set_name] = {
-                    "name": set_bonus["name"],
-                    "description": set_bonus["description"],
-                    "bonus": set_bonus["pieces"][max_pieces],
-                    "active_pieces": max_pieces,
-                }
-                logger.info(f"РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ {user_id} Р°РєС‚РёРІРёСЂРѕРІР°Р» Р±РѕРЅСѓСЃ СЃРµС‚Р° {set_name} ({max_pieces} С‡Р°СЃС‚РµР№)")
-    
+        if set_name not in SET_BONUSES:
+            continue
+        piece_count = len(data["pieces"])
+        set_bonus = SET_BONUSES[set_name]
+        max_pieces = 0
+        for pieces_needed in set_bonus["pieces"].keys():
+            if piece_count >= pieces_needed and pieces_needed > max_pieces:
+                max_pieces = pieces_needed
+        if max_pieces <= 0:
+            continue
+        bonuses[set_name] = {
+            "name": set_bonus["name"],
+            "description": set_bonus["description"],
+            "bonus": set_bonus["pieces"][max_pieces],
+            "active_pieces": max_pieces,
+        }
     return bonuses
 
+
 def apply_item_bonuses(progress, items):
-    """РџСЂРёРјРµРЅСЏРµС‚ Р±РѕРЅСѓСЃС‹ РїСЂРµРґРјРµС‚РѕРІ Рє РїСЂРѕРіСЂРµСЃСЃСѓ РїРµСЂСЃРѕРЅР°Р¶Р°"""
     if not items:
         return progress
-    
+
     for item in items:
         if item.strength_bonus:
             progress.strength += item.strength_bonus
@@ -638,6 +472,5 @@ def apply_item_bonuses(progress, items):
             progress.agility += item.agility_bonus
         if item.intellect_bonus:
             progress.intellect += item.intellect_bonus
-    
-    return progress
 
+    return progress

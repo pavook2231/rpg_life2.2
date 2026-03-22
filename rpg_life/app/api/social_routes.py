@@ -54,6 +54,17 @@ async def send_friend_request(
     return social_service.send_friend_request(db, current_user, payload.receiver_id)
 
 
+@router.post("/friends/add")
+async def add_friend(
+    request: Request,
+    payload: FriendRequestCreateSchema,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(auth.get_current_user),
+):
+    await enforce_rate_limit(request, bucket="social-friend-request", limit=10, window_seconds=60)
+    return social_service.send_friend_request(db, current_user, payload.receiver_id)
+
+
 @router.post("/friends/accept")
 async def respond_friend_request(
     request: Request,
@@ -63,6 +74,30 @@ async def respond_friend_request(
 ):
     await enforce_rate_limit(request, bucket="social-friend-response", limit=20, window_seconds=60)
     return social_service.respond_friend_request(db, current_user, payload.request_id, payload.action)
+
+
+@router.post("/friends/decline")
+async def decline_friend_request(
+    request: Request,
+    payload: FriendRequestRespondSchema,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(auth.get_current_user),
+):
+    await enforce_rate_limit(request, bucket="social-friend-response", limit=20, window_seconds=60)
+    return social_service.respond_friend_request(db, current_user, payload.request_id, "decline")
+
+
+@router.get("/friends")
+async def get_friends(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    search: str | None = None,
+    sort_by: str = "name",
+    sort_order: str = "asc",
+    db: Session = Depends(get_db),
+    current_user: User = Depends(auth.get_current_user),
+):
+    return social_service.list_friends(db, current_user, page, page_size, search, sort_by, sort_order)
 
 
 @router.get("/friends/list")
@@ -144,7 +179,7 @@ async def get_pvp_result(
 @router.get("/leaderboard/global")
 async def get_global_leaderboard(
     request: Request,
-    metric: str = "level",
+    metric: str = "power",
     period: str = Query("all_time", pattern="^(all_time|weekly|season)$"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
@@ -152,13 +187,13 @@ async def get_global_leaderboard(
     current_user: User = Depends(auth.get_current_user),
 ):
     await enforce_rate_limit(request, bucket="social-leaderboard", limit=60, window_seconds=60)
-    return social_service.get_global_leaderboard(db, metric, page, page_size, period)
+    return social_service.get_global_leaderboard(db, metric, page, page_size, period, current_user.id)
 
 
 @router.get("/leaderboard/friends")
 async def get_friends_leaderboard(
     request: Request,
-    metric: str = "level",
+    metric: str = "power",
     period: str = Query("all_time", pattern="^(all_time|weekly|season)$"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),

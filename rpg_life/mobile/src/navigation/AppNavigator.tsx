@@ -9,7 +9,7 @@ import { useTranslation } from "../context/LocalizationContext";
 import { AchievementsScreen } from "../screens/AchievementsScreen";
 import { CharacterScreen } from "../screens/CharacterScreen";
 import { CoopQuestsScreen } from "../screens/CoopQuestsScreen";
-import { FriendsStableScreen } from "../screens/FriendsStableScreen";
+import { FriendsScreen } from "../screens/FriendsScreen";
 import { GoalSelectScreen } from "../screens/GoalSelectScreen";
 import { HelpScreen } from "../screens/HelpScreen";
 import { HomeScreen } from "../screens/HomeScreen";
@@ -310,7 +310,7 @@ export function AppNavigator() {
           <Stack.Screen name="RewardScreen" component={AchievementsScreen} options={{ title: "Награды" }} />
           <Stack.Screen name="SkillTree" component={CharacterScreen} options={{ title: "Навыки" }} />
           <Stack.Screen name="Stats" component={CharacterScreen} options={{ title: "Статы" }} />
-          <Stack.Screen name="Friends" component={FriendsStableScreen} options={{ title: t("screens.friends.title") }} />
+          <Stack.Screen name="Friends" component={FriendsScreen} options={{ title: t("screens.friends.title") }} />
           <Stack.Screen name="Leaderboard" component={LeaderboardScreen} options={{ title: t("screens.leaderboard.title") }} />
           <Stack.Screen name="Settings" component={SettingsScreen} options={{ title: t("screens.settings.title") }} />
           <Stack.Screen name="Achievements" component={AchievementsScreen} options={{ title: t("screens.profile.achievements") }} />
