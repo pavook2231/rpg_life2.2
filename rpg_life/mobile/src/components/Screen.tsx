@@ -47,6 +47,8 @@ export function Screen({
       paddingBottom: insets.bottom + spacing.xl + contentBottomInset,
     },
   ];
+  const bodyStyle = [styles.body, { marginTop: contentTopOffset }, !scrollable ? styles.bodyStatic : null];
+  const staticContentStyle = [...contentStyle, styles.contentStatic];
 
   const content = (
     <>
@@ -60,7 +62,7 @@ export function Screen({
           {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
         </View>
       ) : null}
-      <View style={[styles.body, { marginTop: contentTopOffset }]}>{children}</View>
+      <View style={bodyStyle}>{children}</View>
     </>
   );
 
@@ -74,7 +76,7 @@ export function Screen({
                 {content}
               </ScrollView>
             ) : (
-              <View style={contentStyle}>{content}</View>
+              <View style={staticContentStyle}>{content}</View>
             )}
           </View>
         </ImageBackground>
@@ -87,7 +89,7 @@ export function Screen({
               {content}
             </ScrollView>
           ) : (
-            <View style={contentStyle}>{content}</View>
+            <View style={staticContentStyle}>{content}</View>
           )}
         </View>
       )}
@@ -119,6 +121,10 @@ function createStyles(colors: ReturnType<typeof useThemeColors>, themeMode: Retu
       paddingHorizontal: spacing.md,
       flexGrow: 1,
     },
+    contentStatic: {
+      flex: 1,
+      minHeight: 0,
+    },
     header: {
       gap: 8,
       marginTop: spacing.xs,
@@ -146,6 +152,10 @@ function createStyles(colors: ReturnType<typeof useThemeColors>, themeMode: Retu
     },
     body: {
       gap: 14,
+    },
+    bodyStatic: {
+      flex: 1,
+      minHeight: 0,
     },
     title: {
       color: colors.text,
