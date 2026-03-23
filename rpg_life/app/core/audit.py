@@ -5,11 +5,14 @@ import logging
 import threading
 from collections import defaultdict, deque
 from datetime import datetime, timedelta
+from urllib import parse as urllib_parse
+from urllib import request as urllib_request
 
 from sqlalchemy.orm import Session
 from starlette.requests import Request
 
 from app.core import security
+from app.core.config import TELEGRAM_AUDIT_ALERTS_ENABLED, TELEGRAM_AUDIT_BOT_TOKEN, TELEGRAM_AUDIT_CHAT_ID
 from app.core.dates import utc_now
 from app.models import ApiAuditEvent, User
 
@@ -46,6 +49,8 @@ class _FailureBurstTracker:
 
 
 _failure_tracker = _FailureBurstTracker()
+_alert_sent_at: dict[str, datetime] = {}
+_alert_lock = threading.Lock()
 
 
 def _client_ip(request: Request) -> str | None:
@@ -71,6 +76,59 @@ def _resolve_user_identity(db: Session, request: Request) -> tuple[int | None, s
     if not user:
         return None, str(email)
     return int(user.id), str(user.email)
+
+
+def _send_telegram_alert(message: str) -> None:
+    if not (TELEGRAM_AUDIT_ALERTS_ENABLED and TELEGRAM_AUDIT_BOT_TOKEN and TELEGRAM_AUDIT_CHAT_ID):
+        return
+    url = f"https://api.telegram.org/bot{TELEGRAM_AUDIT_BOT_TOKEN}/sendMessage"
+    payload = urllib_parse.urlencode(
+        {
+            "chat_id": TELEGRAM_AUDIT_CHAT_ID,
+            "text": message[:3900],
+            "disable_web_page_preview": "true",
+        }
+    ).encode("utf-8")
+    req = urllib_request.Request(url, data=payload, method="POST")
+    req.add_header("Content-Type", "application/x-www-form-urlencoded")
+    with urllib_request.urlopen(req, timeout=5) as response:
+        response.read()
+
+
+def _maybe_send_telegram_alert(
+    *,
+    method: str,
+    path: str,
+    status_code: int,
+    severity: str,
+    reason: str | None,
+    user_id: int | None,
+    ip_address: str | None,
+) -> None:
+    if severity not in {"warning", "critical"}:
+        return
+    alert_key = f"{severity}:{reason or 'none'}:{method}:{path}:{status_code}"
+    now = utc_now()
+    with _alert_lock:
+        last_sent = _alert_sent_at.get(alert_key)
+        if last_sent and now - last_sent < timedelta(seconds=60):
+            return
+        _alert_sent_at[alert_key] = now
+    message = (
+        "RPG Life audit alert\n"
+        f"severity: {severity}\n"
+        f"reason: {reason or '-'}\n"
+        f"method: {method}\n"
+        f"path: {path}\n"
+        f"status: {status_code}\n"
+        f"user_id: {user_id or '-'}\n"
+        f"ip: {ip_address or '-'}\n"
+        f"time: {now.isoformat()}"
+    )
+    try:
+        _send_telegram_alert(message)
+    except Exception:
+        logger.exception("Failed to send Telegram audit alert")
 
 
 def classify_write_event(
@@ -178,4 +236,13 @@ def audit_api_write_request(
             user_id,
             reason,
             failure_burst_count,
+        )
+        _maybe_send_telegram_alert(
+            method=method,
+            path=path,
+            status_code=status_code,
+            severity=severity,
+            reason=reason,
+            user_id=user_id,
+            ip_address=_client_ip(request),
         )

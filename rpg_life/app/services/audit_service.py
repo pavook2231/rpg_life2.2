@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import csv
+import io
 import json
 from datetime import datetime
 
@@ -93,3 +95,75 @@ def list_audit_events(
             "total_pages": max(1, (total + page_size - 1) // page_size),
         },
     }
+
+
+def export_audit_events_csv(
+    db: Session,
+    *,
+    user_id: int | None = None,
+    user_email: str | None = None,
+    path: str | None = None,
+    method: str | None = None,
+    severity: str | None = None,
+    status_code: int | None = None,
+    created_from: datetime | None = None,
+    created_to: datetime | None = None,
+    limit: int = 5000,
+) -> str:
+    payload = list_audit_events(
+        db,
+        page=1,
+        page_size=max(1, min(int(limit or 1), 10_000)),
+        user_id=user_id,
+        user_email=user_email,
+        path=path,
+        method=method,
+        severity=severity,
+        status_code=status_code,
+        created_from=created_from,
+        created_to=created_to,
+    )
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(
+        [
+            "id",
+            "created_at",
+            "severity",
+            "reason",
+            "status_code",
+            "method",
+            "path",
+            "user_id",
+            "user_email",
+            "ip_address",
+            "duration_ms",
+        ]
+    )
+    for row in payload["items"]:
+        writer.writerow(
+            [
+                row["id"],
+                row["created_at"],
+                row["severity"],
+                row["reason"] or "",
+                row["status_code"],
+                row["method"],
+                row["path"],
+                row["user_id"] or "",
+                row["user_email"] or "",
+                row["ip_address"] or "",
+                row["duration_ms"] if row["duration_ms"] is not None else "",
+            ]
+        )
+    return output.getvalue()
+
+
+def purge_audit_events(db: Session, *, older_than: datetime) -> dict:
+    deleted = (
+        db.query(ApiAuditEvent)
+        .filter(ApiAuditEvent.created_at < older_than)
+        .delete(synchronize_session=False)
+    )
+    db.commit()
+    return {"deleted": int(deleted), "older_than": older_than.isoformat()}

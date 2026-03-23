@@ -61,3 +61,14 @@ def test_audit_api_write_request_ignores_non_write_methods(db_session) -> None:
     audit.audit_api_write_request(db_session, request=request, status_code=200, duration_ms=5)
 
     assert db_session.query(ApiAuditEvent).count() == 0
+
+
+def test_audit_api_write_request_triggers_alert_hook_for_warning(monkeypatch, db_session) -> None:
+    request = _request("POST", "/api/v1/items/buy")
+    sent: list[str] = []
+
+    monkeypatch.setattr(audit, "_maybe_send_telegram_alert", lambda **kwargs: sent.append(kwargs.get("severity", "")))
+
+    audit.audit_api_write_request(db_session, request=request, status_code=400, duration_ms=11)
+
+    assert sent == ["warning"]
