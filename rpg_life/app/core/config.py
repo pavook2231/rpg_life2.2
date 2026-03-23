@@ -58,7 +58,15 @@ APP_ENV = os.getenv("APP_ENV", "development").strip().lower()
 IS_PRODUCTION = APP_ENV == "production"
 SECRET_KEY = os.getenv("SECRET_KEY", "change-me-in-prod")
 ALGORITHM = os.getenv("ALGORITHM", "HS256")
-ACCESS_TOKEN_EXPIRE_DELTA = timedelta(days=int(os.getenv("ACCESS_TOKEN_EXPIRE_DAYS", "7")))
+_access_token_expire_minutes = os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES")
+_access_token_expire_days = os.getenv("ACCESS_TOKEN_EXPIRE_DAYS")
+if _access_token_expire_minutes:
+    ACCESS_TOKEN_EXPIRE_DELTA = timedelta(minutes=int(_access_token_expire_minutes))
+elif _access_token_expire_days:
+    ACCESS_TOKEN_EXPIRE_DELTA = timedelta(days=int(_access_token_expire_days))
+else:
+    # Secure-by-default for fresh environments that do not define token TTL.
+    ACCESS_TOKEN_EXPIRE_DELTA = timedelta(minutes=30)
 ALLOW_SQLITE_FALLBACK = _env_bool("ALLOW_SQLITE_FALLBACK", True)
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./app.db")
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")

@@ -778,7 +778,10 @@ async def register_notification_device(
     payload: PushDeviceRegisterSchema,
     db: Session = Depends(get_db),
     current_user: User = Depends(auth.get_current_user),
+    request: Request = None,
 ):
+    if request is not None:
+        await enforce_rate_limit(request, bucket="mobile-push-register", limit=30, window_seconds=60)
     return success_response(
         notification_service.register_push_device(db, current_user, payload),
         "Push device registered",
@@ -790,7 +793,10 @@ async def unregister_notification_device(
     payload: PushDeviceUnregisterSchema,
     db: Session = Depends(get_db),
     current_user: User = Depends(auth.get_current_user),
+    request: Request = None,
 ):
+    if request is not None:
+        await enforce_rate_limit(request, bucket="mobile-push-unregister", limit=30, window_seconds=60)
     return success_response(
         notification_service.unregister_push_device(db, current_user, payload.push_token),
         "Push device unregistered",
@@ -807,7 +813,10 @@ async def sync_steps(
     payload: StepsSyncSchema,
     db: Session = Depends(get_db),
     current_user: User = Depends(auth.get_current_user),
+    request: Request = None,
 ):
+    if request is not None:
+        await enforce_rate_limit(request, bucket="mobile-steps-sync", limit=30, window_seconds=60)
     return success_response(mobile_service.sync_today_steps(db, current_user, payload.steps, payload.day_started_at, payload.source))
 
 
@@ -903,7 +912,10 @@ async def equip_inventory_item(
     payload: InventoryActionSchema,
     db: Session = Depends(get_db),
     current_user: User = Depends(auth.get_current_user),
+    request: Request = None,
 ):
+    if request is not None:
+        await enforce_rate_limit(request, bucket="mobile-equip-write", limit=30, window_seconds=60)
     return success_response(
         mobile_service.equip_item(db, current_user, payload.inventory_id, payload.slot or "", payload.class_progress_id),
         "РџСЂРµРґРјРµС‚ СЌРєРёРїРёСЂРѕРІР°РЅ",
@@ -915,7 +927,10 @@ async def equip_item_alias(
     payload: InventoryActionSchema,
     db: Session = Depends(get_db),
     current_user: User = Depends(auth.get_current_user),
+    request: Request = None,
 ):
+    if request is not None:
+        await enforce_rate_limit(request, bucket="mobile-equip-write", limit=30, window_seconds=60)
     return success_response(
         mobile_service.equip_user_item(db, current_user, payload.inventory_id, payload.slot or "", payload.class_progress_id),
         "Item equipped",
@@ -1014,7 +1029,10 @@ async def buy_shop_item(
     payload: ShopPurchaseSchema,
     db: Session = Depends(get_db),
     current_user: User = Depends(auth.get_current_user),
+    request: Request = None,
 ):
+    if request is not None:
+        await enforce_rate_limit(request, bucket="mobile-shop-buy", limit=20, window_seconds=60)
     return success_response(mobile_service.buy_shop_item(db, current_user, payload.item_id), "РџРѕРєСѓРїРєР° РІС‹РїРѕР»РЅРµРЅР°")
 
 
@@ -1023,7 +1041,10 @@ async def buy_item_alias(
     payload: ShopPurchaseSchema,
     db: Session = Depends(get_db),
     current_user: User = Depends(auth.get_current_user),
+    request: Request = None,
 ):
+    if request is not None:
+        await enforce_rate_limit(request, bucket="mobile-shop-buy", limit=20, window_seconds=60)
     return success_response(mobile_service.buy_catalog_item(db, current_user, payload.item_id), "Item purchased")
 
 
@@ -1046,7 +1067,10 @@ async def sell_inventory_item(
     payload: InventoryActionSchema,
     db: Session = Depends(get_db),
     current_user: User = Depends(auth.get_current_user),
+    request: Request = None,
 ):
+    if request is not None:
+        await enforce_rate_limit(request, bucket="mobile-inventory-sell", limit=20, window_seconds=60)
     return success_response(mobile_service.sell_inventory_item(db, current_user, payload.inventory_id), "РџСЂРµРґРјРµС‚ РїСЂРѕРґР°РЅ")
 
 
@@ -1055,7 +1079,10 @@ async def unequip_inventory_item(
     payload: InventoryActionSchema,
     db: Session = Depends(get_db),
     current_user: User = Depends(auth.get_current_user),
+    request: Request = None,
 ):
+    if request is not None:
+        await enforce_rate_limit(request, bucket="mobile-equip-write", limit=30, window_seconds=60)
     return success_response(mobile_service.unequip_inventory_item(db, current_user, payload.inventory_id), "РџСЂРµРґРјРµС‚ СЃРЅСЏС‚")
 
 
@@ -1073,7 +1100,10 @@ async def complete_quest(
     quest_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(auth.get_current_user),
+    request: Request = None,
 ):
+    if request is not None:
+        await enforce_rate_limit(request, bucket="mobile-quest-complete", limit=20, window_seconds=60)
     return success_response(quest_service.complete_quest(db, current_user.id, quest_id), "Р—Р°РґР°РЅРёРµ РІС‹РїРѕР»РЅРµРЅРѕ")
 
 
