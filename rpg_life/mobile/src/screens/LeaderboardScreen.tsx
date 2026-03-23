@@ -17,7 +17,7 @@ import { getScopeLabel, translateOrFallback } from "../features/leaderboard/util
 import { Button } from "../ui";
 import { useThemeColors } from "../ui/theme";
 
-export function LeaderboardScreen() {
+function LeaderboardScreenContent() {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const { profile } = useGameProgress();
@@ -167,6 +167,27 @@ export function LeaderboardScreen() {
       </ScrollView>
       </ScreenRenderBoundary>
     </Screen>
+  );
+}
+
+export function LeaderboardScreen() {
+  return (
+    <ScreenRenderBoundary
+      fallback={({ error, reset }) => (
+        <Screen title="Лидерборд" subtitle="Ошибка рендера рейтинга." scrollable={false}>
+          <StateBlock
+            tone="warning"
+            icon="alert-circle"
+            title="Не удалось открыть лидерборд"
+            description={error.message || "Произошла ошибка рендера. Попробуй повторить."}
+            actionLabel="Повторить"
+            onAction={reset}
+          />
+        </Screen>
+      )}
+    >
+      <LeaderboardScreenContent />
+    </ScreenRenderBoundary>
   );
 }
 

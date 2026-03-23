@@ -19,7 +19,7 @@ import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
 import { radii, useThemeColors } from "../ui/theme";
 
-export function FriendsScreen() {
+function FriendsScreenContent() {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const { profile, refreshGame } = useGameProgress();
@@ -430,6 +430,27 @@ export function FriendsScreen() {
       </ScrollView>
       </ScreenRenderBoundary>
     </Screen>
+  );
+}
+
+export function FriendsScreen() {
+  return (
+    <ScreenRenderBoundary
+      fallback={({ error, reset }) => (
+        <Screen title="Друзья" subtitle="Ошибка рендера раздела друзей." scrollable={false}>
+          <StateBlock
+            tone="warning"
+            icon="alert-circle"
+            title="Не удалось открыть раздел друзей"
+            description={error.message || "Произошла ошибка рендера. Попробуй повторить."}
+            actionLabel="Повторить"
+            onAction={reset}
+          />
+        </Screen>
+      )}
+    >
+      <FriendsScreenContent />
+    </ScreenRenderBoundary>
   );
 }
 
