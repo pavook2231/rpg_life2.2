@@ -2,6 +2,7 @@ import { useFocusEffect } from "@react-navigation/native";
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { loadLeaderboardMe, loadLeaderboardPage, type LeaderboardResponse, type LeaderboardScope } from "./leaderboardService";
+import { sanitizeLeaderboardMeResponse, sanitizeLeaderboardResponse } from "./normalize";
 import type { LeaderboardEntry, LeaderboardRouteParams } from "./types";
 
 function getErrorMessage(error: unknown, fallback: string) {
@@ -72,12 +73,13 @@ export function useLeaderboardScreenState({
         throw listResult.reason;
       }
 
-      setPayload(listResult.value);
-      setItems(listResult.value.items ?? []);
+      const sanitizedList = sanitizeLeaderboardResponse(listResult.value);
+      setPayload(sanitizedList);
+      setItems(sanitizedList.items ?? []);
       setError(null);
 
       if (meResult.status === "fulfilled") {
-        setMeEntry(meResult.value.item ?? null);
+        setMeEntry(sanitizeLeaderboardMeResponse(meResult.value)?.item ?? null);
       } else {
         setMeEntry(null);
       }
@@ -111,7 +113,7 @@ export function useLeaderboardScreenState({
 
     setLoadingMore(true);
     try {
-      const nextPayload = await loadLeaderboardPage(scope, payload.pagination.page + 1);
+      const nextPayload = sanitizeLeaderboardResponse(await loadLeaderboardPage(scope, payload.pagination.page + 1));
       setItems((current) => mergeEntries(current, nextPayload.items ?? []));
       setPayload((current) => {
         if (!current) {

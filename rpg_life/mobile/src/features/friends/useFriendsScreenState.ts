@@ -11,6 +11,8 @@ import {
   sendFriendRequest,
 } from "../../api/social";
 import { useTranslation } from "../../context/LocalizationContext";
+import { sanitizeLeaderboardEntries } from "../leaderboard/normalize";
+import { sanitizeFriendItems, sanitizeFriendRequestItems, sanitizeSocialUserPreview, sanitizeUserSearchResults } from "./normalize";
 import type {
   FriendItem,
   FriendRequestItem,
@@ -116,6 +118,10 @@ export function useFriendsScreenState({ refreshGame, routeParams }: UseFriendsSc
   const discoverRequestRef = useRef(0);
   const socialGraphRequestRef = useRef(0);
   const searchRequestRef = useRef(0);
+  const friendsRef = useRef<FriendItem[]>([]);
+  const requestsRef = useRef<FriendRequestItem[]>([]);
+  const searchQueryRef = useRef("");
+  const searchSubmittedRef = useRef(false);
 
   const [activeTab, setActiveTab] = useState<FriendsTabKey>("friends");
   const [friends, setFriends] = useState<FriendItem[]>([]);
@@ -154,6 +160,22 @@ export function useFriendsScreenState({ refreshGame, routeParams }: UseFriendsSc
   const socialGraphError = friendsError ?? requestsError;
   const discoverActionsReady = socialGraphReady && !socialGraphLoading;
 
+  useEffect(() => {
+    friendsRef.current = friends;
+  }, [friends]);
+
+  useEffect(() => {
+    requestsRef.current = requests;
+  }, [requests]);
+
+  useEffect(() => {
+    searchQueryRef.current = searchQuery;
+  }, [searchQuery]);
+
+  useEffect(() => {
+    searchSubmittedRef.current = searchSubmitted;
+  }, [searchSubmitted]);
+
   const loadSocialGraph = useCallback(async (): Promise<SocialGraphSnapshot | null> => {
     const requestId = ++socialGraphRequestRef.current;
     setFriendsLoading(true);
@@ -183,8 +205,8 @@ export function useFriendsScreenState({ refreshGame, routeParams }: UseFriendsSc
       }
 
       const nextSnapshot = {
-        friends: friendsResult.value.items ?? [],
-        requests: requestsResult.value.items ?? [],
+        friends: sanitizeFriendItems(friendsResult.value.items),
+        requests: sanitizeFriendRequestItems(requestsResult.value.items),
       };
 
       setFriends(nextSnapshot.friends);
@@ -217,7 +239,10 @@ export function useFriendsScreenState({ refreshGame, routeParams }: UseFriendsSc
     setDiscoverLoading(true);
     setDiscoverError(null);
     try {
-      const socialGraph = options?.socialGraph ?? { friends, requests };
+      const socialGraph = options?.socialGraph ?? {
+        friends: friendsRef.current,
+        requests: requestsRef.current,
+      };
       const excludedUserIds = buildDiscoverExcludedUserIds(socialGraph.friends, socialGraph.requests);
       const collectedUsers: UserSearchResult[] = [];
       const seenUserIds = new Set<number>();
@@ -228,9 +253,10 @@ export function useFriendsScreenState({ refreshGame, routeParams }: UseFriendsSc
         const payload = await fetchLeaderboard("power", "global", page, DISCOVER_PAGE_SIZE, "all_time", {
           forceRefresh: options?.forceRefresh,
         });
+        const leaderboardEntries = sanitizeLeaderboardEntries(payload.items);
         totalPages = Math.max(payload.pagination?.total_pages ?? 1, 1);
 
-        for (const entry of payload.items ?? []) {
+        for (const entry of leaderboardEntries) {
           const user = toDiscoverUser(entry);
           if (seenUserIds.has(user.id)) {
             continue;
@@ -247,7 +273,7 @@ export function useFriendsScreenState({ refreshGame, routeParams }: UseFriendsSc
           }
         }
 
-        if ((payload.items ?? []).length === 0) {
+        if (leaderboardEntries.length === 0) {
           break;
         }
 
@@ -270,7 +296,7 @@ export function useFriendsScreenState({ refreshGame, routeParams }: UseFriendsSc
         setDiscoverLoading(false);
       }
     }
-  }, [friends, requests, t]);
+  }, [t]);
 
   const runSearch = useCallback(async (rawQuery: string, options?: { silent?: boolean }) => {
     const query = rawQuery.trim();
@@ -302,7 +328,7 @@ export function useFriendsScreenState({ refreshGame, routeParams }: UseFriendsSc
       if (requestId !== searchRequestRef.current) {
         return;
       }
-      setSearchResults(payload.items ?? []);
+      setSearchResults(sanitizeUserSearchResults(payload.items));
     } catch (error) {
       if (requestId !== searchRequestRef.current) {
         return;
@@ -317,8 +343,9 @@ export function useFriendsScreenState({ refreshGame, routeParams }: UseFriendsSc
   }, [t]);
 
   const reloadDiscover = useCallback(async () => {
-    if (searchQuery.trim()) {
-      await runSearch(searchQuery, { silent: false });
+    const currentQuery = searchQueryRef.current.trim();
+    if (currentQuery) {
+      await runSearch(currentQuery, { silent: false });
       return;
     }
     const socialGraph = await loadSocialGraph();
@@ -326,16 +353,18 @@ export function useFriendsScreenState({ refreshGame, routeParams }: UseFriendsSc
       return;
     }
     await loadDiscoverUsers({ forceRefresh: true, socialGraph });
-  }, [loadDiscoverUsers, loadSocialGraph, runSearch, searchQuery]);
+  }, [loadDiscoverUsers, loadSocialGraph, runSearch]);
 
   const refreshAll = useCallback(async () => {
     const socialGraph = await loadSocialGraph();
+    const currentQuery = searchQueryRef.current.trim();
+    const shouldRefreshSearch = searchSubmittedRef.current && currentQuery;
 
     await Promise.all([
       ...(socialGraph ? [loadDiscoverUsers({ forceRefresh: true, socialGraph })] : []),
-      ...(searchSubmitted && searchQuery.trim() ? [runSearch(searchQuery, { silent: true })] : []),
+      ...(shouldRefreshSearch ? [runSearch(currentQuery, { silent: true })] : []),
     ]);
-  }, [loadDiscoverUsers, loadSocialGraph, runSearch, searchQuery, searchSubmitted]);
+  }, [loadDiscoverUsers, loadSocialGraph, runSearch]);
 
   useFocusEffect(
     useCallback(() => {
@@ -403,6 +432,10 @@ export function useFriendsScreenState({ refreshGame, routeParams }: UseFriendsSc
         )),
       );
       setRequests((current) => {
+        const receiver = sanitizeSocialUserPreview(payload.request.receiver);
+        if (!receiver) {
+          return current;
+        }
         if (current.some((request) => request.id === payload.request.id)) {
           return current;
         }
@@ -413,7 +446,7 @@ export function useFriendsScreenState({ refreshGame, routeParams }: UseFriendsSc
             direction: "outgoing",
             created_at: payload.request.created_at,
             responded_at: null,
-            user: payload.request.receiver,
+            user: receiver,
           },
           ...current,
         ];

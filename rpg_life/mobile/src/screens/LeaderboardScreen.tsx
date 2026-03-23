@@ -3,6 +3,7 @@ import React, { useMemo } from "react";
 import { RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { Screen } from "../components/Screen";
+import { ScreenRenderBoundary } from "../components/ScreenRenderBoundary";
 import { StateBlock } from "../components/StateBlock";
 import { useGameProgress } from "../context/GameContext";
 import { useTranslation } from "../context/LocalizationContext";
@@ -72,6 +73,22 @@ export function LeaderboardScreen() {
       )}
       scrollable={false}
     >
+      <ScreenRenderBoundary
+        resetKeys={[scope, items.length, Boolean(error), loading]}
+        fallback={({ error: renderError, reset }) => (
+          <StateBlock
+            tone="warning"
+            icon="alert-circle"
+            title={translateOrFallback(t, "screens.friends.errorTitle", "Не удалось открыть раздел")}
+            description={renderError.message || translateOrFallback(t, "screens.friends.errors.loadLeaderboard", "Произошла ошибка при рендере лидерборда.")}
+            actionLabel={translateOrFallback(t, "common.retry", "Повторить")}
+            onAction={() => {
+              reset();
+              reload();
+            }}
+          />
+        )}
+      >
       <ScrollView
         style={styles.content}
         contentContainerStyle={styles.contentBody}
@@ -148,6 +165,7 @@ export function LeaderboardScreen() {
           </>
         ) : null}
       </ScrollView>
+      </ScreenRenderBoundary>
     </Screen>
   );
 }

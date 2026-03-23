@@ -27,7 +27,7 @@ export function FriendCard({ friend, t, onInspect }: Props) {
   const lastActiveLabel = formatLastActive(friend.last_active_at);
   const sinceLabel = friend.friends_since ? new Date(friend.friends_since).toLocaleDateString() : null;
   const presenceLabel = formatPresenceLabel(friend.presence_status, t);
-  const level = friend.level ?? friend.stats.level ?? 1;
+  const level = friend.level ?? friend.stats?.level ?? 1;
   const ratingValue = formatValue(friend.power_rating);
   const rankLabel = friend.rating_rank ? `#${friend.rating_rank}` : "—";
   const goalSummary = friend.goal_title

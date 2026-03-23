@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useRef } from "react";
 import { RefreshControl, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { Screen } from "../components/Screen";
+import { ScreenRenderBoundary } from "../components/ScreenRenderBoundary";
 import { StateBlock } from "../components/StateBlock";
 import { useGameProgress } from "../context/GameContext";
 import { useTranslation } from "../context/LocalizationContext";
@@ -121,6 +122,30 @@ export function FriendsScreen() {
       subtitle={translateOrFallback(t, "screens.friends.subtitle", "Друзья, заявки и поиск игроков в едином social-разделе.")}
       scrollable={false}
     >
+      <ScreenRenderBoundary
+        resetKeys={[
+          activeTab,
+          friends.length,
+          incomingRequests.length,
+          outgoingRequests.length,
+          discoverSuggestions.length,
+          searchResults.length,
+          searchQuery,
+        ]}
+        fallback={({ error, reset }) => (
+          <StateBlock
+            tone="warning"
+            icon="alert-circle"
+            title={translateOrFallback(t, "screens.friends.errorTitle", "Не удалось открыть раздел")}
+            description={error.message || translateOrFallback(t, "screens.friends.errors.loadFriends", "Произошла ошибка при рендере списка друзей.")}
+            actionLabel={translateOrFallback(t, "common.retry", "Повторить")}
+            onAction={() => {
+              reset();
+              void refreshScreen();
+            }}
+          />
+        )}
+      >
       <ScrollView
         style={styles.content}
         contentContainerStyle={styles.contentBody}
@@ -403,6 +428,7 @@ export function FriendsScreen() {
           </View>
         ) : null}
       </ScrollView>
+      </ScreenRenderBoundary>
     </Screen>
   );
 }

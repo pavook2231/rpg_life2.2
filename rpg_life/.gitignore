@@ -2,6 +2,7 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+pytest-cache-files-*/
 
 .venv/
 venv/
@@ -19,6 +20,19 @@ node_modules/
 mobile/dist/
 dist/
 build/
+backups/
+celerybeat-schedule
+tmp_test_*.py
+fix_all.py
+mobile/.expo/
+mobile/android/local.properties
+mobile/android/.android-home/
+mobile/android/.build-tmp/
+mobile/android/.gradle-user/
+mobile/android/.gradle/
+mobile/android/.kotlin/
+mobile/android/build/
+mobile/android/app/build/
 
 .env.local
 .env.*.local
