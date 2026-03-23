@@ -1,4 +1,5 @@
 from app.core.celery_app import celery_app
+from .audit_retention_task import audit_retention_task
 from .challenge_result_task import challenge_result_task
 from .daily_quests_task import daily_quests_task
 from .notification_dispatch_task import notification_dispatch_task

@@ -71,6 +71,10 @@ if Celery:
                 "task": "app.tasks.notification_dispatch_task.notification_dispatch_task",
                 "schedule": crontab(minute="*/1"),
             },
+            "audit-retention-purge": {
+                "task": "app.tasks.audit_retention_task.audit_retention_task",
+                "schedule": crontab(hour=3, minute=30),
+            },
         },
     )
 

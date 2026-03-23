@@ -9,6 +9,7 @@ from tempfile import gettempdir
 
 from app.core.dates import utc_now
 from app.tasks.dispatcher import (
+    enqueue_audit_retention,
     enqueue_challenge_results,
     enqueue_daily_quests,
     enqueue_reward_distribution,
@@ -29,6 +30,7 @@ def run_maintenance_loop():
     """Local scheduler that only enqueues Celery tasks."""
     last_daily_enqueued = None
     last_weekly_enqueued = None
+    last_audit_purge_enqueued = None
 
     while True:
         now = utc_now()
@@ -40,6 +42,10 @@ def run_maintenance_loop():
         if last_weekly_enqueued != week_key and now.weekday() == 0 and now.hour == 0:
             enqueue_world_events()
             last_weekly_enqueued = week_key
+
+        if last_audit_purge_enqueued != now.date() and now.hour >= 3:
+            enqueue_audit_retention()
+            last_audit_purge_enqueued = now.date()
 
         enqueue_challenge_results()
         enqueue_reward_distribution()
