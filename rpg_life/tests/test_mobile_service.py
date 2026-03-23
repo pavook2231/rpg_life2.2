@@ -321,6 +321,41 @@ def test_sync_today_steps_invalidates_leaderboard_cache_on_progress_change(db_se
     assert invalidations == ["leaderboard"]
 
 
+def test_sync_today_steps_rejects_unsupported_source(db_session) -> None:
+    user = _create_user(db_session, "step-source-invalid@example.com")
+    _create_progress(db_session, user.id)
+    current_day_start = utc_now().replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+
+    with pytest.raises(HTTPException) as exc:
+        mobile_service.sync_today_steps(db_session, user, 1_000, current_day_start, "spoofed-script")
+
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "Unsupported step sync source"
+
+
+def test_sync_today_steps_rejects_implausible_rate(db_session) -> None:
+    user = _create_user(db_session, "step-rate-spike@example.com")
+    _create_progress(db_session, user.id)
+    current_day_start = utc_now().replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+
+    mobile_service.sync_today_steps(db_session, user, 2_000, current_day_start, "device")
+    record = (
+        db_session.query(DailySteps)
+        .filter(DailySteps.user_id == user.id)
+        .order_by(DailySteps.date.desc())
+        .first()
+    )
+    assert record is not None
+    record.synced_at = utc_now() - timedelta(seconds=10)
+    db_session.commit()
+
+    with pytest.raises(HTTPException) as exc:
+        mobile_service.sync_today_steps(db_session, user, 8_500, current_day_start, "device")
+
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "Step sync rate is implausible"
+
+
 def test_claim_weekly_goal_reward_invalidates_leaderboard_cache(db_session, monkeypatch: pytest.MonkeyPatch) -> None:
     user = _create_user(db_session, "weekly-cache@example.com")
     progress = _create_progress(db_session, user.id, class_name="archer")

@@ -1,3 +1,4 @@
+import logging
 from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException
@@ -16,6 +17,18 @@ from app.text_utils import normalize_item_model, normalize_nested_strings
 
 MAX_SYNCABLE_STEPS_PER_DAY = 70_000
 MAX_STEP_SYNC_INCREMENT = 30_000
+MAX_STEP_SYNC_RATE_PER_SECOND = 3.5
+STEP_SYNC_RATE_GRACE_STEPS = 1_000
+ALLOWED_STEP_SYNC_SOURCES = {
+    "device",
+    "manual",
+    "healthkit",
+    "googlefit",
+    "pedometer",
+    "watch",
+}
+
+logger = logging.getLogger(__name__)
 
 
 def _serialize_equipment_overview_payload(db: Session, user: User, *, include_bag_items: bool) -> dict:
@@ -281,10 +294,13 @@ def sync_today_steps(
     source: str = "device",
 ) -> dict:
     normalized_steps = max(0, int(steps or 0))
+    normalized_source = (source or "device").strip().lower()
     now = utc_now()
 
     if normalized_steps > MAX_SYNCABLE_STEPS_PER_DAY:
         raise HTTPException(status_code=400, detail="Daily step sync exceeds the allowed limit")
+    if normalized_source not in ALLOWED_STEP_SYNC_SOURCES:
+        raise HTTPException(status_code=400, detail="Unsupported step sync source")
 
     requested_day_start: datetime | None = None
     if day_started_at:
@@ -326,6 +342,27 @@ def sync_today_steps(
     previous_steps = int(record.steps or 0) if record else 0
     if previous_steps > 0 and normalized_steps > previous_steps and normalized_steps - previous_steps > MAX_STEP_SYNC_INCREMENT:
         raise HTTPException(status_code=400, detail="Step sync jump is too large")
+    if (
+        previous_steps > 0
+        and normalized_steps > previous_steps
+        and record is not None
+        and record.synced_at is not None
+    ):
+        elapsed_seconds = max((now - record.synced_at).total_seconds(), 1.0)
+        delta_steps = normalized_steps - previous_steps
+        allowed_delta = int(elapsed_seconds * MAX_STEP_SYNC_RATE_PER_SECOND) + STEP_SYNC_RATE_GRACE_STEPS
+        if delta_steps > allowed_delta:
+            logger.warning(
+                "Rejected suspicious step sync: user_id=%s source=%s prev=%s next=%s delta=%s elapsed_s=%.2f allowed=%s",
+                current_user.id,
+                normalized_source,
+                previous_steps,
+                normalized_steps,
+                delta_steps,
+                elapsed_seconds,
+                allowed_delta,
+            )
+            raise HTTPException(status_code=400, detail="Step sync rate is implausible")
 
     if record is None:
         record = DailySteps(
@@ -334,13 +371,13 @@ def sync_today_steps(
             steps=normalized_steps,
             date=day_start,
             synced_at=now,
-            source=source,
+            source=normalized_source,
         )
         db.add(record)
     else:
         record.steps = max(previous_steps, normalized_steps)
         record.synced_at = now
-        record.source = source
+        record.source = normalized_source
         if main_progress and not record.class_progress_id:
             record.class_progress_id = main_progress.id
 
@@ -357,7 +394,7 @@ def sync_today_steps(
         "delta": delta,
         "synced_at": record.synced_at.isoformat() if record.synced_at else None,
         "day_started_at": day_start.isoformat(),
-        "source": source,
+        "source": normalized_source,
     }
 
 
