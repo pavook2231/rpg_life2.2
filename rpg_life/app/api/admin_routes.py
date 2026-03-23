@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app import auth
 from app.api.dependencies import enforce_rate_limit, require_admin_user
+from app.core.audit import send_test_telegram_alert
 from app.core.config import AUDIT_RETENTION_DAYS_DEFAULT
 from app.core.dates import utc_now
 from app.core.database import get_db
@@ -96,3 +97,13 @@ async def purge_old_audit_events(
     await enforce_rate_limit(request, bucket="admin-audit-write", limit=10, window_seconds=60)
     older_than = utc_now() - timedelta(days=retention_days)
     return audit_service.purge_audit_events(db, older_than=older_than)
+
+
+@router.post("/audit/alerts/test")
+async def send_audit_test_alert(
+    request: Request,
+    current_user: User = Depends(auth.get_current_user),
+):
+    require_admin_user(current_user)
+    await enforce_rate_limit(request, bucket="admin-audit-write", limit=10, window_seconds=60)
+    return send_test_telegram_alert(requested_by=current_user.email)

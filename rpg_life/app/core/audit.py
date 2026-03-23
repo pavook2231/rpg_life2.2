@@ -95,6 +95,22 @@ def _send_telegram_alert(message: str) -> None:
         response.read()
 
 
+def send_test_telegram_alert(*, requested_by: str | None = None) -> dict:
+    if not TELEGRAM_AUDIT_ALERTS_ENABLED:
+        return {"ok": False, "message": "Telegram audit alerts are disabled"}
+    if not TELEGRAM_AUDIT_BOT_TOKEN or not TELEGRAM_AUDIT_CHAT_ID:
+        return {"ok": False, "message": "Telegram audit bot token or chat id is not configured"}
+
+    now = utc_now()
+    message = (
+        "RPG Life audit test alert\n"
+        f"requested_by: {requested_by or '-'}\n"
+        f"time: {now.isoformat()}"
+    )
+    _send_telegram_alert(message)
+    return {"ok": True, "message": "Test alert sent", "sent_at": now.isoformat()}
+
+
 def _maybe_send_telegram_alert(
     *,
     method: str,

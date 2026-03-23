@@ -72,3 +72,12 @@ def test_audit_api_write_request_triggers_alert_hook_for_warning(monkeypatch, db
     audit.audit_api_write_request(db_session, request=request, status_code=400, duration_ms=11)
 
     assert sent == ["warning"]
+
+
+def test_send_test_telegram_alert_reports_disabled(monkeypatch) -> None:
+    monkeypatch.setattr(audit, "TELEGRAM_AUDIT_ALERTS_ENABLED", False)
+
+    payload = audit.send_test_telegram_alert(requested_by="admin@example.com")
+
+    assert payload["ok"] is False
+    assert payload["message"] == "Telegram audit alerts are disabled"
