@@ -46,6 +46,15 @@ function asRecord(value: unknown): RawRecord {
   return value && typeof value === "object" ? (value as RawRecord) : {};
 }
 
+function pickField(record: RawRecord, keys: string[]) {
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(record, key)) {
+      return record[key];
+    }
+  }
+  return undefined;
+}
+
 function asNumber(value: unknown, fallback = 0) {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
@@ -142,35 +151,41 @@ function rememberItem(item: CanonicalItem, source: string) {
 
 export function normalizeItemModel(value: unknown, source = "api"): CanonicalItem {
   const raw = asRecord(value);
+  const canonicalRaw: RawRecord = {
+    ...raw,
+    required_class: pickField(raw, ["required_class", "re equired_class", "required_class s"]),
+    set_name: pickField(raw, ["set_name", "set_name e", "set t_name"]),
+    price: pickField(raw, ["price", "pri ice"]),
+  };
   const itemId = asNumber(raw.id, 0);
-  const stats = normalizeStats(raw.stats);
-  const weaponStats = normalizeWeaponStats(raw.weapon_stats);
-  const armorStats = normalizeArmorStats(raw.armor_stats);
+  const stats = normalizeStats(canonicalRaw.stats);
+  const weaponStats = normalizeWeaponStats(canonicalRaw.weapon_stats);
+  const armorStats = normalizeArmorStats(canonicalRaw.armor_stats);
 
   const item: CanonicalItem = {
     id: itemId,
-    name: asString(raw.name, "Unknown item"),
-    description: asString(raw.description, ""),
-    rarity: asString(raw.rarity, "common"),
-    image: asString(raw.image || raw.icon, "package-variant"),
-    icon: asString(raw.icon || raw.image, "package-variant"),
-    type: asString(raw.type, "misc"),
-    subclass: asNullableString(raw.subclass),
-    slot: asNullableString(raw.slot),
-    strength_bonus: asNumber(raw.strength_bonus, 0),
-    agility_bonus: asNumber(raw.agility_bonus, 0),
-    intellect_bonus: asNumber(raw.intellect_bonus, 0),
-    stamina_bonus: asNumber(raw.stamina_bonus, 0),
-    critical_bonus: asNumber(raw.critical_bonus, 0),
-    luck_bonus: asNumber(raw.luck_bonus, 0),
-    xp_bonus: asNumber(raw.xp_bonus, 0),
-    crystal_bonus: asNumber(raw.crystal_bonus, 0),
-    health_bonus: asNumber(raw.health_bonus, 0),
-    required_level: asNumber(raw.required_level, 1),
-    required_class: asNullableString(raw.required_class),
-    set_name: asNullableString(raw.set_name),
-    price: asNumber(raw.price, asNumber(raw.price_crystals, 0)),
-    price_crystals: asNumber(raw.price_crystals, asNumber(raw.price, 0)),
+    name: asString(canonicalRaw.name, "Unknown item"),
+    description: asString(canonicalRaw.description, ""),
+    rarity: asString(canonicalRaw.rarity, "common"),
+    image: asString(canonicalRaw.image || canonicalRaw.icon, "package-variant"),
+    icon: asString(canonicalRaw.icon || canonicalRaw.image, "package-variant"),
+    type: asString(canonicalRaw.type, "misc"),
+    subclass: asNullableString(canonicalRaw.subclass),
+    slot: asNullableString(canonicalRaw.slot),
+    strength_bonus: asNumber(canonicalRaw.strength_bonus, 0),
+    agility_bonus: asNumber(canonicalRaw.agility_bonus, 0),
+    intellect_bonus: asNumber(canonicalRaw.intellect_bonus, 0),
+    stamina_bonus: asNumber(canonicalRaw.stamina_bonus, 0),
+    critical_bonus: asNumber(canonicalRaw.critical_bonus, 0),
+    luck_bonus: asNumber(canonicalRaw.luck_bonus, 0),
+    xp_bonus: asNumber(canonicalRaw.xp_bonus, 0),
+    crystal_bonus: asNumber(canonicalRaw.crystal_bonus, 0),
+    health_bonus: asNumber(canonicalRaw.health_bonus, 0),
+    required_level: asNumber(canonicalRaw.required_level, 1),
+    required_class: asNullableString(canonicalRaw.required_class),
+    set_name: asNullableString(canonicalRaw.set_name),
+    price: asNumber(canonicalRaw.price, asNumber(canonicalRaw.price_crystals, 0)),
+    price_crystals: asNumber(canonicalRaw.price_crystals, asNumber(canonicalRaw.price, 0)),
     stats,
     weapon_stats: weaponStats,
     armor_stats: armorStats,

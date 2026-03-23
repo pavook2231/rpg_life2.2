@@ -96,6 +96,49 @@ def _extract_bonus_fields(source: Item | dict) -> dict:
     return {field: getattr(item, field, 0) or 0 for field in ITEM_BONUS_FIELDS}
 
 
+def _coalesce_source_value(source: dict, *keys: str):
+    for key in keys:
+        if key in source:
+            return source.get(key)
+    return None
+
+
+def _canonicalize_item_source_dict(source: dict) -> dict:
+    return {
+        "id": _coalesce_source_value(source, "id"),
+        "name": _coalesce_source_value(source, "name"),
+        "description": _coalesce_source_value(source, "description"),
+        "type": _coalesce_source_value(source, "type"),
+        "subclass": _coalesce_source_value(source, "subclass"),
+        "slot": _coalesce_source_value(source, "slot"),
+        "rarity": _coalesce_source_value(source, "rarity"),
+        "image": _coalesce_source_value(source, "image"),
+        "icon": _coalesce_source_value(source, "icon"),
+        "required_level": _coalesce_source_value(source, "required_level"),
+        "required_class": _coalesce_source_value(
+            source,
+            "required_class",
+            "re equired_class",
+            "required_class s",
+        ),
+        "set_name": _coalesce_source_value(
+            source,
+            "set_name",
+            "set_name e",
+            "set t_name",
+        ),
+        "price": _coalesce_source_value(
+            source,
+            "price",
+            "pri ice",
+        ),
+        "price_crystals": _coalesce_source_value(source, "price_crystals"),
+        "weapon_stats": _coalesce_source_value(source, "weapon_stats"),
+        "armor_stats": _coalesce_source_value(source, "armor_stats"),
+        "stats": _coalesce_source_value(source, "stats"),
+    }
+
+
 def _build_stats_record(bonuses: dict) -> dict:
     return {field: value for field, value in bonuses.items() if value}
 
@@ -174,24 +217,25 @@ def serialize_armor_stats_payload(stats) -> dict | None:
 
 def serialize_item_payload(source: Item | dict) -> dict:
     if isinstance(source, dict):
+        canonical_source = _canonicalize_item_source_dict(source)
         bonuses = _extract_bonus_fields(source)
-        weapon_stats = serialize_weapon_stats_payload(source.get("weapon_stats"))
-        armor_stats = serialize_armor_stats_payload(source.get("armor_stats"))
+        weapon_stats = serialize_weapon_stats_payload(canonical_source.get("weapon_stats"))
+        armor_stats = serialize_armor_stats_payload(canonical_source.get("armor_stats"))
         payload = {
-            "id": source.get("id"),
-            "name": source.get("name"),
-            "description": source.get("description"),
-            "type": source.get("type"),
-            "subclass": source.get("subclass"),
-            "slot": source.get("slot"),
-            "rarity": source.get("rarity"),
-            "image": source.get("image") or source.get("icon"),
-            "icon": source.get("icon"),
-            "required_level": source.get("required_level", 1),
-            "required_class": source.get("required_class"),
-            "set_name": source.get("set_name"),
-            "price": source.get("price", source.get("price_crystals", 0)),
-            "price_crystals": source.get("price_crystals", 0),
+            "id": canonical_source.get("id"),
+            "name": canonical_source.get("name"),
+            "description": canonical_source.get("description"),
+            "type": canonical_source.get("type"),
+            "subclass": canonical_source.get("subclass"),
+            "slot": canonical_source.get("slot"),
+            "rarity": canonical_source.get("rarity"),
+            "image": canonical_source.get("image") or canonical_source.get("icon"),
+            "icon": canonical_source.get("icon"),
+            "required_level": canonical_source.get("required_level", 1),
+            "required_class": canonical_source.get("required_class"),
+            "set_name": canonical_source.get("set_name"),
+            "price": canonical_source.get("price", canonical_source.get("price_crystals", 0)),
+            "price_crystals": canonical_source.get("price_crystals", 0),
             **bonuses,
             "stats": _build_canonical_stats_payload(bonuses, weapon_stats, armor_stats),
         }
