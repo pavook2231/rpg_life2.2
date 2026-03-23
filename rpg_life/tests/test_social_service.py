@@ -1,11 +1,12 @@
 from datetime import timedelta
 
 import pytest
+from fastapi import HTTPException
 
 from app.core.config import get_total_xp_for_level
 from app.core.dates import utc_now
 from app.models import DailySteps, Friendship, GameEvent, User, UserClassProgress
-from app.schemas.social_schema import CoopQuestCreateSchema
+from app.schemas.social_schema import CoopQuestCreateSchema, PvpChallengeCreateSchema
 from app.services import social_service
 
 
@@ -415,3 +416,75 @@ def test_list_coop_quests_refreshes_progress_and_orders_participants(db_session)
     assert quest["participants"][0]["contribution"] == 3_500
     assert quest["participants"][1]["user_id"] == friend.id
     assert quest["participants"][1]["contribution"] == 2_000
+
+
+def test_create_pvp_challenge_sanitizes_excessive_rewards(db_session) -> None:
+    creator = _create_user(db_session, "pvp-cap-creator@example.com")
+    opponent = _create_user(db_session, "pvp-cap-opponent@example.com")
+    _make_friends(db_session, creator.id, opponent.id)
+
+    payload = PvpChallengeCreateSchema(
+        opponent_id=opponent.id,
+        objective_type="steps",
+        goal=99_999_999,
+        duration_hours=24,
+        reward_xp=999_999,
+        reward_crystals=999_999,
+        title="Cap Test",
+        description="Sanitize rewards",
+    )
+    result = social_service.create_pvp_challenge(db_session, creator, payload)
+    challenge = result["challenge"]
+
+    assert challenge["goal"] == social_service.MAX_CHALLENGE_GOAL
+    assert challenge["reward"]["xp"] == social_service.MAX_CHALLENGE_REWARD_XP
+    assert challenge["reward"]["crystals"] == social_service.MAX_CHALLENGE_REWARD_CRYSTALS
+
+
+def test_accept_challenge_invitation_uses_sanitized_rewards(db_session) -> None:
+    sender = _create_user(db_session, "invite-cap-sender@example.com")
+    receiver = _create_user(db_session, "invite-cap-receiver@example.com")
+    _make_friends(db_session, sender.id, receiver.id)
+
+    invitation = social_service.send_challenge_invitation(
+        db_session,
+        sender,
+        receiver.id,
+        "pvp",
+        "Huge reward",
+        "Should be capped",
+        "steps",
+        50_000_000,
+        5_000_000,
+        5_000_000,
+    )
+    response = social_service.respond_challenge_invitation(db_session, receiver, invitation.id, "accept")
+    challenge = db_session.query(social_service.Challenge).filter(social_service.Challenge.id == response["challenge_id"]).first()
+
+    assert challenge is not None
+    assert challenge.target_value == social_service.MAX_CHALLENGE_GOAL
+    assert challenge.reward_xp == social_service.MAX_CHALLENGE_REWARD_XP
+    assert challenge.reward_crystals == social_service.MAX_CHALLENGE_REWARD_CRYSTALS
+
+
+def test_respond_pvp_challenge_rejects_unknown_action(db_session) -> None:
+    creator = _create_user(db_session, "pvp-action-creator@example.com")
+    opponent = _create_user(db_session, "pvp-action-opponent@example.com")
+    _make_friends(db_session, creator.id, opponent.id)
+
+    payload = PvpChallengeCreateSchema(
+        opponent_id=opponent.id,
+        objective_type="steps",
+        goal=2000,
+        duration_hours=24,
+        reward_xp=100,
+        reward_crystals=20,
+        title="Action Test",
+        description="Invalid action",
+    )
+    challenge_id = social_service.create_pvp_challenge(db_session, creator, payload)["challenge"]["id"]
+
+    with pytest.raises(HTTPException) as exc:
+        social_service.respond_pvp_challenge(db_session, opponent, challenge_id, "maybe")
+
+    assert exc.value.status_code == 400

@@ -39,6 +39,9 @@ LEADERBOARD_METRICS = {"power", "level", "quests", "steps", "challenge_wins"}
 LEADERBOARD_PERIODS = {"all_time", "weekly", "season"}
 MAX_FRIENDS = 50
 ONLINE_ACTIVITY_WINDOW = timedelta(minutes=15)
+MAX_CHALLENGE_REWARD_XP = 1_000
+MAX_CHALLENGE_REWARD_CRYSTALS = 300
+MAX_CHALLENGE_GOAL = 1_000_000
 
 
 def _get_redis_client():
@@ -48,6 +51,13 @@ def _get_redis_client():
     except Exception:
         logger.warning("Redis not available, skipping cache")
         return None
+
+
+def _sanitize_challenge_payload_values(*, goal: int, reward_xp: int, reward_crystals: int) -> tuple[int, int, int]:
+    normalized_goal = max(1, min(int(goal or 1), MAX_CHALLENGE_GOAL))
+    normalized_xp = max(0, min(int(reward_xp or 0), MAX_CHALLENGE_REWARD_XP))
+    normalized_crystals = max(0, min(int(reward_crystals or 0), MAX_CHALLENGE_REWARD_CRYSTALS))
+    return normalized_goal, normalized_xp, normalized_crystals
 
 
 def _cached_user_stats_map(
@@ -422,6 +432,7 @@ def send_friend_request(db: Session, current_user: User, receiver_id: int) -> di
                 and_(FriendRequest.requester_id == receiver.id, FriendRequest.receiver_id == current_user.id),
             ),
         )
+        .with_for_update()
         .first()
     )
     if existing and existing.status == "pending":
@@ -433,6 +444,7 @@ def send_friend_request(db: Session, current_user: User, receiver_id: int) -> di
             FriendRequest.requester_id == current_user.id,
             FriendRequest.receiver_id == receiver.id,
         )
+        .with_for_update()
         .first()
     )
     if request:
@@ -472,6 +484,7 @@ def respond_friend_request(db: Session, current_user: User, request_id: int, act
         db.query(FriendRequest)
         .options(joinedload(FriendRequest.requester), joinedload(FriendRequest.receiver))
         .filter(FriendRequest.id == request_id, FriendRequest.receiver_id == current_user.id)
+        .with_for_update()
         .first()
     )
     if not request or request.status != "pending":
@@ -733,6 +746,24 @@ def create_pvp_challenge(db: Session, current_user: User, payload) -> dict:
     if not _is_friend(db, current_user.id, opponent.id):
         raise HTTPException(status_code=400, detail="PvP доступен только между друзьями")
 
+    goal, reward_xp, reward_crystals = _sanitize_challenge_payload_values(
+        goal=payload.goal,
+        reward_xp=payload.reward_xp,
+        reward_crystals=payload.reward_crystals,
+    )
+    if goal != payload.goal or reward_xp != payload.reward_xp or reward_crystals != payload.reward_crystals:
+        logger.warning(
+            "Challenge payload sanitized: creator_id=%s opponent_id=%s goal=%s->%s reward_xp=%s->%s reward_crystals=%s->%s",
+            current_user.id,
+            opponent.id,
+            payload.goal,
+            goal,
+            payload.reward_xp,
+            reward_xp,
+            payload.reward_crystals,
+            reward_crystals,
+        )
+
     challenge = Challenge(
         creator_id=current_user.id,
         opponent_id=opponent.id,
@@ -740,9 +771,9 @@ def create_pvp_challenge(db: Session, current_user: User, payload) -> dict:
         description=payload.description,
         challenge_type="pvp",
         objective_type=payload.objective_type,
-        target_value=payload.goal,
-        reward_xp=payload.reward_xp,
-        reward_crystals=payload.reward_crystals,
+        target_value=goal,
+        reward_xp=reward_xp,
+        reward_crystals=reward_crystals,
         status="pending",
         start_at=utc_now(),
         end_at=utc_now() + timedelta(hours=payload.duration_hours),
@@ -756,10 +787,13 @@ def create_pvp_challenge(db: Session, current_user: User, payload) -> dict:
 
 
 def respond_pvp_challenge(db: Session, current_user: User, challenge_id: int, action: str) -> dict:
+    if action not in {"accept", "decline"}:
+        raise HTTPException(status_code=400, detail="Неверное действие")
     challenge = (
         db.query(Challenge)
         .options(joinedload(Challenge.creator), joinedload(Challenge.opponent), selectinload(Challenge.participants))
         .filter(Challenge.id == challenge_id, Challenge.challenge_type == "pvp", Challenge.opponent_id == current_user.id)
+        .with_for_update()
         .first()
     )
     if not challenge or challenge.status != "pending":
@@ -879,11 +913,12 @@ def _reward_user(db: Session, user_id: int, xp: int, crystals: int):
         db.query(UserClassProgress)
         .filter(UserClassProgress.user_id == user_id, UserClassProgress.is_unlocked == True)
         .order_by(UserClassProgress.id.asc())
+        .with_for_update()
         .first()
     )
     if progress:
-        progress.current_xp += xp
-        progress.crystals += crystals
+        progress.current_xp += max(0, int(xp or 0))
+        progress.crystals += max(0, int(crystals or 0))
 
 
 def resolve_pvp_challenges(db: Session) -> list[int]:
@@ -891,6 +926,7 @@ def resolve_pvp_challenges(db: Session) -> list[int]:
     pending = (
         db.query(Challenge)
         .filter(Challenge.challenge_type == "pvp", Challenge.status == "pending", Challenge.end_at <= now)
+        .with_for_update()
         .all()
     )
     for challenge in pending:
@@ -902,6 +938,7 @@ def resolve_pvp_challenges(db: Session) -> list[int]:
         db.query(Challenge)
         .options(selectinload(Challenge.participants))
         .filter(Challenge.challenge_type == "pvp", Challenge.status == "active", Challenge.end_at <= now)
+        .with_for_update()
         .all()
     )
     resolved_ids = []
@@ -982,19 +1019,37 @@ def create_coop_quest(db: Session, current_user: User, payload) -> dict:
                 raise HTTPException(status_code=400, detail="В coop можно приглашать только друзей")
             _get_user_or_404(db, participant_id)
             participant_ids.add(participant_id)
+    goal, reward_xp, reward_crystals = _sanitize_challenge_payload_values(
+        goal=payload.goal,
+        reward_xp=payload.reward_xp,
+        reward_crystals=payload.reward_crystals,
+    )
+    if goal != payload.goal or reward_xp != payload.reward_xp or reward_crystals != payload.reward_crystals:
+        logger.warning(
+            "Coop payload sanitized: creator_id=%s goal=%s->%s reward_xp=%s->%s reward_crystals=%s->%s",
+            current_user.id,
+            payload.goal,
+            goal,
+            payload.reward_xp,
+            reward_xp,
+            payload.reward_crystals,
+            reward_crystals,
+        )
 
     bonus_participants = max(len(participant_ids) - 1, 0)
     reward_multiplier = min(1.0 + (0.15 * bonus_participants), 1.45)
-    reward_xp = max(int(round(payload.reward_xp * reward_multiplier)), payload.reward_xp)
-    reward_crystals = max(int(round(payload.reward_crystals * reward_multiplier)), payload.reward_crystals)
+    scaled_reward_xp = max(int(round(reward_xp * reward_multiplier)), reward_xp)
+    scaled_reward_crystals = max(int(round(reward_crystals * reward_multiplier)), reward_crystals)
+    scaled_reward_xp = min(scaled_reward_xp, MAX_CHALLENGE_REWARD_XP)
+    scaled_reward_crystals = min(scaled_reward_crystals, MAX_CHALLENGE_REWARD_CRYSTALS)
 
     coop_quest = CoopQuest(
         title=payload.title,
         description=payload.description,
         objective_type=payload.objective_type,
-        goal=payload.goal,
-        reward_xp=reward_xp,
-        reward_crystals=reward_crystals,
+        goal=goal,
+        reward_xp=scaled_reward_xp,
+        reward_crystals=scaled_reward_crystals,
         created_by=current_user.id,
         end_at=utc_now() + timedelta(hours=payload.duration_hours),
     )
@@ -1164,6 +1219,7 @@ def resolve_coop_quests(db: Session) -> list[int]:
         db.query(CoopQuest)
         .options(selectinload(CoopQuest.participants))
         .filter(CoopQuest.status.in_(["active", "scheduled"]))
+        .with_for_update()
         .all()
     )
     changed_ids = []
@@ -1343,6 +1399,11 @@ def send_challenge_invitation(
     reward_xp: int = 0,
     reward_crystals: int = 0,
 ) -> ChallengeInvitation:
+    goal, reward_xp, reward_crystals = _sanitize_challenge_payload_values(
+        goal=goal,
+        reward_xp=reward_xp,
+        reward_crystals=reward_crystals,
+    )
     if objective_type not in SUPPORTED_OBJECTIVES:
         raise HTTPException(status_code=400, detail="Неподдерживаемый тип цели")
     if challenge_type not in {"pvp", "coop"}:
@@ -1357,7 +1418,7 @@ def send_challenge_invitation(
         ChallengeInvitation.sender_id == sender.id,
         ChallengeInvitation.receiver_id == receiver_id,
         ChallengeInvitation.challenge_type == challenge_type,
-    ).first()
+    ).with_for_update().first()
     if existing and existing.status != "pending":
         existing.title = title
         existing.description = description
@@ -1418,7 +1479,7 @@ def respond_challenge_invitation(
         ChallengeInvitation.id == invitation_id,
         ChallengeInvitation.receiver_id == user.id,
         ChallengeInvitation.status == "pending",
-    ).first()
+    ).with_for_update().first()
     if not invitation:
         raise HTTPException(status_code=404, detail="Приглашение не найдено")
 
@@ -1427,6 +1488,11 @@ def respond_challenge_invitation(
     db.commit()
 
     if action == "accept":
+        normalized_goal, normalized_reward_xp, normalized_reward_crystals = _sanitize_challenge_payload_values(
+            goal=invitation.goal,
+            reward_xp=invitation.reward_xp,
+            reward_crystals=invitation.reward_crystals,
+        )
         # Create actual challenge
         if invitation.challenge_type == "pvp":
             challenge = Challenge(
@@ -1436,9 +1502,9 @@ def respond_challenge_invitation(
                 description=invitation.description,
                 challenge_type="pvp",
                 objective_type=invitation.objective_type,
-                target_value=invitation.goal,
-                reward_xp=invitation.reward_xp,
-                reward_crystals=invitation.reward_crystals,
+                target_value=normalized_goal,
+                reward_xp=normalized_reward_xp,
+                reward_crystals=normalized_reward_crystals,
                 status="active",
                 end_at=utc_now() + timedelta(days=7),  # 7 days default
             )
@@ -1456,9 +1522,9 @@ def respond_challenge_invitation(
                 title=invitation.title,
                 description=invitation.description,
                 objective_type=invitation.objective_type,
-                goal=invitation.goal,
-                reward_xp=invitation.reward_xp,
-                reward_crystals=invitation.reward_crystals,
+                goal=normalized_goal,
+                reward_xp=normalized_reward_xp,
+                reward_crystals=normalized_reward_crystals,
                 created_by=invitation.sender_id,
                 end_at=utc_now() + timedelta(days=7),
             )
