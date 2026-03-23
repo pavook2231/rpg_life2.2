@@ -326,6 +326,7 @@ def buy_item(db: Session, user_id: int, item_id: int) -> bool:
         db.query(UserClassProgress)
         .filter(UserClassProgress.user_id == user_id, UserClassProgress.is_unlocked == True)
         .order_by(UserClassProgress.id.asc())
+        .with_for_update()
         .first()
     )
     if user_progress is None:
@@ -353,6 +354,7 @@ def buy_item(db: Session, user_id: int, item_id: int) -> bool:
         return False
 
     if item.is_unique:
+        # Re-check under row lock so parallel purchase requests cannot duplicate unique items.
         existing = (
             db.query(UserInventory)
             .filter(UserInventory.user_id == user_id, UserInventory.item_id == item.id)

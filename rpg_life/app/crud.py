@@ -427,7 +427,12 @@ def _grant_daily_chest_if_earned(db: Session, user_id: int, class_progress_id: i
 
 
 def complete_quest(db: Session, user_id: int, quest_id: int):
-    quest = db.query(Quest).filter(Quest.id == quest_id, Quest.user_id == user_id).first()
+    quest = (
+        db.query(Quest)
+        .filter(Quest.id == quest_id, Quest.user_id == user_id)
+        .with_for_update()
+        .first()
+    )
     if not quest or quest.is_completed:
         return None
     if quest.expires_at and quest.expires_at < utc_now():
@@ -439,6 +444,7 @@ def complete_quest(db: Session, user_id: int, quest_id: int):
             UserClassProgress.id == quest.class_progress_id,
             UserClassProgress.user_id == user_id,
         )
+        .with_for_update()
         .first()
     )
     if not progress:
@@ -449,6 +455,7 @@ def complete_quest(db: Session, user_id: int, quest_id: int):
                 UserClassProgress.is_unlocked == True,
             )
             .order_by(UserClassProgress.id.asc())
+            .with_for_update()
             .first()
         )
     if not progress:
@@ -1052,8 +1059,14 @@ def get_daily_bonus_info(db: Session, user_id: int):
     })
 def claim_daily_bonus(db: Session, user_id: int):
     """РџРѕР»СѓС‡РµРЅРёРµ РµР¶РµРґРЅРµРІРЅРѕРіРѕ Р±РѕРЅСѓСЃР°"""
-    today_start = datetime.combine(date.today(), datetime.min.time())
-    today_end = datetime.combine(date.today(), datetime.max.time())
+    now = utc_now()
+    today_start = datetime.combine(now.date(), datetime.min.time())
+    today_end = datetime.combine(now.date(), datetime.max.time())
+
+    # Serialize bonus claims per user to prevent double-claim races.
+    user_row = db.query(User).filter(User.id == user_id).with_for_update().first()
+    if user_row is None:
+        return None
     
     # РџСЂРѕРІРµСЂСЏРµРј, РїРѕР»СѓС‡Р°Р» Р»Рё СѓР¶Рµ СЃРµРіРѕРґРЅСЏ
     existing = db.query(DailyBonus).filter(
@@ -1082,7 +1095,7 @@ def claim_daily_bonus(db: Session, user_id: int):
         day_number=current_day,
         bonus_xp=bonus_xp,
         bonus_crystals=bonus_crystals,
-        claimed_at=utc_now()
+        claimed_at=now
     )
     db.add(bonus)
 
