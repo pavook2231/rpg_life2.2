@@ -23,6 +23,7 @@ from app.core.config import (
     validate_runtime_config,
 )
 from app.core.database import engine, init_db, normalize_existing_strings
+from app.core.audit import audit_api_write_request
 from app.core.rate_limit import RateLimitMiddleware
 from app.core.responses import error_payload
 from app.scheduler import start_scheduler
@@ -135,6 +136,26 @@ def create_app() -> FastAPI:
                 duration_ms,
             )
 
+        return response
+
+    @app.middleware("http")
+    async def add_write_audit_trail(request: Request, call_next):
+        started_at = time.perf_counter()
+        response = await call_next(request)
+        duration_ms = int((time.perf_counter() - started_at) * 1000)
+        db = SessionLocal()
+        try:
+            audit_api_write_request(
+                db,
+                request=request,
+                status_code=response.status_code,
+                duration_ms=duration_ms,
+            )
+        except Exception:
+            logger.exception("Failed to persist API write audit event: %s %s", request.method, request.url.path)
+            db.rollback()
+        finally:
+            db.close()
         return response
 
     @app.middleware("http")

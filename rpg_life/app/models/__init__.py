@@ -1,4 +1,5 @@
 from .auth_session import RefreshTokenSession
+from .audit import ApiAuditEvent
 from .beta import Boss, Chest, UserBoss, UserItem
 from .character import DailyCalories, DailySteps, DailyWater, HealthAchievements, UserClassProgress
 from .crafting import CraftingRecipe, CraftingRecipeIngredient, CraftingResource, ItemUpgradePath
