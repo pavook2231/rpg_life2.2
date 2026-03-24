@@ -30,6 +30,11 @@ SENSITIVE_PATH_PREFIXES = (
     "/api/v1/social/",
     "/api/v1/challenges/",
 )
+EXPECTED_VALIDATION_WRITE_PATHS = {
+    "/api/v1/items/equip",
+    "/api/v1/inventory/equip",
+    "/api/v1/inventory/unequip",
+}
 SUSPICIOUS_WINDOW_SECONDS = 60
 SUSPICIOUS_FAILURE_THRESHOLD = 5
 
@@ -156,6 +161,8 @@ def classify_write_event(
     if status_code >= 400:
         if failure_burst_count >= SUSPICIOUS_FAILURE_THRESHOLD:
             return "warning", "failure_burst"
+        if method in WRITE_METHODS and status_code == 400 and path in EXPECTED_VALIDATION_WRITE_PATHS:
+            return "info", "validation_rejected"
         if path.startswith(SENSITIVE_PATH_PREFIXES):
             return "warning", "sensitive_write_rejected"
         return "info", "write_rejected"

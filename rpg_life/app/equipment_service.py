@@ -1,4 +1,5 @@
 from collections import defaultdict
+import re
 from sqlalchemy.orm import Session, joinedload
 from app import shop_runtime
 from .models import (
@@ -33,6 +34,26 @@ SLOTS = [
     "off_hand",
     "ranged",
 ]
+SLOT_SET = set(SLOTS)
+SLOT_ALIASES = {
+    "mainhand": "main_hand",
+    "main_hand": "main_hand",
+    "main": "main_hand",
+    "weapon": "main_hand",
+    "primary": "main_hand",
+    "two_hand": "main_hand",
+    "twohand": "main_hand",
+    "right_hand": "main_hand",
+    "offhand": "off_hand",
+    "off_hand": "off_hand",
+    "off": "off_hand",
+    "secondary": "off_hand",
+    "shield": "off_hand",
+    "left_hand": "off_hand",
+    "range": "ranged",
+    "range_weapon": "ranged",
+    "ranged_weapon": "ranged",
+}
 
 
 class EquipmentError(Exception):
@@ -41,6 +62,58 @@ class EquipmentError(Exception):
 
 def _slot_field(slot: str) -> str:
     return f"{slot}_id"
+
+
+def _normalize_equipment_slot(raw_slot: str | None) -> str:
+    if not raw_slot:
+        return ""
+    normalized = str(raw_slot).strip()
+    if not normalized:
+        return ""
+    normalized = normalized.replace("-", "_").replace(" ", "_")
+    normalized = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", normalized)
+    normalized = re.sub(r"_+", "_", normalized).lower()
+    return SLOT_ALIASES.get(normalized, normalized)
+
+
+def _normalize_class_name(raw_name: str | None) -> str:
+    if not raw_name:
+        return ""
+    return str(raw_name).strip().lower()
+
+
+def _resolve_target_slot(
+    *,
+    item_type: str,
+    requested_slot: str,
+    item_slot: str | None,
+    item_subclass: str | None,
+    weapon_stats: ItemWeaponStats | None,
+) -> str:
+    slot = _normalize_equipment_slot(requested_slot)
+    if slot:
+        return slot
+
+    if item_type == "weapon":
+        category = (weapon_stats.weapon_category if weapon_stats else "") or ""
+        if category == "ranged":
+            return "ranged"
+        if category == "off_hand_only":
+            return "off_hand"
+        return "main_hand"
+
+    if item_type == "armor":
+        return _normalize_equipment_slot(item_slot)
+
+    if item_type == "accessory":
+        if item_subclass == "ring":
+            return "ring1"
+        if item_subclass == "necklace":
+            return "neck"
+        if item_subclass == "trinket":
+            return "trinket1"
+
+    return slot
 
 
 def _equipped_inventory_ids(equipment: CharacterEquipment | None) -> set[int]:
@@ -194,8 +267,21 @@ def can_equip_item(
 
     if item.required_level and item.required_level > progress.level:
         return False, f"Требуется уровень {item.required_level}"
-    if item.required_class and item.required_class != progress.class_name:
+    if item.required_class and _normalize_class_name(item.required_class) != _normalize_class_name(progress.class_name):
         return False, f"Предмет доступен только для класса {item.required_class}"
+
+    weapon_stats = (
+        db.query(ItemWeaponStats).filter(ItemWeaponStats.item_id == item.id).first()
+        if item.type == "weapon"
+        else None
+    )
+    target_slot = _resolve_target_slot(
+        item_type=item.type or "",
+        requested_slot=target_slot,
+        item_slot=item.slot,
+        item_subclass=item.subclass,
+        weapon_stats=weapon_stats,
+    )
 
     slot_compatibility = {
         "head": ["armor"],
@@ -217,12 +303,12 @@ def can_equip_item(
         "ranged": ["weapon"],
     }
 
-    if target_slot not in slot_compatibility:
+    if target_slot not in SLOT_SET:
         return False, f"Unknown slot: {target_slot}"
     if item.type not in slot_compatibility[target_slot]:
         return False, f"Cannot equip item type '{item.type}' to slot '{target_slot}'"
 
-    if item.type == "armor" and item.slot and item.slot != target_slot:
+    if item.type == "armor" and item.slot and _normalize_equipment_slot(item.slot) != target_slot:
         return False, f"Armor slot mismatch: expected '{item.slot}'"
 
     if item.type == "accessory":
@@ -233,9 +319,6 @@ def can_equip_item(
         if item.subclass == "trinket" and target_slot not in ["trinket1", "trinket2"]:
             return False, "Trinket can be equipped only in trinket slots"
 
-    weapon_stats = (
-        db.query(ItemWeaponStats).filter(ItemWeaponStats.item_id == item.id).first()
-    )
     if item.type == "weapon" and weapon_stats:
         if weapon_stats.required_strength and weapon_stats.required_strength > progress.strength:
             return False, f"Required strength: {weapon_stats.required_strength}"
@@ -274,6 +357,7 @@ def equip_item(
     inventory_id: int,
     target_slot: str,
 ) -> bool:
+    target_slot = _normalize_equipment_slot(target_slot)
     can_equip, message = can_equip_item(db, user_id, class_progress_id, inventory_id, target_slot)
     if not can_equip:
         raise EquipmentError(message)
@@ -292,6 +376,13 @@ def equip_item(
         db.query(ItemWeaponStats).filter(ItemWeaponStats.item_id == inventory_item.item_id).first()
     )
 
+    target_slot = _resolve_target_slot(
+        item_type=(inventory_item.item.type if inventory_item.item else ""),
+        requested_slot=target_slot,
+        item_slot=(inventory_item.item.slot if inventory_item.item else None),
+        item_subclass=(inventory_item.item.subclass if inventory_item.item else None),
+        weapon_stats=weapon_stats,
+    )
     # Единственный источник истины: только slot_id в CharacterEquipment.
     if weapon_stats and weapon_stats.weapon_category == "two_hand" and equipment.off_hand_id:
         equipment.off_hand_id = None

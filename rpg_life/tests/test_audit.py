@@ -74,6 +74,21 @@ def test_audit_api_write_request_triggers_alert_hook_for_warning(monkeypatch, db
     assert sent == ["warning"]
 
 
+def test_audit_api_write_request_treats_equip_validation_reject_as_info(monkeypatch, db_session) -> None:
+    request = _request("POST", "/api/v1/items/equip")
+    sent: list[str] = []
+
+    monkeypatch.setattr(audit, "_maybe_send_telegram_alert", lambda **kwargs: sent.append(kwargs.get("severity", "")))
+
+    audit.audit_api_write_request(db_session, request=request, status_code=400, duration_ms=9)
+
+    event = db_session.query(ApiAuditEvent).order_by(ApiAuditEvent.id.desc()).first()
+    assert event is not None
+    assert event.severity == "info"
+    assert event.reason == "validation_rejected"
+    assert sent == []
+
+
 def test_audit_api_write_request_includes_state_details_and_custom_event_type(db_session) -> None:
     request = _request("POST", "/api/v1/items/buy")
     request.state.audit_details = {
