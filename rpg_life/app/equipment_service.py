@@ -1,5 +1,6 @@
 from collections import defaultdict
 from sqlalchemy.orm import Session, joinedload
+from app import shop_runtime
 from .models import (
     UserClassProgress,
     UserInventory,
@@ -446,19 +447,49 @@ def get_equipped_items(db: Session, user_id: int, class_progress_id: int):
         damage_min += ws.damage_min // 2
         damage_max += ws.damage_max // 2
 
+    enchant_payloads = shop_runtime.get_weapon_enchants(user_id)
+    enchant_strength = 0.0
+    enchant_agility = 0.0
+    enchant_intellect = 0.0
+    enchant_stamina = 0.0
+    enchant_crit = 0.0
+    enchant_luck = 0.0
+    enchant_damage_min = 0
+    enchant_damage_max = 0
+    for slot in ("main_hand", "off_hand", "ranged"):
+        slot_entry = result.get(slot)
+        if not slot_entry:
+            continue
+        inventory_id = slot_entry.get("inventory_id")
+        if not inventory_id:
+            continue
+        enchant = enchant_payloads.get(str(int(inventory_id)))
+        if not enchant:
+            continue
+        effects = enchant.get("effects", {}) if isinstance(enchant.get("effects", {}), dict) else {}
+        enchant_strength += float(effects.get("strength", 0.0) or 0.0)
+        enchant_agility += float(effects.get("agility", 0.0) or 0.0)
+        enchant_intellect += float(effects.get("intellect", 0.0) or 0.0)
+        enchant_stamina += float(effects.get("stamina", 0.0) or 0.0)
+        enchant_crit += float(effects.get("critical_chance", 0.0) or 0.0)
+        enchant_luck += float(effects.get("luck", 0.0) or 0.0)
+        enchant_damage_min += int(effects.get("damage_min", 0) or 0)
+        enchant_damage_max += int(effects.get("damage_max", 0) or 0)
+        slot_entry["enchant"] = enchant
+
     return {
         "equipment": result,
         "totals": {
-            "strength": equipment.total_strength,
-            "agility": equipment.total_agility,
-            "intellect": equipment.total_intellect,
-            "stamina": equipment.total_stamina,
+            "strength": equipment.total_strength + enchant_strength,
+            "agility": equipment.total_agility + enchant_agility,
+            "intellect": equipment.total_intellect + enchant_intellect,
+            "stamina": equipment.total_stamina + enchant_stamina,
             "armor": equipment.total_armor,
             "dps": equipment.total_dps,
-            "health": equipment.total_health,
-            "damage_min": damage_min,
-            "damage_max": damage_max,
-            "critical_chance": total_crit * 100,
-            "luck": total_luck * 100,
+            "health": equipment.total_health + int(enchant_stamina * 10),
+            "damage_min": damage_min + enchant_damage_min,
+            "damage_max": damage_max + enchant_damage_max,
+            "critical_chance": (total_crit + enchant_crit) * 100,
+            "luck": (total_luck + enchant_luck) * 100,
         },
     }

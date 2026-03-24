@@ -89,6 +89,7 @@ export function HomeScreen() {
   const [goalSetupPending, setGoalSetupPending] = useState<boolean | null>(null);
   const dailyBonus = rewards?.daily_bonus ?? null;
   const weeklyGoal = rewards?.weekly_goal ?? null;
+  const weeklyDigest = rewards?.weekly_digest ?? null;
   const seasonalGoal = rewards?.seasonal_goal ?? null;
   const unlockState = useMemo(
     () =>
@@ -295,6 +296,22 @@ export function HomeScreen() {
   const showOnboardingRoadmap = onboardingCompletedCount < onboardingSteps.length;
   const showAdvancedHome = !showOnboardingRoadmap && unlockState.hasQuestProgress;
   const showDeepGuideCards = showAdvancedHome && unlockState.hasEquippedItems;
+  const isWeeklyDigestClaimAction = weeklyDigest?.focus_code === "claim_weekly";
+  const weeklyDigestStatusLabel = weeklyDigest
+    ? weeklyDigest.momentum_state === "excellent"
+      ? translateOrFallback(t, "screens.home.quick.weeklyDigestStatusExcellent", "Отличный темп")
+      : weeklyDigest.momentum_state === "stable"
+        ? translateOrFallback(t, "screens.home.quick.weeklyDigestStatusStable", "Стабильный темп")
+        : translateOrFallback(t, "screens.home.quick.weeklyDigestStatusRisk", "Нужен фокус сегодня")
+    : "";
+  const weeklyDigestActionLabel = weeklyDigest
+    ? weeklyDigest.focus_code === "claim_weekly"
+      ? t("screens.home.claimWeekly")
+      : weeklyDigest.focus_code === "do_one_task_today"
+        ? translateOrFallback(t, "screens.home.quick.weeklyDigestActionToday", "Сделать 1 задачу сегодня")
+        : translateOrFallback(t, "screens.home.quick.weeklyDigestActionPush", "Дожать следующий рубеж")
+    : t("screens.home.toQuests");
+  const weeklyDigestActionIcon = isWeeklyDigestClaimAction ? "calendar-check" : "notebook-outline";
   const showFirstWinCard =
     !needsGoalSetup &&
     unlockState.hasQuestProgress &&
@@ -1047,6 +1064,56 @@ export function HomeScreen() {
         <InfoItem icon={todayPlan.icon} title={todayPlan.title} description={todayPlan.description} />
         <InfoItem icon={stepStatusDetails.icon} title={stepStatusDetails.title} description={stepStatusDetails.description} />
         <Button label={todayPlan.actionLabel} icon={todayPlan.icon} onPress={todayPlan.onPress} variant="secondary" />
+        </Card>
+      ) : null}
+
+      {showAdvancedHome && weeklyDigest ? (
+        <Card tone={isWeeklyDigestClaimAction ? "accent" : "subtle"}>
+          <Text style={styles.cardTitle}>{translateOrFallback(t, "screens.home.quick.weeklyDigestTitle", "Итоги недели")}</Text>
+          <Text style={styles.bonusText}>
+            {translateOrFallback(
+              t,
+              "screens.home.quick.weeklyDigestSummary",
+              "За 7 дней: +{xp} XP • {quests} задач • {days}/7 активных дней",
+              {
+                xp: weeklyDigest?.xp_earned_7d ?? 0,
+                quests: weeklyDigest?.quests_completed_7d ?? 0,
+                days: weeklyDigest?.active_days_7d ?? 0,
+              },
+            )}
+          </Text>
+          <View style={styles.overviewRow}>
+            <View style={styles.overviewChip}>
+              <Text style={styles.overviewLabel}>{translateOrFallback(t, "screens.home.quick.weeklyDigestXp", "XP за 7д")}</Text>
+              <Text style={styles.overviewValue}>{weeklyDigest?.xp_earned_7d ?? 0}</Text>
+            </View>
+            <View style={styles.overviewChip}>
+              <Text style={styles.overviewLabel}>{translateOrFallback(t, "screens.home.quick.weeklyDigestQuests", "Квесты")}</Text>
+              <Text style={styles.overviewValue}>{weeklyDigest?.quests_completed_7d ?? 0}</Text>
+            </View>
+            <View style={styles.overviewChip}>
+              <Text style={styles.overviewLabel}>{translateOrFallback(t, "screens.home.quick.weeklyDigestActiveDays", "Активные дни")}</Text>
+              <Text style={styles.overviewValue}>{weeklyDigest?.active_days_7d ?? 0}/7</Text>
+            </View>
+            <View style={styles.overviewChip}>
+              <Text style={styles.overviewLabel}>{translateOrFallback(t, "screens.home.quick.weeklyDigestStreak", "Серия")}</Text>
+              <Text style={styles.overviewValue}>{weeklyDigest?.streak_current ?? 0}</Text>
+            </View>
+          </View>
+          <Text style={styles.rewardMeta}>
+            {translateOrFallback(
+              t,
+              "screens.home.quick.weeklyDigestMomentum",
+              "Статус темпа: {status}",
+              { status: weeklyDigestStatusLabel },
+            )}
+          </Text>
+          <Button
+            label={weeklyDigestActionLabel}
+            icon={weeklyDigestActionIcon}
+            onPress={isWeeklyDigestClaimAction ? handleClaimWeeklyReward : () => navigation.navigate("Quests")}
+            loading={isWeeklyDigestClaimAction ? isClaimingWeeklyReward : false}
+          />
         </Card>
       ) : null}
 

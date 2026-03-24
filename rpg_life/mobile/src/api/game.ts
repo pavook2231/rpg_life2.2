@@ -420,6 +420,16 @@ export type RewardsSummaryPayload = {
       };
     }>;
   } | null;
+  weekly_digest?: {
+    period_started_at: string;
+    period_ends_at: string;
+    xp_earned_7d: number;
+    quests_completed_7d: number;
+    active_days_7d: number;
+    streak_current: number;
+    momentum_state: "excellent" | "stable" | "at_risk";
+    focus_code: "claim_weekly" | "push_to_next_tier" | "do_one_task_today";
+  } | null;
   seasonal_goal?: {
     event_id: number;
     event_title: string;

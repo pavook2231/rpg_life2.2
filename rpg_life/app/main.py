@@ -14,16 +14,20 @@ from starlette.requests import Request
 from app.api import build_api_router
 from app.core.config import (
     APP_ENV,
+    CORS_ALLOW_HEADERS,
+    CORS_ALLOW_METHODS,
     CORS_ALLOWED_ORIGINS,
     CORS_ALLOW_ORIGIN_REGEX,
+    CORS_EXPOSE_HEADERS,
     IS_PRODUCTION,
+    RATE_LIMIT_REQUESTS_PER_MINUTE,
     REDIS_URL,
     RUN_STARTUP_DATA_REPAIR,
     USE_INTERNAL_SCHEDULER,
     validate_runtime_config,
 )
 from app.core.database import engine, init_db, normalize_existing_strings
-from app.core.audit import audit_api_write_request
+from app.core.audit import WRITE_METHODS, audit_api_write_request
 from app.core.rate_limit import RateLimitMiddleware
 from app.core.responses import error_payload
 from app.scheduler import start_scheduler
@@ -112,11 +116,12 @@ def create_app() -> FastAPI:
         allow_origins=CORS_ALLOWED_ORIGINS,
         allow_origin_regex=CORS_ALLOW_ORIGIN_REGEX,
         allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=CORS_ALLOW_METHODS,
+        allow_headers=CORS_ALLOW_HEADERS,
+        expose_headers=CORS_EXPOSE_HEADERS,
     )
     app.add_middleware(GZipMiddleware, minimum_size=900, compresslevel=5)
-    app.add_middleware(RateLimitMiddleware, requests_per_minute=180)
+    app.add_middleware(RateLimitMiddleware, requests_per_minute=RATE_LIMIT_REQUESTS_PER_MINUTE)
 
     @app.middleware("http")
     async def add_request_timing(request: Request, call_next):
@@ -143,6 +148,10 @@ def create_app() -> FastAPI:
         started_at = time.perf_counter()
         response = await call_next(request)
         duration_ms = int((time.perf_counter() - started_at) * 1000)
+        method = request.method.upper()
+        path = request.url.path
+        if method not in WRITE_METHODS or not path.startswith("/api/"):
+            return response
         db = SessionLocal()
         try:
             audit_api_write_request(

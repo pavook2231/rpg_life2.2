@@ -96,10 +96,22 @@ export function fetchEquipmentOverview(options: CachedRequestOptions = {}) {
   });
 }
 
-export function buyShopItem(itemId: number) {
+function buildShopPurchaseRequestId(itemId: number, targetInventoryId?: number | null) {
+  const targetToken = targetInventoryId ?? 0;
+  const tsToken = Date.now().toString(36);
+  const randomToken = Math.random().toString(36).slice(2, 10);
+  return `shop-${itemId}-${targetToken}-${tsToken}-${randomToken}`;
+}
+
+export function buyShopItem(itemId: number, targetInventoryId?: number | null, clientRequestId?: string | null) {
+  const requestId = clientRequestId || buildShopPurchaseRequestId(itemId, targetInventoryId);
   return apiRequest<ShopPurchasePayload>("/items/buy", {
     method: "POST",
-    body: JSON.stringify({ item_id: itemId }),
+    body: JSON.stringify({
+      item_id: itemId,
+      target_inventory_id: targetInventoryId ?? null,
+      client_request_id: requestId,
+    }),
   }).then((payload) => ({
     ...payload,
     chest_item: payload.chest_item

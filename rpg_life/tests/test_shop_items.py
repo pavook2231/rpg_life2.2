@@ -1,8 +1,11 @@
 import pytest
 from fastapi import HTTPException
+from datetime import timedelta
 
 from app.beta_content import CHEST_CATALOG
+from app.core.dates import utc_now
 from app import item_service
+from app import shop_runtime
 from app.models import CharacterEquipment, Item, User, UserClassProgress, UserInventory
 from app.schemas.beta_schema import ChestOpenSchema
 from app.services import beta_service, inventory_service, mobile_service
@@ -88,6 +91,275 @@ def test_shop_chest_purchase_adds_chest_to_inventory(db_session):
     assert result["chest_item"]["name"]
     assert after_inventory == before_inventory + 1
     assert progress.crystals == 500 - chest["price_crystals"]
+
+
+def test_shop_context_exposes_healer_services_with_stateful_availability(db_session):
+    user = _create_user(db_session, "shop-services@example.com")
+    progress = _create_progress(db_session, user.id, crystals=500)
+    progress.level = 5
+    progress.max_health = 200
+    progress.current_health = 120
+    progress.reward_penalty_percent = 0.0
+    progress.penalty_quests_remaining = 0
+    progress.wounded_until = None
+    db_session.commit()
+
+    healthy_context = inventory_service.get_shop_context(db_session, user)
+    services = {service["key"]: service for service in healthy_context["services"]}
+
+    assert set(services.keys()) == {"bandage", "full_heal", "wound_cure"}
+    assert services["bandage"]["id"] == -9101
+    assert services["full_heal"]["id"] == -9102
+    assert services["wound_cure"]["id"] == -9103
+    assert services["bandage"]["price_crystals"] == 60
+    assert services["full_heal"]["price_crystals"] == 95
+    assert services["wound_cure"]["price_crystals"] == 135
+    assert services["bandage"]["available"] is True
+    assert services["full_heal"]["available"] is True
+    assert services["wound_cure"]["available"] is False
+    assert services["wound_cure"]["unavailable_reason"] == "Hero is not wounded"
+
+    progress.current_health = 40
+    progress.reward_penalty_percent = 0.25
+    progress.penalty_quests_remaining = 2
+    progress.wounded_until = utc_now() + timedelta(hours=2)
+    db_session.commit()
+
+    wounded_context = inventory_service.get_shop_context(db_session, user)
+    wounded_services = {service["key"]: service for service in wounded_context["services"]}
+
+    assert wounded_services["bandage"]["available"] is False
+    assert wounded_services["full_heal"]["available"] is False
+    assert wounded_services["wound_cure"]["available"] is True
+
+
+def test_shop_service_bandage_purchase_restores_partial_health_and_spends_gold(db_session):
+    user = _create_user(db_session, "shop-bandage@example.com")
+    progress = _create_progress(db_session, user.id, crystals=500)
+    progress.level = 5
+    progress.max_health = 200
+    progress.current_health = 100
+    progress.reward_penalty_percent = 0.0
+    progress.penalty_quests_remaining = 0
+    progress.wounded_until = None
+    db_session.commit()
+
+    result = inventory_service.buy_shop_item(db_session, user, -9101)
+
+    db_session.refresh(progress)
+    assert result["ok"] is True
+    assert result["kind"] == "service"
+    assert result["service_key"] == "bandage"
+    assert result["health"]["current_health"] == 170
+    assert progress.current_health == 170
+    assert progress.crystals == 440
+
+
+def test_shop_service_wound_cure_clears_penalty_and_restores_full_health(db_session):
+    user = _create_user(db_session, "shop-wound-cure@example.com")
+    progress = _create_progress(db_session, user.id, crystals=500)
+    progress.level = 5
+    progress.max_health = 180
+    progress.current_health = 36
+    progress.reward_penalty_percent = 0.25
+    progress.penalty_quests_remaining = 3
+    progress.wounded_until = utc_now() + timedelta(hours=12)
+    db_session.commit()
+
+    result = inventory_service.buy_shop_item(db_session, user, -9103)
+
+    db_session.refresh(progress)
+    assert result["ok"] is True
+    assert result["kind"] == "service"
+    assert result["service_key"] == "wound_cure"
+    assert result["health"]["is_wounded"] is False
+    assert progress.current_health == 180
+    assert progress.reward_penalty_percent == 0.0
+    assert progress.penalty_quests_remaining == 0
+    assert progress.wounded_until is None
+    assert progress.crystals == 365
+
+
+def test_shop_service_purchase_rejects_unavailable_or_unknown_service(db_session):
+    user = _create_user(db_session, "shop-service-errors@example.com")
+    progress = _create_progress(db_session, user.id, crystals=500)
+    progress.level = 5
+    progress.max_health = 150
+    progress.current_health = 150
+    progress.reward_penalty_percent = 0.0
+    progress.penalty_quests_remaining = 0
+    progress.wounded_until = None
+    db_session.commit()
+
+    with pytest.raises(HTTPException) as unavailable_exc:
+        inventory_service.buy_shop_item(db_session, user, -9101)
+    assert unavailable_exc.value.status_code == 400
+    assert "Health is already full" in unavailable_exc.value.detail
+
+    with pytest.raises(HTTPException) as unknown_exc:
+        inventory_service.buy_shop_item(db_session, user, -9199)
+    assert unknown_exc.value.status_code == 400
+
+
+def test_mobile_shop_payload_and_buy_alias_support_services(db_session):
+    user = _create_user(db_session, "shop-mobile-services@example.com")
+    progress = _create_progress(db_session, user.id, crystals=500)
+    progress.level = 6
+    progress.max_health = 220
+    progress.current_health = 110
+    progress.reward_penalty_percent = 0.0
+    progress.penalty_quests_remaining = 0
+    progress.wounded_until = None
+    db_session.commit()
+
+    payload = mobile_service.get_shop(db_session, user)
+    assert "services" in payload
+    assert len(payload["services"]) == 3
+    assert payload["services"][0]["id"] < 0
+
+    purchase_payload = mobile_service.buy_shop_item(db_session, user, -9102)
+    assert purchase_payload["kind"] == "service"
+    assert purchase_payload["service_key"] == "full_heal"
+    assert purchase_payload["health"]["current_health"] == purchase_payload["health"]["max_health"]
+
+
+def test_shop_context_exposes_extra_shop_catalogs_and_tabs(db_session):
+    user = _create_user(db_session, "shop-extra-catalogs@example.com")
+    progress = _create_progress(db_session, user.id, crystals=2_000)
+    progress.class_name = "warrior"
+    progress.level = 12
+    db_session.commit()
+
+    inventory_service.buy_shop_item(db_session, user, 205)
+    context = inventory_service.get_shop_context(db_session, user)
+
+    assert len(context["services"]) == 3
+    assert len(context["xp_scrolls"]) == 5
+    assert len(context["quest_contracts"]) == 3
+    assert len(context["weapon_enchants"]) == 4
+    assert [entry["key"] for entry in context["catalog_tabs"]] == [
+        "equipment",
+        "xp_scrolls",
+        "contracts",
+        "enchants",
+        "services",
+    ]
+
+
+def test_shop_xp_scroll_purchase_grants_xp_and_spends_gold(db_session):
+    user = _create_user(db_session, "shop-scroll@example.com")
+    progress = _create_progress(db_session, user.id, crystals=500)
+    progress.current_xp = 0
+    db_session.commit()
+
+    before_gold = progress.crystals
+    result = inventory_service.buy_shop_item(db_session, user, -9201)
+    db_session.refresh(progress)
+
+    assert result["ok"] is True
+    assert result["kind"] == "xp_scroll"
+    assert result["scroll_key"] == "xp_scroll_100"
+    assert result["xp_gained"] == 100
+    assert result["new_xp"] == progress.current_xp
+    assert progress.crystals == before_gold - int(shop_runtime.XP_SCROLL_BY_ID[-9201]["price_crystals"])
+
+
+def test_shop_contract_purchase_activates_cached_bonus(db_session):
+    user = _create_user(db_session, "shop-contract@example.com")
+    progress = _create_progress(db_session, user.id, crystals=1_000)
+    db_session.commit()
+
+    before_gold = progress.crystals
+    result = inventory_service.buy_shop_item(db_session, user, -9301)
+    db_session.refresh(progress)
+    active_contract = shop_runtime.get_active_contract(user.id)
+
+    assert result["ok"] is True
+    assert result["kind"] == "contract"
+    assert result["contract"]["key"] == "contract_adventurer"
+    assert result["contract"]["remaining_quests"] == 3
+    assert active_contract is not None
+    assert active_contract["key"] == "contract_adventurer"
+    assert progress.crystals == before_gold - int(shop_runtime.QUEST_CONTRACT_BY_ID[-9301]["price_crystals"])
+
+
+def test_shop_weapon_enchant_purchase_applies_to_selected_weapon(db_session):
+    user = _create_user(db_session, "shop-enchant@example.com")
+    progress = _create_progress(db_session, user.id, crystals=3_000)
+    progress.class_name = "warrior"
+    progress.level = 12
+    db_session.commit()
+
+    shop_context = inventory_service.get_shop_context(db_session, user)
+    weapon_entry = next(item for item in shop_context["items"] if item.get("id") == 205)
+    inventory_service.buy_shop_item(db_session, user, 205)
+    weapon_inventory = (
+        db_session.query(UserInventory)
+        .filter(UserInventory.user_id == user.id, UserInventory.item_id == 205)
+        .order_by(UserInventory.id.desc())
+        .first()
+    )
+    assert weapon_inventory is not None
+
+    db_session.refresh(progress)
+    before_gold = progress.crystals
+    result = inventory_service.buy_shop_item(db_session, user, -9401, target_inventory_id=weapon_inventory.id)
+    db_session.refresh(progress)
+    enchant_payload = shop_runtime.get_weapon_enchant_for_inventory(user.id, weapon_inventory.id)
+
+    assert result["ok"] is True
+    assert result["kind"] == "enchant"
+    assert result["target_inventory_id"] == weapon_inventory.id
+    assert result["target_weapon_name"]
+    assert enchant_payload is not None
+    assert enchant_payload["key"] == "enchant_might"
+    expected_spent = int(shop_runtime.WEAPON_ENCHANT_BY_ID[-9401]["price_crystals"])
+    assert progress.crystals == before_gold - expected_spent
+    assert int(weapon_entry["price_crystals"]) > 0
+
+
+def test_shop_purchase_idempotency_replays_without_double_charge(db_session):
+    user = _create_user(db_session, "shop-idempotency@example.com")
+    progress = _create_progress(db_session, user.id, crystals=500)
+    db_session.commit()
+
+    request_id = "shop-buy-req-001"
+    first = inventory_service.buy_shop_item(db_session, user, -9201, client_request_id=request_id)
+    second = inventory_service.buy_shop_item(db_session, user, -9201, client_request_id=request_id)
+    db_session.refresh(progress)
+
+    assert first["kind"] == "xp_scroll"
+    assert first["idempotency_replayed"] is False
+    assert second["kind"] == "xp_scroll"
+    assert second["idempotency_replayed"] is True
+    assert second["client_request_id"] == request_id
+    assert progress.crystals == 500 - int(shop_runtime.XP_SCROLL_BY_ID[-9201]["price_crystals"])
+
+
+def test_shop_purchase_rejects_invalid_client_request_id(db_session):
+    user = _create_user(db_session, "shop-invalid-idempotency@example.com")
+    _create_progress(db_session, user.id, crystals=500)
+    db_session.commit()
+
+    with pytest.raises(HTTPException) as exc:
+        inventory_service.buy_shop_item(db_session, user, -9201, client_request_id="bad id")
+
+    assert exc.value.status_code == 400
+    assert "client_request_id" in exc.value.detail
+
+
+def test_shop_purchase_rejects_when_distributed_lock_is_busy(db_session, monkeypatch: pytest.MonkeyPatch):
+    user = _create_user(db_session, "shop-lock-busy@example.com")
+    _create_progress(db_session, user.id, crystals=500)
+    db_session.commit()
+
+    monkeypatch.setattr(inventory_service, "cache_acquire_lock", lambda *_args, **_kwargs: False)
+
+    with pytest.raises(HTTPException) as exc:
+        inventory_service.buy_shop_item(db_session, user, -9201, client_request_id="shop-lock-busy-001")
+
+    assert exc.value.status_code == 409
+    assert "already processing" in exc.value.detail
 
 
 def test_shop_catalog_prioritizes_items_for_current_class(db_session):

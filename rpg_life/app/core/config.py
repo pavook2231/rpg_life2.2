@@ -67,6 +67,7 @@ elif _access_token_expire_days:
 else:
     # Secure-by-default for fresh environments that do not define token TTL.
     ACCESS_TOKEN_EXPIRE_DELTA = timedelta(minutes=30)
+REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "30"))
 ALLOW_SQLITE_FALLBACK = _env_bool("ALLOW_SQLITE_FALLBACK", True)
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./app.db")
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
@@ -95,6 +96,21 @@ CORS_ALLOW_ORIGIN_REGEX = os.getenv(
     "CORS_ALLOW_ORIGIN_REGEX",
     r"https?://(localhost|127\.0\.0\.1):(3000|8081)$" if not IS_PRODUCTION else "",
 ).strip() or None
+CORS_ALLOW_METHODS = _env_csv(
+    "CORS_ALLOW_METHODS",
+    ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+)
+CORS_ALLOW_HEADERS = _env_csv(
+    "CORS_ALLOW_HEADERS",
+    ["Authorization", "Content-Type", "X-CSRF-Token"],
+)
+CORS_EXPOSE_HEADERS = _env_csv(
+    "CORS_EXPOSE_HEADERS",
+    ["X-Process-Time-Ms"],
+)
+TRUST_PROXY_HEADERS = _env_bool("TRUST_PROXY_HEADERS", False)
+TRUSTED_PROXY_IPS = set(_env_csv("TRUSTED_PROXY_IPS", []))
+RATE_LIMIT_REQUESTS_PER_MINUTE = int(os.getenv("RATE_LIMIT_REQUESTS_PER_MINUTE", "180"))
 ADMIN_EMAILS = {email.lower() for email in _env_csv("ADMIN_EMAILS", [])}
 
 CACHE_TTL_LEADERBOARD = int(os.getenv("CACHE_TTL_LEADERBOARD", "60"))

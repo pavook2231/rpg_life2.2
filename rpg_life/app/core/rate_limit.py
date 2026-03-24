@@ -4,6 +4,7 @@ from collections import defaultdict, deque
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.core.responses import error_payload
+from app.core.request_ip import get_client_ip
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
@@ -19,7 +20,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             self.buckets.pop(host, None)
 
     async def dispatch(self, request, call_next):
-        client_host = request.client.host if request.client else "unknown"
+        client_host = get_client_ip(request)
         bucket = self.buckets[client_host]
         now = time.time()
         window_start = now - 60

@@ -5,6 +5,7 @@ from threading import Lock
 
 from fastapi import HTTPException, Request
 from app.core.config import ACCESS_COOKIE_NAME, ADMIN_EMAILS, CSRF_COOKIE_NAME
+from app.core.request_ip import get_client_ip
 from app.models import User
 _RATE_LIMIT_STORAGE: dict[str, deque[float]] = defaultdict(deque)
 _RATE_LIMIT_LOCK = Lock()
@@ -35,12 +36,7 @@ def require_admin_user(current_user: User) -> None:
 
 
 def _client_ip(request: Request) -> str:
-    forwarded_for = request.headers.get("X-Forwarded-For", "").strip()
-    if forwarded_for:
-        return forwarded_for.split(",")[0].strip()
-    if request.client and request.client.host:
-        return request.client.host
-    return "unknown"
+    return get_client_ip(request)
 
 
 async def enforce_rate_limit(

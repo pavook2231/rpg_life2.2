@@ -35,6 +35,27 @@ class InMemoryCache:
             for key in keys:
                 self._store.pop(key, None)
 
+    def acquire_lock(self, key: str, owner_token: str, ttl: int) -> bool:
+        with self._lock:
+            payload = self._store.get(key)
+            if payload:
+                expires_at, current_owner = payload
+                if expires_at >= time.time() and current_owner != owner_token:
+                    return False
+            self._store[key] = (time.time() + max(1, int(ttl)), owner_token)
+            return True
+
+    def release_lock(self, key: str, owner_token: str) -> bool:
+        with self._lock:
+            payload = self._store.get(key)
+            if not payload:
+                return False
+            _, current_owner = payload
+            if current_owner != owner_token:
+                return False
+            self._store.pop(key, None)
+            return True
+
 
 def _build_client():
     if not REDIS_URL:
@@ -76,6 +97,36 @@ def cache_delete_prefix(prefix: str):
             cache_client.delete(key)
     else:
         cache_client.delete_prefix(prefix)
+
+
+def cache_acquire_lock(key: str, owner_token: str, ttl_seconds: int = 10) -> bool:
+    ttl = max(1, int(ttl_seconds))
+    if redis_enabled:
+        try:
+            acquired = cache_client.set(key, owner_token, ex=ttl, nx=True)
+            return bool(acquired)
+        except Exception:
+            return False
+    if hasattr(cache_client, "acquire_lock"):
+        return bool(cache_client.acquire_lock(key, owner_token, ttl))
+    return False
+
+
+def cache_release_lock(key: str, owner_token: str) -> bool:
+    if redis_enabled:
+        release_script = (
+            "if redis.call('get', KEYS[1]) == ARGV[1] then "
+            "return redis.call('del', KEYS[1]) "
+            "else return 0 end"
+        )
+        try:
+            released = cache_client.eval(release_script, 1, key, owner_token)
+            return bool(released)
+        except Exception:
+            return False
+    if hasattr(cache_client, "release_lock"):
+        return bool(cache_client.release_lock(key, owner_token))
+    return False
 
 
 def invalidate_leaderboard_cache():

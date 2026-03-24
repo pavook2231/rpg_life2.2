@@ -202,6 +202,7 @@ def get_bootstrap_payload(db: Session, current_user: User) -> dict:
     )
     streak_summary = engagement_service.get_streak_summary(db, current_user)
     weekly_goal = engagement_service.get_weekly_goal_summary(db, current_user)
+    weekly_digest = engagement_service.get_weekly_digest_summary(db, current_user, weekly_goal=weekly_goal)
     seasonal_goal = engagement_service.get_seasonal_goal_summary(db, current_user)
     active_event = engagement_service.get_active_event_summary(db, current_user)
     social_pulse = engagement_service.get_social_pulse(db, current_user)
@@ -277,6 +278,7 @@ def get_bootstrap_payload(db: Session, current_user: User) -> dict:
                 "last_bonus_claimed_at": recent_bonus.claimed_at.isoformat() if recent_bonus else None,
                 "streak_summary": streak_summary,
                 "weekly_goal": weekly_goal,
+                "weekly_digest": weekly_digest,
                 "seasonal_goal": seasonal_goal,
                 "active_event": active_event,
                 "social_pulse": social_pulse,
@@ -453,6 +455,7 @@ def get_rewards_summary(db: Session, current_user: User) -> dict:
     )
     streak_summary = engagement_service.get_streak_summary(db, current_user)
     weekly_goal = engagement_service.get_weekly_goal_summary(db, current_user)
+    weekly_digest = engagement_service.get_weekly_digest_summary(db, current_user, weekly_goal=weekly_goal)
     seasonal_goal = engagement_service.get_seasonal_goal_summary(db, current_user)
     active_event = engagement_service.get_active_event_summary(db, current_user)
     social_pulse = engagement_service.get_social_pulse(db, current_user)
@@ -463,6 +466,7 @@ def get_rewards_summary(db: Session, current_user: User) -> dict:
         "last_bonus_claimed_at": recent_bonus.claimed_at.isoformat() if recent_bonus else None,
         "streak_summary": streak_summary,
         "weekly_goal": weekly_goal,
+        "weekly_digest": weekly_digest,
         "seasonal_goal": seasonal_goal,
         "active_event": active_event,
         "social_pulse": social_pulse,
@@ -568,12 +572,26 @@ def refresh_shop(db: Session, current_user: User) -> dict:
     return normalize_nested_strings(inventory_service.refresh_shop_context(db, current_user))
 
 
-def buy_shop_item(db: Session, current_user: User, item_id: int) -> dict:
-    return normalize_nested_strings(inventory_service.buy_shop_item(db, current_user, item_id))
+def buy_shop_item(
+    db: Session,
+    current_user: User,
+    item_id: int,
+    target_inventory_id: int | None = None,
+    client_request_id: str | None = None,
+) -> dict:
+    return normalize_nested_strings(
+        inventory_service.buy_shop_item(db, current_user, item_id, target_inventory_id, client_request_id)
+    )
 
 
-def buy_catalog_item(db: Session, current_user: User, item_id: int) -> dict:
-    return buy_shop_item(db, current_user, item_id)
+def buy_catalog_item(
+    db: Session,
+    current_user: User,
+    item_id: int,
+    target_inventory_id: int | None = None,
+    client_request_id: str | None = None,
+) -> dict:
+    return buy_shop_item(db, current_user, item_id, target_inventory_id, client_request_id)
 
 
 def get_user_items(db: Session, current_user: User, page: int, limit: int, sort: str) -> dict:

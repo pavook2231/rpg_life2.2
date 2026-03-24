@@ -26,8 +26,22 @@ services:
         value: lax
       - key: ENABLE_PUSH_DISPATCH
         value: "true"
-      - key: ACCESS_TOKEN_EXPIRE_DAYS
-        value: "7"
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: "30"
+      - key: REFRESH_TOKEN_EXPIRE_DAYS
+        value: "14"
+      - key: RATE_LIMIT_REQUESTS_PER_MINUTE
+        value: "120"
+      - key: CORS_ALLOW_METHODS
+        value: GET,POST,PUT,PATCH,DELETE,OPTIONS
+      - key: CORS_ALLOW_HEADERS
+        value: Authorization,Content-Type,X-CSRF-Token
+      - key: CORS_EXPOSE_HEADERS
+        value: X-Process-Time-Ms
+      - key: TRUST_PROXY_HEADERS
+        value: "true"
+      - key: TRUSTED_PROXY_IPS
+        value: 127.0.0.1/32,10.0.0.0/8,172.16.0.0/12,100.64.0.0/10
       - key: PUSH_QUEUE_BATCH_SIZE
         value: "50"
       - key: PUSH_QUEUE_MAX_ATTEMPTS
@@ -60,7 +74,7 @@ services:
       - key: SECRET_KEY
         sync: false
       - key: CORS_ALLOWED_ORIGINS
-        sync: false
+        value: https://rpglife.online,https://www.rpglife.online
       - key: EXPO_PUSH_ACCESS_TOKEN
         sync: false
       - key: GOOGLE_AUTH_ENABLED

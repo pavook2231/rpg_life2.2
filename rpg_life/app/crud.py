@@ -14,6 +14,7 @@ from app.core.dates import utc_now
 from .goals import GOALS, get_goal_quests, get_goal_info
 from .config import get_xp_for_level
 from .services import health_service, progression_service
+from . import shop_runtime
 from .text_utils import normalize_nested_strings, repair_mojibake
 from .user_identity import USERNAME_MAX_LENGTH, build_public_user_id, normalize_username, username_matches_rules
 logger = logging.getLogger(__name__)
@@ -548,6 +549,7 @@ def complete_quest(db: Session, user_id: int, quest_id: int):
         db.commit()
         db.refresh(progress)
     daily_chest = _grant_daily_chest_if_earned(db, user_id, progress.id, progress.level)
+    active_contract = shop_runtime.consume_contract_charge(user_id)
 
     next_xp = calculate_next_level_xp(progress.level)
     xp_percentage = (progress.current_xp / next_xp) * 100 if next_xp > 0 else 0
@@ -575,6 +577,7 @@ def complete_quest(db: Session, user_id: int, quest_id: int):
         "daily_chest": daily_chest,
         "health": health_state_after_quest,
         "daily_limits": progression_service.get_daily_completion_limits(db, user_id, progress),
+        "active_contract": active_contract,
     }
 def get_or_create_class_progress(db: Session, user_id: int, class_name: str, is_start: bool = False) -> UserClassProgress:
     progress = db.query(UserClassProgress).filter(

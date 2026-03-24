@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Any
 
 from sqlalchemy import func, or_
@@ -240,6 +240,82 @@ def _objective_progress(db: Session, user_id: int, objective_type: str, start_at
 
 def _weekly_progress(db: Session, user_id: int, objective_type: str, start_at: datetime, end_at: datetime) -> int:
     return _objective_progress(db, user_id, objective_type, start_at, end_at)
+
+
+def _active_days_in_window(db: Session, user_id: int, start_at: datetime, end_at: datetime) -> int:
+    active_days: set[date] = set()
+
+    step_rows = (
+        db.query(DailySteps.date)
+        .filter(
+            DailySteps.user_id == user_id,
+            DailySteps.date >= start_at,
+            DailySteps.date <= end_at,
+            DailySteps.steps > 0,
+        )
+        .all()
+    )
+    for (day_value,) in step_rows:
+        if day_value is not None:
+            active_days.add(day_value.date())
+
+    completed_rows = (
+        db.query(CompletedQuest.completed_at)
+        .filter(
+            CompletedQuest.user_id == user_id,
+            CompletedQuest.completed_at >= start_at,
+            CompletedQuest.completed_at <= end_at,
+        )
+        .all()
+    )
+    for (completed_at,) in completed_rows:
+        if completed_at is not None:
+            active_days.add(completed_at.date())
+
+    return len(active_days)
+
+
+def get_weekly_digest_summary(
+    db: Session,
+    user: User,
+    weekly_goal: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    progress = _main_progress(db, user.id)
+    start_at, end_at = _week_window()
+    week_end = _week_end(start_at)
+
+    xp_earned_7d = _objective_progress(db, user.id, "xp_gained", start_at, end_at)
+    quests_completed_7d = _objective_progress(db, user.id, "quests_completed", start_at, end_at)
+    active_days_7d = _active_days_in_window(db, user.id, start_at, end_at)
+    streak_current = int(getattr(progress, "streak", 0) or 0)
+
+    if active_days_7d >= 5 and quests_completed_7d >= 7:
+        momentum_state = "excellent"
+    elif active_days_7d >= 3:
+        momentum_state = "stable"
+    else:
+        momentum_state = "at_risk"
+
+    if weekly_goal is None:
+        weekly_goal = get_weekly_goal_summary(db, user)
+
+    if weekly_goal and weekly_goal.get("claimable"):
+        focus_code = "claim_weekly"
+    elif active_days_7d < 3:
+        focus_code = "do_one_task_today"
+    else:
+        focus_code = "push_to_next_tier"
+
+    return {
+        "period_started_at": start_at.isoformat(),
+        "period_ends_at": week_end.isoformat(),
+        "xp_earned_7d": xp_earned_7d,
+        "quests_completed_7d": quests_completed_7d,
+        "active_days_7d": active_days_7d,
+        "streak_current": streak_current,
+        "momentum_state": momentum_state,
+        "focus_code": focus_code,
+    }
 
 
 def get_streak_summary(db: Session, user: User) -> dict[str, Any]:

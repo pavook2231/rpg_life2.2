@@ -586,7 +586,68 @@
       "refreshCostHint": "Стоимость обновления: {cost} золота",
       "merchantTip1": "Добро пожаловать, искатель приключений! Проверь ежедневную сделку для лучшей цены.",
       "merchantTip2": "Редкие предметы светятся силой. Не пропусти избранный сундук!",
-      "merchantTip3": "Товар обновляется ежедневно. Возвращайся завтра за новыми сокровищами."
+      "merchantTip3": "Товар обновляется ежедневно. Возвращайся завтра за новыми сокровищами.",
+      "services": {
+        "title": "Услуги торговца",
+        "subtitle": "Потрать золото на быстрое восстановление и лечение героя.",
+        "buy": "Купить услугу",
+        "effectLabel": "Эффект: {effect}",
+        "priceLabel": "{price} золота",
+        "notAvailableTitle": "Услуга недоступна",
+        "notAvailableDescription": "Эта услуга сейчас недоступна.",
+        "serviceAppliedTitle": "Услуга применена",
+        "fullHealTitle": "Здоровье восстановлено",
+        "woundCuredTitle": "Ранение снято",
+        "healthNow": "Текущее здоровье: {current}/{max} HP",
+        "emptyTitle": "Услуги недоступны",
+        "emptyDescription": "Сейчас нет доступных услуг торговца."
+      },
+      "catalogCount": "{catalog}: {count}",
+      "catalogs": {
+        "equipment": "Снаряжение",
+        "xp_scrolls": "Свитки XP",
+        "contracts": "Контракты",
+        "enchants": "Чары",
+        "services": "Услуги"
+      },
+      "scrolls": {
+        "title": "Свитки опыта",
+        "subtitle": "Мгновенно ускоряют развитие героя.",
+        "buy": "Купить свиток",
+        "notAvailableTitle": "Свиток недоступен",
+        "notAvailableDescription": "Этот свиток сейчас недоступен.",
+        "purchasedTitle": "Свиток использован",
+        "purchasedDescription": "Получено +{xp} XP",
+        "emptyTitle": "Свитков нет",
+        "emptyDescription": "Свитки опыта временно недоступны."
+      },
+      "contracts": {
+        "title": "Контракты на квесты",
+        "subtitle": "Временные бонусы к наградам на ограниченное число квестов.",
+        "buy": "Купить контракт",
+        "notAvailableTitle": "Контракт недоступен",
+        "notAvailableDescription": "Сейчас этот контракт купить нельзя.",
+        "purchasedTitle": "Контракт активирован",
+        "purchasedDescription": "Бонус действует {quests} квестов",
+        "activeTitle": "Активный контракт",
+        "activeDescription": "Осталось квестов: {quests}",
+        "bonusLine": "+{xp}% XP, +{gold}% золота, {quests} квестов",
+        "emptyTitle": "Контрактов нет",
+        "emptyDescription": "Контракты временно недоступны."
+      },
+      "enchants": {
+        "title": "Чары на оружие",
+        "subtitle": "Накладывайте постоянные бонусы на активное оружие.",
+        "buy": "Наложить чары",
+        "notAvailableTitle": "Чары недоступны",
+        "notAvailableDescription": "Сейчас зачарование недоступно.",
+        "purchasedTitle": "Чары наложены",
+        "purchasedDescription": "Применено к оружию: {weapon}",
+        "targetLabel": "Цель: {weapon}",
+        "currentLabel": "Текущие чары: {enchant}",
+        "emptyTitle": "Чар нет",
+        "emptyDescription": "Чары на оружие временно недоступны."
+      }
     },
     "loading": {
       "subtitle": "Подготовка игрового мира..."

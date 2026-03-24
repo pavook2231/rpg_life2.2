@@ -839,18 +839,20 @@ def authenticate_social_mobile(
     provider_config = next((entry for entry in get_social_auth_providers() if entry["id"] == provider), None)
     if not provider_config:
         raise HTTPException(status_code=400, detail="Unsupported social auth provider")
+
+    if bridge_ticket and provider in {"google", "vk"}:
+        bridged_payload = consume_social_bridge_ticket(bridge_ticket)
+        if not bridged_payload:
+            label = "Google" if provider == "google" else "VK ID"
+            raise HTTPException(status_code=400, detail=f"{label} sign-in session has expired or was already used")
+        return bridged_payload
+
     if not provider_config["enabled"]:
         raise HTTPException(status_code=400, detail=f"{provider_config['label']} sign-in is disabled")
     if not provider_config["configured"]:
         raise HTTPException(status_code=503, detail=f"{provider_config['label']} sign-in is not configured yet")
 
     if provider == "google":
-        if bridge_ticket:
-            bridged_payload = consume_social_bridge_ticket(bridge_ticket)
-            if not bridged_payload:
-                raise HTTPException(status_code=400, detail="Google sign-in session has expired or was already used")
-            return bridged_payload
-
         if not id_token:
             raise HTTPException(status_code=400, detail="Google sign-in requires bridge_ticket or id_token")
 
@@ -885,12 +887,6 @@ def authenticate_social_mobile(
         return _build_auth_payload_for_user(db, user, needs_goal_setup=is_new_user)
 
     if provider == "vk":
-        if bridge_ticket:
-            bridged_payload = consume_social_bridge_ticket(bridge_ticket)
-            if not bridged_payload:
-                raise HTTPException(status_code=400, detail="VK ID sign-in session has expired or was already used")
-            return bridged_payload
-
         if not access_token:
             raise HTTPException(status_code=400, detail="VK ID sign-in requires bridge_ticket or access_token")
 

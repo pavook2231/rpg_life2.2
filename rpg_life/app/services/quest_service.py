@@ -190,10 +190,25 @@ def get_daily_quests(
     if not user:
         return {"items": [], "pagination": {"page": page, "limit": limit, "total_items": 0, "total_pages": 1}}
 
-    # Preserve legacy boss/rare generation while goal-quests are the primary daily flow.
-    for progress in crud.get_all_unlocked_classes(db, user_id):
-        crud.generate_boss_quests(db, user_id, progress.class_name)
-        crud.generate_rare_mission(db, user_id, progress.class_name)
+    is_first_page = page == 1
+    if is_first_page:
+        # Preserve legacy boss/rare generation, but avoid running it on every paginated read.
+        daily_window_start = goal_service._daily_window_start()
+        has_recent_legacy_quest = (
+            db.query(Quest.id)
+            .filter(
+                Quest.user_id == user_id,
+                Quest.is_custom == False,
+                Quest.quest_type.in_(["boss_daily", "boss_weekly", "boss_challenge", "rare_mission"]),
+                Quest.created_at >= daily_window_start,
+                or_(Quest.is_archived == False, Quest.is_archived == None),
+            )
+            .first()
+        )
+        if not has_recent_legacy_quest:
+            for progress in crud.get_all_unlocked_classes(db, user_id):
+                crud.generate_boss_quests(db, user_id, progress.class_name)
+                crud.generate_rare_mission(db, user_id, progress.class_name)
 
     payload = goal_service.get_user_goal_quests(
         db,
@@ -203,13 +218,16 @@ def get_daily_quests(
         sort=sort,
         bucket=bucket if bucket in {"daily", "weekly", "long_term"} else None,
     )
+    if not is_first_page:
+        return normalize_nested_strings(payload)
+
     system_items = payload.get("items", [])
     custom_rows = (
         db.query(Quest)
         .filter(
             Quest.user_id == user_id,
             Quest.is_custom == True,
-            Quest.created_at >= goal_service._daily_window_start(),
+            Quest.created_at >= daily_window_start,
             or_(Quest.is_archived == False, Quest.is_archived == None),
         )
         .order_by(Quest.is_completed.asc(), Quest.created_at.asc())
@@ -251,7 +269,7 @@ def get_daily_quests(
             Quest.user_id == user_id,
             Quest.is_custom == False,
             Quest.quest_type.in_(["boss_daily", "boss_weekly", "boss_challenge", "rare_mission"]),
-            or_(Quest.expires_at == None, Quest.expires_at >= goal_service._daily_window_start()),
+            or_(Quest.expires_at == None, Quest.expires_at >= daily_window_start),
             or_(Quest.is_archived == False, Quest.is_archived == None),
         )
         .order_by(Quest.is_completed.asc(), Quest.created_at.asc())
@@ -287,14 +305,18 @@ def get_daily_quests(
             }
         )
 
-    payload["items"] = sorted(
+    combined_items = sorted(
         [*system_items, *custom_items, *legacy_items],
         key=lambda item: (bool(item.get("is_completed")), int(item.get("id", 0))),
     )
-    payload["pagination"]["total_items"] = len(payload["items"])
-    payload["pagination"]["total_pages"] = 1
-    payload["pagination"]["page"] = 1
-    payload["pagination"]["limit"] = max(len(payload["items"]), 1)
+    payload["items"] = combined_items[:limit]
+
+    base_total_items = int(payload.get("pagination", {}).get("total_items", len(system_items)))
+    total_items = base_total_items + len(custom_items) + len(legacy_items)
+    payload["pagination"]["total_items"] = total_items
+    payload["pagination"]["total_pages"] = max(1, (total_items + limit - 1) // limit)
+    payload["pagination"]["page"] = page
+    payload["pagination"]["limit"] = limit
     return normalize_nested_strings(payload)
 
 

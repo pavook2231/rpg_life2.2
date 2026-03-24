@@ -9,6 +9,8 @@ class InventoryActionSchema(BaseModel):
 
 class ShopPurchaseSchema(BaseModel):
     item_id: int
+    target_inventory_id: int | None = None
+    client_request_id: str | None = None
 
 
 class EquipmentSlotActionSchema(BaseModel):

@@ -20,7 +20,6 @@
     "expo-av": "^16.0.8",
     "expo-constants": "~18.0.10",
     "expo-crypto": "~15.0.8",
-    "expo-dev-client": "~6.0.20",
     "expo-haptics": "~15.0.8",
     "expo-notifications": "~0.32.16",
     "expo-secure-store": "~15.0.8",

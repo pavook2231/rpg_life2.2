@@ -9,7 +9,12 @@ import type {
   ItemArmorStats,
   ItemStats,
   ItemWeaponStats,
+  ShopCatalogTabPayload,
+  ShopQuestContractPayload,
   ShopItemPayload,
+  ShopServicePayload,
+  ShopWeaponEnchantPayload,
+  ShopXpScrollPayload,
   ShopPayload,
 } from "./types";
 
@@ -202,12 +207,130 @@ export function normalizeShopItem(value: unknown): ShopItemPayload {
   };
 }
 
+export function normalizeShopService(value: unknown): ShopServicePayload {
+  const raw = asRecord(value);
+  return {
+    id: asNumber(raw.id, 0),
+    key: asString(raw.key, ""),
+    name: asString(raw.name, "Service"),
+    description: asString(raw.description, ""),
+    icon: asString(raw.icon, "medical-bag"),
+    price_crystals: asNumber(raw.price_crystals, 0),
+    available: Boolean(raw.available),
+    unavailable_reason: asNullableString(raw.unavailable_reason),
+    effect_preview: asString(raw.effect_preview, ""),
+  };
+}
+
+function normalizeShopXpScroll(value: unknown): ShopXpScrollPayload {
+  const raw = asRecord(value);
+  return {
+    id: asNumber(raw.id, 0),
+    key: asString(raw.key, ""),
+    name: asString(raw.name, "XP Scroll"),
+    description: asString(raw.description, ""),
+    icon: asString(raw.icon, "script-text-outline"),
+    xp_amount: asNumber(raw.xp_amount, 0),
+    price_crystals: asNumber(raw.price_crystals, 0),
+    available: Boolean(raw.available),
+    unavailable_reason: asNullableString(raw.unavailable_reason),
+    effect_preview: asString(raw.effect_preview, ""),
+  };
+}
+
+function normalizeShopQuestContract(value: unknown): ShopQuestContractPayload {
+  const raw = asRecord(value);
+  return {
+    id: asNumber(raw.id, 0),
+    key: asString(raw.key, ""),
+    name: asString(raw.name, "Contract"),
+    description: asString(raw.description, ""),
+    icon: asString(raw.icon, "sword-cross"),
+    price_crystals: asNumber(raw.price_crystals, 0),
+    charges: asNumber(raw.charges, 0),
+    xp_bonus: asNumber(raw.xp_bonus, 0),
+    gold_bonus: asNumber(raw.gold_bonus, 0),
+    loot_bonus: asNumber(raw.loot_bonus, 0),
+    available: Boolean(raw.available),
+    unavailable_reason: asNullableString(raw.unavailable_reason),
+    effect_preview: asString(raw.effect_preview, ""),
+    active: Boolean(raw.active),
+  };
+}
+
+function normalizeShopWeaponEnchant(value: unknown): ShopWeaponEnchantPayload {
+  const raw = asRecord(value);
+  const effectsRaw = asRecord(raw.effects);
+  const effects: Record<string, number> = {};
+  for (const [key, entryValue] of Object.entries(effectsRaw)) {
+    if (typeof entryValue === "number" && Number.isFinite(entryValue)) {
+      effects[key] = entryValue;
+    }
+  }
+  const currentEnchantRaw = asRecord(raw.current_enchant);
+  return {
+    id: asNumber(raw.id, 0),
+    key: asString(raw.key, ""),
+    name: asString(raw.name, "Enchant"),
+    description: asString(raw.description, ""),
+    icon: asString(raw.icon, "creation"),
+    price_crystals: asNumber(raw.price_crystals, 0),
+    effects,
+    available: Boolean(raw.available),
+    unavailable_reason: asNullableString(raw.unavailable_reason),
+    effect_preview: asString(raw.effect_preview, ""),
+    target_inventory_id: typeof raw.target_inventory_id === "number" ? raw.target_inventory_id : undefined,
+    target_weapon_name: asNullableString(raw.target_weapon_name),
+    current_enchant: Object.keys(currentEnchantRaw).length
+      ? {
+          key: asOptionalString(currentEnchantRaw.key),
+          name: asOptionalString(currentEnchantRaw.name),
+        }
+      : null,
+  };
+}
+
+function normalizeShopCatalogTab(value: unknown): ShopCatalogTabPayload {
+  const raw = asRecord(value);
+  return {
+    key: asString(raw.key, ""),
+    label: asString(raw.label, ""),
+    count: asNumber(raw.count, 0),
+  };
+}
+
 export function normalizeShopPayload(value: unknown): ShopPayload {
   const raw = asRecord(value);
   const items = (Array.isArray(raw.items) ? raw.items : []).map((item) => normalizeShopItem(item));
+  const services = (Array.isArray(raw.services) ? raw.services : []).map((service) => normalizeShopService(service));
+  const xpScrolls = (Array.isArray(raw.xp_scrolls) ? raw.xp_scrolls : []).map((entry) => normalizeShopXpScroll(entry));
+  const questContracts = (Array.isArray(raw.quest_contracts) ? raw.quest_contracts : []).map((entry) =>
+    normalizeShopQuestContract(entry),
+  );
+  const weaponEnchants = (Array.isArray(raw.weapon_enchants) ? raw.weapon_enchants : []).map((entry) =>
+    normalizeShopWeaponEnchant(entry),
+  );
+  const activeContractRaw = asRecord(raw.active_contract);
+  const catalogTabs = (Array.isArray(raw.catalog_tabs) ? raw.catalog_tabs : []).map((entry) => normalizeShopCatalogTab(entry));
   snapshot.catalogItemIds = items.map((item) => item.id).filter(Boolean);
   return {
     items,
+    services,
+    xp_scrolls: xpScrolls,
+    quest_contracts: questContracts,
+    weapon_enchants: weaponEnchants,
+    active_contract: Object.keys(activeContractRaw).length
+      ? {
+          key: asOptionalString(activeContractRaw.key),
+          name: asOptionalString(activeContractRaw.name),
+          remaining_quests: typeof activeContractRaw.remaining_quests === "number" ? activeContractRaw.remaining_quests : undefined,
+          total_quests: typeof activeContractRaw.total_quests === "number" ? activeContractRaw.total_quests : undefined,
+          xp_bonus: typeof activeContractRaw.xp_bonus === "number" ? activeContractRaw.xp_bonus : undefined,
+          gold_bonus: typeof activeContractRaw.gold_bonus === "number" ? activeContractRaw.gold_bonus : undefined,
+          loot_bonus: typeof activeContractRaw.loot_bonus === "number" ? activeContractRaw.loot_bonus : undefined,
+        }
+      : null,
+    catalog_tabs: catalogTabs,
     crystals: asNumber(raw.crystals, 0),
     character_level: asNumber(raw.character_level, 1),
     refresh_cost: asNumber(raw.refresh_cost, 0),

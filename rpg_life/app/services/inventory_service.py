@@ -1,14 +1,19 @@
 from datetime import datetime, timedelta
 import logging
+import re
+import threading
+import time
+import uuid
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session, joinedload
 
 from app.class_roles import score_item_for_class
 from app import crud
+from app import shop_runtime
 from app.beta_content import CHEST_CATALOG
 from app.chest_items import CHEST_PRESENTATION, ensure_chest_item, get_chest_catalog_entry, grant_chest_to_user
-from app.core.cache import cache_get_json, cache_set_json
+from app.core.cache import cache_acquire_lock, cache_get_json, cache_release_lock, cache_set_json
 from app.core.dates import utc_now
 from app.equipment_service import (
     EquipmentError,
@@ -44,6 +49,85 @@ CHEST_SHOP_IDS = {
     "LEGENDARY_CHEST": -9004,
 }
 CHEST_SHOP_PRESENTATION = CHEST_PRESENTATION
+SHOP_SERVICE_IDS = {
+    "bandage": -9101,
+    "full_heal": -9102,
+    "wound_cure": -9103,
+}
+SHOP_SERVICE_IDS_REVERSE = {value: key for key, value in SHOP_SERVICE_IDS.items()}
+SHOP_SERVICE_DEFINITIONS = {
+    "bandage": {
+        "name": "Bandage",
+        "description": "Restore part of your hero's health.",
+        "icon": "bandage",
+    },
+    "full_heal": {
+        "name": "Battle Healer",
+        "description": "Restore health to maximum.",
+        "icon": "heart-plus",
+    },
+    "wound_cure": {
+        "name": "Wound Cleanse",
+        "description": "Remove wounded state and restore full health.",
+        "icon": "medical-bag",
+    },
+}
+SHOP_PURCHASE_GUARD_SECONDS = 8.0
+_CLIENT_REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:\-]{5,127}$")
+_SHOP_PURCHASE_GUARD_LOCK = threading.Lock()
+_SHOP_PURCHASE_GUARD: dict[str, float] = {}
+
+
+def _normalize_client_request_id(client_request_id: str | None) -> str | None:
+    if not client_request_id:
+        return None
+    normalized = str(client_request_id).strip()
+    if not normalized:
+        return None
+    if not _CLIENT_REQUEST_ID_RE.match(normalized):
+        raise HTTPException(status_code=400, detail="Invalid client_request_id format")
+    return normalized
+
+
+def _acquire_shop_purchase_guard(user_id: int, item_id: int, target_inventory_id: int | None) -> str:
+    marker = f"{int(user_id)}:{int(item_id)}:{int(target_inventory_id or 0)}"
+    now_mono = time.monotonic()
+    with _SHOP_PURCHASE_GUARD_LOCK:
+        stale_markers = [key for key, expires_at in _SHOP_PURCHASE_GUARD.items() if expires_at <= now_mono]
+        for key in stale_markers:
+            _SHOP_PURCHASE_GUARD.pop(key, None)
+        existing_expires_at = _SHOP_PURCHASE_GUARD.get(marker)
+        if existing_expires_at and existing_expires_at > now_mono:
+            raise HTTPException(status_code=409, detail="Purchase is already processing")
+        _SHOP_PURCHASE_GUARD[marker] = now_mono + SHOP_PURCHASE_GUARD_SECONDS
+    return marker
+
+
+def _release_shop_purchase_guard(marker: str) -> None:
+    with _SHOP_PURCHASE_GUARD_LOCK:
+        _SHOP_PURCHASE_GUARD.pop(marker, None)
+
+
+def _shop_purchase_lock_key(user_id: int, item_id: int, target_inventory_id: int | None) -> str:
+    return f"shop:purchase-lock:{int(user_id)}:{int(item_id)}:{int(target_inventory_id or 0)}"
+
+
+def _acquire_distributed_shop_purchase_guard(
+    user_id: int,
+    item_id: int,
+    target_inventory_id: int | None,
+) -> tuple[str, str]:
+    lock_key = _shop_purchase_lock_key(user_id, item_id, target_inventory_id)
+    owner_token = uuid.uuid4().hex
+    lock_ttl = max(1, int(SHOP_PURCHASE_GUARD_SECONDS))
+    acquired = cache_acquire_lock(lock_key, owner_token, ttl_seconds=lock_ttl)
+    if not acquired:
+        raise HTTPException(status_code=409, detail="Purchase is already processing")
+    return lock_key, owner_token
+
+
+def _release_distributed_shop_purchase_guard(lock_key: str, owner_token: str) -> None:
+    cache_release_lock(lock_key, owner_token)
 
 
 def _get_chest_catalog_entry(chest_name: str) -> dict:
@@ -395,6 +479,276 @@ def _get_shop_meta(next_rotation_at: datetime) -> dict:
     }
 
 
+def _is_progress_wounded(progress: UserClassProgress | None, now: datetime | None = None) -> bool:
+    if progress is None:
+        return False
+    wounded_until = getattr(progress, "wounded_until", None)
+    penalty_quests_remaining = max(0, int(getattr(progress, "penalty_quests_remaining", 0) or 0))
+    reward_penalty_percent = float(getattr(progress, "reward_penalty_percent", 0.0) or 0.0)
+    current = now or utc_now()
+    return bool(
+        reward_penalty_percent > 0
+        and (penalty_quests_remaining > 0 or (wounded_until is not None and wounded_until > current))
+    )
+
+
+def _normalized_health_values(progress: UserClassProgress | None) -> tuple[int, int]:
+    if progress is None:
+        return 100, 100
+    max_health = max(1, int(getattr(progress, "max_health", 100) or 100))
+    current_health = max(0, min(max_health, int(getattr(progress, "current_health", max_health) or max_health)))
+    return max_health, current_health
+
+
+def _serialize_health_payload(progress: UserClassProgress | None) -> dict:
+    max_health, current_health = _normalized_health_values(progress)
+    wounded_until = getattr(progress, "wounded_until", None) if progress is not None else None
+    penalty_quests_remaining = max(0, int(getattr(progress, "penalty_quests_remaining", 0) or 0)) if progress is not None else 0
+    reward_penalty_percent = float(getattr(progress, "reward_penalty_percent", 0.0) or 0.0) if progress is not None else 0.0
+    is_wounded = _is_progress_wounded(progress)
+    return {
+        "max_health": max_health,
+        "current_health": current_health,
+        "health_percent": int(round(current_health * 100 / max_health)),
+        "is_wounded": is_wounded,
+        "wounded_until": wounded_until.isoformat() if wounded_until else None,
+        "penalty_quests_remaining": penalty_quests_remaining,
+        "reward_penalty_percent": round(reward_penalty_percent * 100, 1),
+        "last_health_decay_at": getattr(progress, "last_health_decay_at", None).isoformat()
+        if progress is not None and getattr(progress, "last_health_decay_at", None)
+        else None,
+    }
+
+
+def _shop_service_price(service_key: str, level: int) -> int:
+    normalized_level = max(1, int(level or 1))
+    if service_key == "bandage":
+        return 20 + normalized_level * 8
+    if service_key == "full_heal":
+        return 40 + normalized_level * 11
+    if service_key == "wound_cure":
+        return 65 + normalized_level * 14
+    raise KeyError(service_key)
+
+
+def _build_shop_services(progress: UserClassProgress | None, level: int) -> list[dict]:
+    max_health, current_health = _normalized_health_values(progress)
+    is_wounded = _is_progress_wounded(progress)
+    services: list[dict] = []
+
+    for service_key, service_meta in SHOP_SERVICE_DEFINITIONS.items():
+        price = _shop_service_price(service_key, level)
+        payload = {
+            "id": SHOP_SERVICE_IDS[service_key],
+            "key": service_key,
+            "name": service_meta["name"],
+            "description": service_meta["description"],
+            "icon": service_meta["icon"],
+            "price_crystals": price,
+            "available": False,
+            "unavailable_reason": None,
+            "effect_preview": "",
+        }
+
+        if progress is None:
+            payload["unavailable_reason"] = "Character not found"
+            payload["effect_preview"] = "Unavailable"
+            services.append(payload)
+            continue
+
+        if service_key == "bandage":
+            heal_amount = max(1, int(round(max_health * 0.35)))
+            payload["effect_preview"] = f"Heal +{heal_amount} HP"
+            if is_wounded:
+                payload["unavailable_reason"] = "Unavailable while wounded"
+            elif current_health >= max_health:
+                payload["unavailable_reason"] = "Health is already full"
+            else:
+                payload["available"] = True
+        elif service_key == "full_heal":
+            payload["effect_preview"] = "Restore to full HP"
+            if is_wounded:
+                payload["unavailable_reason"] = "Unavailable while wounded"
+            elif current_health >= max_health:
+                payload["unavailable_reason"] = "Health is already full"
+            else:
+                payload["available"] = True
+        elif service_key == "wound_cure":
+            payload["effect_preview"] = "Remove wounded state and restore full HP"
+            if not is_wounded:
+                payload["unavailable_reason"] = "Hero is not wounded"
+            else:
+                payload["available"] = True
+        services.append(payload)
+
+    return services
+
+
+def _apply_shop_service_effect(progress: UserClassProgress, service_key: str) -> None:
+    max_health, current_health = _normalized_health_values(progress)
+    if service_key == "bandage":
+        heal_amount = max(1, int(round(max_health * 0.35)))
+        progress.current_health = min(max_health, current_health + heal_amount)
+        return
+    if service_key == "full_heal":
+        progress.current_health = max_health
+        return
+    if service_key == "wound_cure":
+        progress.wounded_until = None
+        progress.penalty_quests_remaining = 0
+        progress.reward_penalty_percent = 0.0
+        progress.current_health = max_health
+        return
+    raise KeyError(service_key)
+
+
+def _build_shop_xp_scrolls(progress: UserClassProgress | None) -> list[dict]:
+    if progress is None:
+        return [
+            {
+                **product,
+                "available": False,
+                "unavailable_reason": "Character not found",
+                "effect_preview": f"+{int(product['xp_amount'])} XP",
+            }
+            for product in shop_runtime.XP_SCROLL_PRODUCTS
+        ]
+
+    level = max(1, int(getattr(progress, "level", 1) or 1))
+    return [
+        {
+            **product,
+            "available": True,
+            "unavailable_reason": None,
+            "effect_preview": f"+{int(product['xp_amount'])} XP (Level {level})",
+        }
+        for product in shop_runtime.XP_SCROLL_PRODUCTS
+    ]
+
+
+def _build_shop_contracts(current_user: User, progress: UserClassProgress | None) -> list[dict]:
+    active_contract = shop_runtime.get_active_contract(current_user.id)
+    contracts: list[dict] = []
+    for product in shop_runtime.QUEST_CONTRACT_PRODUCTS:
+        effect_preview = (
+            f"+{int(round(float(product['xp_bonus']) * 100))}% XP • "
+            f"+{int(round(float(product['gold_bonus']) * 100))}% gold • "
+            f"{int(product['charges'])} quests"
+        )
+        contracts.append(
+            {
+                **product,
+                "available": bool(progress),
+                "unavailable_reason": None if progress else "Character not found",
+                "effect_preview": effect_preview,
+                "active": bool(active_contract and active_contract.get("key") == product["key"]),
+            }
+        )
+    return contracts
+
+
+def _resolve_target_weapon_inventory_id(db: Session, current_user: User, preferred_inventory_id: int | None = None) -> int | None:
+    if preferred_inventory_id:
+        preferred = (
+            db.query(UserInventory)
+            .options(joinedload(UserInventory.item))
+            .filter(UserInventory.user_id == current_user.id, UserInventory.id == preferred_inventory_id)
+            .first()
+        )
+        if preferred and preferred.item and preferred.item.type == "weapon":
+            return preferred.id
+
+    classes = crud.get_all_unlocked_classes(db, current_user.id)
+    class_progress_id = classes[0].id if classes else None
+    if class_progress_id is not None:
+        try:
+            equipment_payload = get_equipped_items(db, current_user.id, class_progress_id)
+            for slot in ("main_hand", "off_hand", "ranged"):
+                slot_entry = equipment_payload.get("equipment", {}).get(slot)
+                if slot_entry and slot_entry.get("inventory_id"):
+                    return int(slot_entry["inventory_id"])
+        except Exception:
+            pass
+
+    fallback = (
+        db.query(UserInventory)
+        .options(joinedload(UserInventory.item))
+        .filter(UserInventory.user_id == current_user.id)
+        .order_by(UserInventory.acquired_at.desc())
+        .all()
+    )
+    for row in fallback:
+        if row.item and row.item.type == "weapon":
+            return row.id
+    return None
+
+
+def _build_shop_weapon_enchants(db: Session, current_user: User, progress: UserClassProgress | None) -> list[dict]:
+    target_inventory_id = _resolve_target_weapon_inventory_id(db, current_user)
+    target_weapon_name = None
+    if target_inventory_id:
+        target_row = (
+            db.query(UserInventory)
+            .options(joinedload(UserInventory.item))
+            .filter(UserInventory.user_id == current_user.id, UserInventory.id == target_inventory_id)
+            .first()
+        )
+        if target_row and target_row.item:
+            target_weapon_name = target_row.item.name
+
+    active_enchant = shop_runtime.get_weapon_enchant_for_inventory(current_user.id, target_inventory_id) if target_inventory_id else None
+    enchants: list[dict] = []
+    for product in shop_runtime.WEAPON_ENCHANT_PRODUCTS:
+        effects = product.get("effects", {}) or {}
+        lines: list[str] = []
+        if effects.get("damage_min") or effects.get("damage_max"):
+            lines.append(f"Damage +{int(effects.get('damage_min', 0))}-{int(effects.get('damage_max', 0))}")
+        if effects.get("strength"):
+            lines.append(f"Strength +{int(effects['strength'])}")
+        if effects.get("agility"):
+            lines.append(f"Agility +{int(effects['agility'])}")
+        if effects.get("intellect"):
+            lines.append(f"Intellect +{int(effects['intellect'])}")
+        if effects.get("critical_chance"):
+            lines.append(f"Crit +{int(round(float(effects['critical_chance']) * 100))}%")
+        if effects.get("luck"):
+            lines.append(f"Luck +{int(round(float(effects['luck']) * 100))}%")
+        if effects.get("xp_bonus"):
+            lines.append(f"XP gain +{int(round(float(effects['xp_bonus']) * 100))}%")
+        if effects.get("gold_bonus"):
+            lines.append(f"Gold gain +{int(round(float(effects['gold_bonus']) * 100))}%")
+
+        available = bool(progress and target_inventory_id)
+        unavailable_reason = None
+        if not progress:
+            unavailable_reason = "Character not found"
+        elif not target_inventory_id:
+            unavailable_reason = "No weapon found in inventory"
+
+        enchants.append(
+            {
+                **product,
+                "available": available,
+                "unavailable_reason": unavailable_reason,
+                "effect_preview": " • ".join(lines) if lines else "Weapon bonus",
+                "target_inventory_id": target_inventory_id,
+                "target_weapon_name": target_weapon_name,
+                "current_enchant": active_enchant,
+            }
+        )
+    return enchants
+
+
+def _build_catalog_tabs(items: list[dict], services: list[dict], xp_scrolls: list[dict], quest_contracts: list[dict], weapon_enchants: list[dict]) -> list[dict]:
+    return [
+        {"key": shop_runtime.SHOP_CATALOG_KEYS["equipment"], "label": "Equipment", "count": len(items)},
+        {"key": shop_runtime.SHOP_CATALOG_KEYS["xp_scrolls"], "label": "XP Scrolls", "count": len(xp_scrolls)},
+        {"key": shop_runtime.SHOP_CATALOG_KEYS["contracts"], "label": "Contracts", "count": len(quest_contracts)},
+        {"key": shop_runtime.SHOP_CATALOG_KEYS["enchants"], "label": "Enchants", "count": len(weapon_enchants)},
+        {"key": shop_runtime.SHOP_CATALOG_KEYS["services"], "label": "Services", "count": len(services)},
+    ]
+
+
 def _validate_inventory_item_reference(inv: UserInventory) -> Item:
     if inv.item is None:
         logger.error("Inventory row references missing item: inventory_id=%s item_id=%s", inv.id, inv.item_id)
@@ -471,9 +825,20 @@ def get_shop_context(db: Session, current_user: User) -> dict:
     progress = _get_main_progress(db, current_user.id)
     level = progress.level if progress else 1
     items, next_rotation_at = _resolve_shop_items(db, current_user, level)
+    services = _build_shop_services(progress, level)
+    xp_scrolls = _build_shop_xp_scrolls(progress)
+    quest_contracts = _build_shop_contracts(current_user, progress)
+    weapon_enchants = _build_shop_weapon_enchants(db, current_user, progress)
+    active_contract = shop_runtime.get_active_contract(current_user.id)
 
     return {
         "items": items,
+        "services": services,
+        "xp_scrolls": xp_scrolls,
+        "quest_contracts": quest_contracts,
+        "weapon_enchants": weapon_enchants,
+        "active_contract": active_contract,
+        "catalog_tabs": _build_catalog_tabs(items, services, xp_scrolls, quest_contracts, weapon_enchants),
         "crystals": progress.crystals if progress else 0,
         "character_level": level,
         **_get_shop_meta(next_rotation_at),
@@ -511,6 +876,18 @@ def _legacy_refresh_shop_context_unused(db: Session, current_user: User) -> dict
 
     return {
         "items": items,
+        "services": _build_shop_services(progress, progress.level),
+        "xp_scrolls": _build_shop_xp_scrolls(progress),
+        "quest_contracts": _build_shop_contracts(current_user, progress),
+        "weapon_enchants": _build_shop_weapon_enchants(db, current_user, progress),
+        "active_contract": shop_runtime.get_active_contract(current_user.id),
+        "catalog_tabs": _build_catalog_tabs(
+            items,
+            _build_shop_services(progress, progress.level),
+            _build_shop_xp_scrolls(progress),
+            _build_shop_contracts(current_user, progress),
+            _build_shop_weapon_enchants(db, current_user, progress),
+        ),
         "crystals": progress.crystals,
         "character_level": progress.level,
         **_get_shop_meta(next_rotation_at),
@@ -523,49 +900,231 @@ def refresh_shop_context(db: Session, current_user: User) -> dict:
 
     items, next_rotation_at = _resolve_shop_items(db, current_user, progress.level, force_refresh=True)
 
+    services = _build_shop_services(progress, progress.level)
+    xp_scrolls = _build_shop_xp_scrolls(progress)
+    quest_contracts = _build_shop_contracts(current_user, progress)
+    weapon_enchants = _build_shop_weapon_enchants(db, current_user, progress)
     return {
         "items": items,
+        "services": services,
+        "xp_scrolls": xp_scrolls,
+        "quest_contracts": quest_contracts,
+        "weapon_enchants": weapon_enchants,
+        "active_contract": shop_runtime.get_active_contract(current_user.id),
+        "catalog_tabs": _build_catalog_tabs(items, services, xp_scrolls, quest_contracts, weapon_enchants),
         "crystals": progress.crystals,
         "character_level": progress.level,
         **_get_shop_meta(next_rotation_at),
     }
 
 
-def buy_shop_item(db: Session, current_user: User, item_id: int) -> dict:
-    if item_id in CHEST_SHOP_IDS.values():
-        chest_name = next((name for name, shop_id in CHEST_SHOP_IDS.items() if shop_id == item_id), None)
-        if not chest_name:
-            raise HTTPException(status_code=404, detail="\u0421\u0443\u043d\u0434\u0443\u043a \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d")
-        progress = _get_main_progress(db, current_user.id)
-        if not progress:
-            raise HTTPException(status_code=404, detail="Character not found")
-        chest_payload = _get_chest_catalog_entry(chest_name)
-        if progress.crystals < chest_payload["gold_cost"]:
-            raise HTTPException(status_code=400, detail="Недостаточно золота")
+def buy_shop_item(
+    db: Session,
+    current_user: User,
+    item_id: int,
+    target_inventory_id: int | None = None,
+    client_request_id: str | None = None,
+) -> dict:
+    normalized_client_request_id = _normalize_client_request_id(client_request_id)
+    if normalized_client_request_id:
+        cached_result = shop_runtime.get_cached_purchase_result(current_user.id, normalized_client_request_id)
+        if cached_result:
+            replayed = dict(cached_result)
+            replayed["idempotency_replayed"] = True
+            replayed["client_request_id"] = normalized_client_request_id
+            return replayed
 
-        progress.crystals -= chest_payload["gold_cost"]
-        inventory_item = _grant_shop_chest_to_user(db, current_user.id, chest_name)
-        chest_item = inventory_item.item or _ensure_shop_chest_item(db, chest_name)
-        db.add(progress)
-        db.commit()
+    guard_marker = _acquire_shop_purchase_guard(current_user.id, item_id, target_inventory_id)
+    distributed_lock: tuple[str, str] | None = None
 
-        return {
-            "ok": True,
-            "kind": "chest",
-            "chest_name": chest_name,
-            "inventory_id": inventory_item.id,
-            "chest_item": {
-                "id": chest_item.id,
-                "name": chest_item.name,
-                "icon": chest_item.icon,
-                "rarity": chest_item.rarity or chest_payload["rarity"],
-            },
-        }
+    def _build_purchase_result(payload: dict, *, price_paid: int, balance_after: int | None) -> dict:
+        result = dict(payload)
+        result["price_paid"] = max(0, int(price_paid or 0))
+        if balance_after is not None:
+            result["balance_after"] = max(0, int(balance_after))
+        if normalized_client_request_id:
+            result["client_request_id"] = normalized_client_request_id
+            result["idempotency_replayed"] = False
+            shop_runtime.cache_purchase_result(current_user.id, normalized_client_request_id, result)
+        return result
 
-    success = buy_item(db, current_user.id, item_id)
-    if not success:
-        raise HTTPException(status_code=400, detail="Недостаточно кристаллов, предмет не найден или не хватает уровня")
-    return {"ok": True, "kind": "item"}
+    try:
+        distributed_lock = _acquire_distributed_shop_purchase_guard(current_user.id, item_id, target_inventory_id)
+        service_key = SHOP_SERVICE_IDS_REVERSE.get(item_id)
+        if service_key:
+            progress = _get_main_progress(db, current_user.id)
+            if not progress:
+                raise HTTPException(status_code=404, detail="Character not found")
+
+            services = _build_shop_services(progress, progress.level)
+            selected_service = next((service for service in services if service["key"] == service_key), None)
+            if selected_service is None:
+                raise HTTPException(status_code=404, detail="Service not found")
+            if not selected_service.get("available"):
+                raise HTTPException(
+                    status_code=400,
+                    detail=selected_service.get("unavailable_reason") or "Service is currently unavailable",
+                )
+            service_price = int(selected_service.get("price_crystals") or 0)
+            if progress.crystals < service_price:
+                raise HTTPException(status_code=400, detail="Not enough gold")
+
+            progress.crystals -= service_price
+            _apply_shop_service_effect(progress, service_key)
+            db.add(progress)
+            db.commit()
+            db.refresh(progress)
+            return _build_purchase_result(
+                {
+                    "ok": True,
+                    "kind": "service",
+                    "service_key": service_key,
+                    "service_name": selected_service["name"],
+                    "health": _serialize_health_payload(progress),
+                },
+                price_paid=service_price,
+                balance_after=progress.crystals,
+            )
+
+        xp_scroll = shop_runtime.XP_SCROLL_BY_ID.get(item_id)
+        if xp_scroll:
+            progress = _get_main_progress(db, current_user.id)
+            if not progress:
+                raise HTTPException(status_code=404, detail="Character not found")
+            scroll_price = int(xp_scroll.get("price_crystals") or 0)
+            if progress.crystals < scroll_price:
+                raise HTTPException(status_code=400, detail="Not enough gold")
+
+            progress.crystals -= scroll_price
+            progress, level_ups, _ = crud.add_xp_and_stats(db, progress, int(xp_scroll.get("xp_amount") or 0), "common")
+            return _build_purchase_result(
+                {
+                    "ok": True,
+                    "kind": "xp_scroll",
+                    "scroll_key": xp_scroll["key"],
+                    "scroll_name": xp_scroll["name"],
+                    "xp_gained": int(xp_scroll.get("xp_amount") or 0),
+                    "level_ups": level_ups,
+                    "new_level": progress.level,
+                    "new_xp": progress.current_xp,
+                },
+                price_paid=scroll_price,
+                balance_after=progress.crystals,
+            )
+
+        quest_contract = shop_runtime.QUEST_CONTRACT_BY_ID.get(item_id)
+        if quest_contract:
+            progress = _get_main_progress(db, current_user.id)
+            if not progress:
+                raise HTTPException(status_code=404, detail="Character not found")
+            contract_price = int(quest_contract.get("price_crystals") or 0)
+            if progress.crystals < contract_price:
+                raise HTTPException(status_code=400, detail="Not enough gold")
+            progress.crystals -= contract_price
+            active_contract = shop_runtime.set_active_contract(current_user.id, quest_contract)
+            db.add(progress)
+            db.commit()
+            db.refresh(progress)
+            return _build_purchase_result(
+                {
+                    "ok": True,
+                    "kind": "contract",
+                    "contract": active_contract,
+                },
+                price_paid=contract_price,
+                balance_after=progress.crystals,
+            )
+
+        weapon_enchant = shop_runtime.WEAPON_ENCHANT_BY_ID.get(item_id)
+        if weapon_enchant:
+            progress = _get_main_progress(db, current_user.id)
+            if not progress:
+                raise HTTPException(status_code=404, detail="Character not found")
+            enchant_price = int(weapon_enchant.get("price_crystals") or 0)
+            if progress.crystals < enchant_price:
+                raise HTTPException(status_code=400, detail="Not enough gold")
+
+            resolved_target_inventory_id = _resolve_target_weapon_inventory_id(db, current_user, target_inventory_id)
+            if not resolved_target_inventory_id:
+                raise HTTPException(status_code=400, detail="No weapon available for enchant")
+
+            target_row = (
+                db.query(UserInventory)
+                .options(joinedload(UserInventory.item))
+                .filter(UserInventory.user_id == current_user.id, UserInventory.id == resolved_target_inventory_id)
+                .first()
+            )
+            if not target_row or not target_row.item or target_row.item.type != "weapon":
+                raise HTTPException(status_code=400, detail="Selected inventory item is not a weapon")
+
+            progress.crystals -= enchant_price
+            enchant_payload = shop_runtime.set_weapon_enchant(current_user.id, resolved_target_inventory_id, weapon_enchant)
+            db.add(progress)
+            db.commit()
+            db.refresh(progress)
+            return _build_purchase_result(
+                {
+                    "ok": True,
+                    "kind": "enchant",
+                    "enchant": enchant_payload,
+                    "target_inventory_id": resolved_target_inventory_id,
+                    "target_weapon_name": target_row.item.name,
+                },
+                price_paid=enchant_price,
+                balance_after=progress.crystals,
+            )
+
+        if item_id in CHEST_SHOP_IDS.values():
+            chest_name = next((name for name, shop_id in CHEST_SHOP_IDS.items() if shop_id == item_id), None)
+            if not chest_name:
+                raise HTTPException(status_code=404, detail="Chest not found")
+            progress = _get_main_progress(db, current_user.id)
+            if not progress:
+                raise HTTPException(status_code=404, detail="Character not found")
+            chest_payload = _get_chest_catalog_entry(chest_name)
+            chest_price = int(chest_payload.get("gold_cost") or 0)
+            if progress.crystals < chest_price:
+                raise HTTPException(status_code=400, detail="Not enough gold")
+
+            progress.crystals -= chest_price
+            inventory_item = _grant_shop_chest_to_user(db, current_user.id, chest_name)
+            chest_item = inventory_item.item or _ensure_shop_chest_item(db, chest_name)
+            db.add(progress)
+            db.commit()
+            db.refresh(progress)
+
+            return _build_purchase_result(
+                {
+                    "ok": True,
+                    "kind": "chest",
+                    "chest_name": chest_name,
+                    "inventory_id": inventory_item.id,
+                    "chest_item": {
+                        "id": chest_item.id,
+                        "name": chest_item.name,
+                        "icon": chest_item.icon,
+                        "rarity": chest_item.rarity or chest_payload["rarity"],
+                    },
+                },
+                price_paid=chest_price,
+                balance_after=progress.crystals,
+            )
+
+        catalog_item = db.query(Item.id, Item.price_crystals).filter(Item.id == item_id).first()
+        item_price = int(catalog_item.price_crystals or 0) if catalog_item else 0
+        success = buy_item(db, current_user.id, item_id)
+        if not success:
+            raise HTTPException(status_code=400, detail="Not enough gold, item not found, or level too low")
+        refreshed_progress = _get_main_progress(db, current_user.id)
+        return _build_purchase_result(
+            {"ok": True, "kind": "item"},
+            price_paid=item_price,
+            balance_after=(refreshed_progress.crystals if refreshed_progress else None),
+        )
+    finally:
+        if distributed_lock is not None:
+            _release_distributed_shop_purchase_guard(distributed_lock[0], distributed_lock[1])
+        _release_shop_purchase_guard(guard_marker)
 
 
 def equip_inventory_item(db: Session, current_user: User, inventory_id: int, slot: str, class_progress_id: int | None) -> dict:

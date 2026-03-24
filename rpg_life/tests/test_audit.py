@@ -74,6 +74,24 @@ def test_audit_api_write_request_triggers_alert_hook_for_warning(monkeypatch, db
     assert sent == ["warning"]
 
 
+def test_audit_api_write_request_includes_state_details_and_custom_event_type(db_session) -> None:
+    request = _request("POST", "/api/v1/items/buy")
+    request.state.audit_details = {
+        "event_type": "shop_purchase",
+        "item_id": -9201,
+        "price_paid": 25,
+        "balance_after": 475,
+    }
+
+    audit.audit_api_write_request(db_session, request=request, status_code=200, duration_ms=15)
+
+    event = db_session.query(ApiAuditEvent).order_by(ApiAuditEvent.id.desc()).first()
+    assert event is not None
+    assert event.event_type == "shop_purchase"
+    assert '"item_id": -9201' in event.details_json
+    assert '"price_paid": 25' in event.details_json
+
+
 def test_send_test_telegram_alert_reports_disabled(monkeypatch) -> None:
     monkeypatch.setattr(audit, "TELEGRAM_AUDIT_ALERTS_ENABLED", False)
 

@@ -585,7 +585,68 @@
       "refreshCostHint": "Refresh cost: {cost} gold",
       "merchantTip1": "Welcome, adventurer! Check the daily deal for the best value.",
       "merchantTip2": "Rare items glow with power. Don't miss the featured chest!",
-      "merchantTip3": "Stock rotates daily. Come back tomorrow for new treasures."
+      "merchantTip3": "Stock rotates daily. Come back tomorrow for new treasures.",
+      "services": {
+        "title": "Merchant Services",
+        "subtitle": "Spend gold on quick recovery and battlefield treatment.",
+        "buy": "Buy service",
+        "effectLabel": "Effect: {effect}",
+        "priceLabel": "{price} gold",
+        "notAvailableTitle": "Service unavailable",
+        "notAvailableDescription": "This service is currently unavailable.",
+        "serviceAppliedTitle": "Service applied",
+        "fullHealTitle": "Health restored",
+        "woundCuredTitle": "Wound cured",
+        "healthNow": "Current health: {current}/{max} HP",
+        "emptyTitle": "No services available",
+        "emptyDescription": "Merchant services are temporarily unavailable."
+      },
+      "catalogCount": "{catalog}: {count}",
+      "catalogs": {
+        "equipment": "Equipment",
+        "xp_scrolls": "XP Scrolls",
+        "contracts": "Contracts",
+        "enchants": "Enchants",
+        "services": "Services"
+      },
+      "scrolls": {
+        "title": "XP Scrolls",
+        "subtitle": "Instantly boost hero progression with experience scrolls.",
+        "buy": "Buy scroll",
+        "notAvailableTitle": "Scroll unavailable",
+        "notAvailableDescription": "This scroll is currently unavailable.",
+        "purchasedTitle": "Scroll used",
+        "purchasedDescription": "+{xp} XP received",
+        "emptyTitle": "No scrolls available",
+        "emptyDescription": "Experience scrolls are temporarily unavailable."
+      },
+      "contracts": {
+        "title": "Quest Contracts",
+        "subtitle": "Temporary quest bonuses with limited charges.",
+        "buy": "Buy contract",
+        "notAvailableTitle": "Contract unavailable",
+        "notAvailableDescription": "This contract cannot be bought right now.",
+        "purchasedTitle": "Contract activated",
+        "purchasedDescription": "Bonus active for {quests} quests",
+        "activeTitle": "Active contract",
+        "activeDescription": "{quests} quests remaining",
+        "bonusLine": "+{xp}% XP, +{gold}% gold, {quests} quests",
+        "emptyTitle": "No contracts available",
+        "emptyDescription": "Quest contracts are temporarily unavailable."
+      },
+      "enchants": {
+        "title": "Weapon Enchants",
+        "subtitle": "Apply permanent bonuses to your active weapon.",
+        "buy": "Apply enchant",
+        "notAvailableTitle": "Enchant unavailable",
+        "notAvailableDescription": "Enchant cannot be applied right now.",
+        "purchasedTitle": "Enchant applied",
+        "purchasedDescription": "Applied to weapon: {weapon}",
+        "targetLabel": "Target weapon: {weapon}",
+        "currentLabel": "Current enchant: {enchant}",
+        "emptyTitle": "No enchants available",
+        "emptyDescription": "Weapon enchants are temporarily unavailable."
+      }
     },
     "loading": {
       "subtitle": "Preparing the game world..."

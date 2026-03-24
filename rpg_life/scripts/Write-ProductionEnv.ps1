@@ -1,7 +1,7 @@
 param(
   [string]$ProjectRoot = (Split-Path -Parent $PSScriptRoot),
   [string]$PostgresPassword = "rpg_password_123",
-  [string]$CorsOrigins = "http://192.168.0.174:8000,http://192.168.0.175:8000,http://localhost:8000"
+  [string]$CorsOrigins = "https://rpglife.online,https://www.rpglife.online"
 )
 
 $ErrorActionPreference = "Stop"
@@ -14,7 +14,8 @@ APP_ENV=production
 
 SECRET_KEY=$secretKey
 ALGORITHM=HS256
-ACCESS_TOKEN_EXPIRE_DAYS=7
+ACCESS_TOKEN_EXPIRE_MINUTES=30
+REFRESH_TOKEN_EXPIRE_DAYS=14
 
 POSTGRES_DB=rpg_life
 POSTGRES_USER=rpg_user
@@ -35,11 +36,17 @@ CACHE_TTL_PROFILE=45
 CACHE_TTL_INVENTORY=30
 CACHE_TTL_EVENTS=60
 
-COOKIE_SECURE=false
+COOKIE_SECURE=true
 COOKIE_SAMESITE=lax
 
 CORS_ALLOWED_ORIGINS=$CorsOrigins
 CORS_ALLOW_ORIGIN_REGEX=
+CORS_ALLOW_METHODS=GET,POST,PUT,PATCH,DELETE,OPTIONS
+CORS_ALLOW_HEADERS=Authorization,Content-Type,X-CSRF-Token
+CORS_EXPOSE_HEADERS=X-Process-Time-Ms
+TRUST_PROXY_HEADERS=true
+TRUSTED_PROXY_IPS=127.0.0.1/32,10.0.0.0/8,172.16.0.0/12,100.64.0.0/10
+RATE_LIMIT_REQUESTS_PER_MINUTE=120
 
 ENABLE_ACCOUNT_RECOVERY=false
 ENABLE_PUSH_DISPATCH=false

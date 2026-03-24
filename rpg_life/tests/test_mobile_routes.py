@@ -249,11 +249,13 @@ def test_current_user_items_route_forwards_pagination_to_service(monkeypatch) ->
 def test_items_buy_alias_forwards_item_id_to_mobile_service(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
-    def fake_buy_catalog_item(db, current_user, item_id):
+    def fake_buy_catalog_item(db, current_user, item_id, target_inventory_id, client_request_id):
         captured.update({
             "db": db,
             "current_user": current_user,
             "item_id": item_id,
+            "target_inventory_id": target_inventory_id,
+            "client_request_id": client_request_id,
         })
         return {"ok": True, "kind": "item"}
 
@@ -268,9 +270,22 @@ def test_items_buy_alias_forwards_item_id_to_mobile_service(monkeypatch) -> None
     )
     body = json.loads(response.body.decode("utf-8"))
 
-    assert captured == {"db": "demo-db", "current_user": "demo-user", "item_id": 205}
+    assert captured == {
+        "db": "demo-db",
+        "current_user": "demo-user",
+        "item_id": 205,
+        "target_inventory_id": None,
+        "client_request_id": None,
+    }
     assert response.status_code == 200
     assert body["data"]["ok"] is True
+
+
+def test_shop_buy_rate_limit_uses_separate_buckets_for_special_catalogs() -> None:
+    assert mobile_routes._resolve_shop_buy_rate_limit(-9201)[0] == "mobile-shop-buy-scroll"
+    assert mobile_routes._resolve_shop_buy_rate_limit(-9301)[0] == "mobile-shop-buy-contract"
+    assert mobile_routes._resolve_shop_buy_rate_limit(-9401)[0] == "mobile-shop-buy-enchant"
+    assert mobile_routes._resolve_shop_buy_rate_limit(205)[0] == "mobile-shop-buy"
 
 
 def test_items_equip_alias_forwards_payload_to_mobile_service(monkeypatch) -> None:

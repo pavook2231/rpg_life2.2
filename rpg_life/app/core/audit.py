@@ -14,6 +14,7 @@ from starlette.requests import Request
 from app.core import security
 from app.core.config import TELEGRAM_AUDIT_ALERTS_ENABLED, TELEGRAM_AUDIT_BOT_TOKEN, TELEGRAM_AUDIT_CHAT_ID
 from app.core.dates import utc_now
+from app.core.request_ip import get_client_ip
 from app.models import ApiAuditEvent, User
 
 logger = logging.getLogger(__name__)
@@ -54,12 +55,8 @@ _alert_lock = threading.Lock()
 
 
 def _client_ip(request: Request) -> str | None:
-    forwarded_for = request.headers.get("x-forwarded-for")
-    if forwarded_for:
-        return forwarded_for.split(",")[0].strip()
-    if request.client:
-        return request.client.host
-    return None
+    client_ip = get_client_ip(request)
+    return None if client_ip == "unknown" else client_ip
 
 
 def _resolve_user_identity(db: Session, request: Request) -> tuple[int | None, str | None]:
@@ -180,6 +177,7 @@ def record_api_write_event(
     duration_ms: int | None,
     severity: str,
     reason: str | None,
+    event_type: str = "api_write",
     details: dict | None = None,
 ) -> ApiAuditEvent:
     event = ApiAuditEvent(
@@ -189,7 +187,7 @@ def record_api_write_event(
         path=path,
         status_code=int(status_code),
         severity=severity,
-        event_type="api_write",
+        event_type=event_type or "api_write",
         reason=reason,
         ip_address=ip_address,
         user_agent=user_agent,
@@ -227,7 +225,18 @@ def audit_api_write_request(
         failure_burst_count=failure_burst_count,
     )
 
-    details = {"failure_burst_count": failure_burst_count} if failure_burst_count else {}
+    state_details = getattr(request.state, "audit_details", None)
+    details = {}
+    if failure_burst_count:
+        details["failure_burst_count"] = failure_burst_count
+    if isinstance(state_details, dict):
+        details.update({key: value for key, value in state_details.items() if key != "event_type"})
+    event_type = "api_write"
+    if isinstance(state_details, dict):
+        candidate_event_type = state_details.get("event_type")
+        if isinstance(candidate_event_type, str) and candidate_event_type.strip():
+            event_type = candidate_event_type.strip()[:64]
+
     record_api_write_event(
         db,
         user_id=user_id,
@@ -240,6 +249,7 @@ def audit_api_write_request(
         duration_ms=duration_ms,
         severity=severity,
         reason=reason,
+        event_type=event_type,
         details=details,
     )
 

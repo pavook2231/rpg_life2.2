@@ -102,6 +102,9 @@ def test_rewards_summary_includes_engagement_layers(db_session) -> None:
     assert payload["weekly_goal"]["total_tiers"] == 3
     assert payload["weekly_goal"]["next_tier_index"] == 1
     assert len(payload["weekly_goal"]["tiers"]) == 3
+    assert payload["weekly_digest"]["active_days_7d"] >= 1
+    assert payload["weekly_digest"]["momentum_state"] == "at_risk"
+    assert payload["weekly_digest"]["focus_code"] == "claim_weekly"
     assert payload["seasonal_goal"]["objective_type"] == "steps"
     assert payload["seasonal_goal"]["event_title"] == "Spring Festival"
     assert payload["seasonal_goal"]["total_tiers"] == 3
@@ -147,6 +150,34 @@ def test_rewards_summary_exposes_social_feed_and_weekly_rank(db_session) -> None
     assert any(item["kind"] == "friend_requests" for item in pulse["feed_items"])
     assert any(item["kind"] == "weekly_chase" for item in pulse["feed_items"])
     assert any(item["kind"] == "friend_activity" for item in pulse["feed_items"])
+
+
+def test_rewards_summary_weekly_digest_defaults_to_focus_today_without_activity(db_session) -> None:
+    user = _create_user(db_session, "digest-idle@example.com")
+    _create_progress(db_session, user.id, class_name="archer")
+
+    payload = mobile_service.get_rewards_summary(db_session, user)
+    digest = payload["weekly_digest"]
+
+    assert digest["xp_earned_7d"] == 0
+    assert digest["quests_completed_7d"] == 0
+    assert digest["active_days_7d"] == 0
+    assert digest["momentum_state"] == "at_risk"
+    assert digest["focus_code"] == "do_one_task_today"
+
+
+def test_bootstrap_payload_includes_weekly_digest(db_session) -> None:
+    user = _create_user(db_session, "bootstrap-digest@example.com")
+    _create_progress(db_session, user.id, class_name="archer")
+
+    payload = mobile_service.get_bootstrap_payload(db_session, user)
+
+    assert payload["rewards_summary"]["weekly_digest"] is not None
+    assert payload["rewards_summary"]["weekly_digest"]["focus_code"] in {
+        "claim_weekly",
+        "push_to_next_tier",
+        "do_one_task_today",
+    }
 
 
 def test_get_public_user_profile_returns_goal_and_equipment_overview(db_session) -> None:

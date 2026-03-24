@@ -74,6 +74,22 @@ For installable release artifacts:
 - `eas build -p android`
 - `eas build -p ios`
 
+### Local APK build (Windows, faster defaults)
+
+From repository root:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File ".\mobile\scripts\Build-Android-Release.ps1" -UseShortRoot
+```
+
+The script automatically retries native build steps on transient CMake/.cxx file-lock errors.
+
+If the fast mode fails on your machine, retry in safe mode:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File ".\mobile\scripts\Build-Android-Release.ps1" -SafeMode -UseShortRoot
+```
+
 ## 6. Closed beta build
 
 Use environment variables so the release app points to the public beta backend:

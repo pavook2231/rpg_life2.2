@@ -16,6 +16,7 @@ from app.core.config import (
     COOKIE_SAMESITE,
     COOKIE_SECURE,
     CSRF_COOKIE_NAME,
+    REFRESH_TOKEN_EXPIRE_DAYS,
     SECRET_KEY,
 )
 from app.core.dates import utc_now
@@ -24,7 +25,7 @@ from app.models import User
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token", auto_error=False)
-REFRESH_TOKEN_EXPIRE_DELTA = timedelta(days=30)
+REFRESH_TOKEN_EXPIRE_DELTA = timedelta(days=max(1, REFRESH_TOKEN_EXPIRE_DAYS))
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:

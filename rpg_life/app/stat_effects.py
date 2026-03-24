@@ -8,6 +8,7 @@ from .models import (
     UserClassProgress,
     UserInventory,
 )
+from . import shop_runtime
 from .services import progression_service
 
 
@@ -96,6 +97,7 @@ class StatEffects:
             if item_ids
             else []
         )
+        enchant_payloads = shop_runtime.get_weapon_enchants(user_id)
         ability_by_item: dict[int, list[ItemUniqueAbility]] = {}
         for ability in ability_rows:
             ability_by_item.setdefault(ability.item_id, []).append(ability)
@@ -120,6 +122,12 @@ class StatEffects:
                     gear_crit_chance += (ability.proc_chance or 0) * 100
                 if ability.proc_effect in {"luck_bonus", "luck"}:
                     gear_luck_chance += (ability.proc_chance or 0) * 100
+
+            enchant = enchant_payloads.get(str(int(inv_item.id)))
+            if enchant:
+                effects = enchant.get("effects", {}) if isinstance(enchant.get("effects", {}), dict) else {}
+                gear_xp_bonus += float(effects.get("xp_bonus", 0.0) or 0.0)
+                gear_gold_bonus += float(effects.get("gold_bonus", 0.0) or 0.0)
 
         return {
             "crit_points": gear_crit_chance / 0.5 if gear_crit_chance > 0 else 0.0,
@@ -194,6 +202,15 @@ class StatEffects:
 
         final_xp = int(quest_xp * (1 + effects["xp_bonus"]))
         final_crystals = int(quest_crystals * (1 + effects["gold_bonus"]))
+
+        active_contract = shop_runtime.get_active_contract(user_id)
+        if active_contract:
+            contract_xp_bonus = float(active_contract.get("xp_bonus", 0.0) or 0.0)
+            contract_gold_bonus = float(active_contract.get("gold_bonus", 0.0) or 0.0)
+            contract_loot_bonus = float(active_contract.get("loot_bonus", 0.0) or 0.0)
+            final_xp = int(round(final_xp * (1.0 + contract_xp_bonus)))
+            final_crystals = int(round(final_crystals * (1.0 + contract_gold_bonus)))
+            loot_bonus += contract_loot_bonus
 
         is_critical = random.random() < effects["crit_reward_chance"]
         if is_critical:

@@ -11,6 +11,7 @@ import logging
 import time
 
 from app import auth
+from app import shop_runtime
 from app.api.dependencies import enforce_rate_limit
 from app.core.config import (
     COOKIE_SAMESITE,
@@ -100,6 +101,41 @@ def _external_url_for(request: Request, route_name: str) -> str:
         host = f"{host}:{forwarded_port}"
 
     return urlunsplit((scheme, host, internal_url.path, internal_url.query, internal_url.fragment))
+
+
+def _resolve_shop_buy_rate_limit(item_id: int) -> tuple[str, int, int]:
+    if item_id in shop_runtime.XP_SCROLL_BY_ID:
+        return "mobile-shop-buy-scroll", 12, 60
+    if item_id in shop_runtime.QUEST_CONTRACT_BY_ID:
+        return "mobile-shop-buy-contract", 6, 60
+    if item_id in shop_runtime.WEAPON_ENCHANT_BY_ID:
+        return "mobile-shop-buy-enchant", 10, 60
+    return "mobile-shop-buy", 20, 60
+
+
+def _attach_shop_purchase_audit_details(
+    request: Request,
+    *,
+    payload: ShopPurchaseSchema,
+    result: dict,
+    rate_limit_bucket: str,
+) -> None:
+    existing = getattr(request.state, "audit_details", {})
+    merged = dict(existing) if isinstance(existing, dict) else {}
+    merged.update(
+        {
+            "event_type": "shop_purchase",
+            "item_id": int(payload.item_id),
+            "target_inventory_id": payload.target_inventory_id,
+            "client_request_id": payload.client_request_id,
+            "purchase_kind": result.get("kind"),
+            "price_paid": result.get("price_paid"),
+            "balance_after": result.get("balance_after"),
+            "idempotency_replayed": bool(result.get("idempotency_replayed")),
+            "rate_limit_bucket": rate_limit_bucket,
+        }
+    )
+    request.state.audit_details = merged
 
 
 @router.get("/auth/telegram/bridge", summary="Telegram auth bridge", include_in_schema=False)
@@ -1031,9 +1067,28 @@ async def buy_shop_item(
     current_user: User = Depends(auth.get_current_user),
     request: Request = None,
 ):
+    rate_limit_bucket = "mobile-shop-buy"
     if request is not None:
-        await enforce_rate_limit(request, bucket="mobile-shop-buy", limit=20, window_seconds=60)
-    return success_response(mobile_service.buy_shop_item(db, current_user, payload.item_id), "РџРѕРєСѓРїРєР° РІС‹РїРѕР»РЅРµРЅР°")
+        rate_limit_bucket, limit, window_seconds = _resolve_shop_buy_rate_limit(payload.item_id)
+        await enforce_rate_limit(request, bucket=rate_limit_bucket, limit=limit, window_seconds=window_seconds)
+    result = mobile_service.buy_shop_item(
+        db,
+        current_user,
+        payload.item_id,
+        payload.target_inventory_id,
+        payload.client_request_id,
+    )
+    if request is not None:
+        _attach_shop_purchase_audit_details(
+            request,
+            payload=payload,
+            result=result,
+            rate_limit_bucket=rate_limit_bucket,
+        )
+    return success_response(
+        result,
+        "РџРѕРєСѓРїРєР° РІС‹РїРѕР»РЅРµРЅР°",
+    )
 
 
 @router.post("/items/buy", summary="Buy item from canonical catalog")
@@ -1043,9 +1098,28 @@ async def buy_item_alias(
     current_user: User = Depends(auth.get_current_user),
     request: Request = None,
 ):
+    rate_limit_bucket = "mobile-shop-buy"
     if request is not None:
-        await enforce_rate_limit(request, bucket="mobile-shop-buy", limit=20, window_seconds=60)
-    return success_response(mobile_service.buy_catalog_item(db, current_user, payload.item_id), "Item purchased")
+        rate_limit_bucket, limit, window_seconds = _resolve_shop_buy_rate_limit(payload.item_id)
+        await enforce_rate_limit(request, bucket=rate_limit_bucket, limit=limit, window_seconds=window_seconds)
+    result = mobile_service.buy_catalog_item(
+        db,
+        current_user,
+        payload.item_id,
+        payload.target_inventory_id,
+        payload.client_request_id,
+    )
+    if request is not None:
+        _attach_shop_purchase_audit_details(
+            request,
+            payload=payload,
+            result=result,
+            rate_limit_bucket=rate_limit_bucket,
+        )
+    return success_response(
+        result,
+        "Item purchased",
+    )
 
 
 @router.get("/character/equipment", summary="РћР±Р·РѕСЂ СЌРєРёРїРёСЂРѕРІРєРё")
