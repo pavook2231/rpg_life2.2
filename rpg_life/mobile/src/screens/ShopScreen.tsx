@@ -1,6 +1,6 @@
 import { useNavigation } from "@react-navigation/native";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Pressable, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
 
 import { buyShopItem, fetchShop } from "../features/items/itemService";
 import type {
@@ -35,6 +35,100 @@ type ShopVisualItem = ShopItemPayload & {
 const FILTERS: CatalogFilter[] = ["all", "weapon", "armor", "accessory", "chest"];
 const SORT_MODES: SortMode[] = ["rarity", "price", "level", "name"];
 const SHOP_CATALOGS: ShopCatalogTab[] = ["equipment", "xp_scrolls", "contracts", "enchants", "services"];
+
+type CatalogVisual = {
+  icon: string;
+  light: {
+    border: string;
+    bg: string;
+    iconBg: string;
+    countBg: string;
+  };
+  dark: {
+    border: string;
+    bg: string;
+    iconBg: string;
+    countBg: string;
+  };
+};
+
+const CATALOG_VISUALS: Record<ShopCatalogTab, CatalogVisual> = {
+  equipment: {
+    icon: "shield-sword-outline",
+    light: {
+      border: "rgba(183,121,31,0.56)",
+      bg: "rgba(183,121,31,0.2)",
+      iconBg: "rgba(183,121,31,0.22)",
+      countBg: "rgba(183,121,31,0.24)",
+    },
+    dark: {
+      border: "rgba(245,158,11,0.38)",
+      bg: "rgba(245,158,11,0.18)",
+      iconBg: "rgba(245,158,11,0.24)",
+      countBg: "rgba(245,158,11,0.22)",
+    },
+  },
+  xp_scrolls: {
+    icon: "script-text-outline",
+    light: {
+      border: "rgba(22,163,74,0.5)",
+      bg: "rgba(22,163,74,0.15)",
+      iconBg: "rgba(22,163,74,0.18)",
+      countBg: "rgba(22,163,74,0.2)",
+    },
+    dark: {
+      border: "rgba(34,197,94,0.36)",
+      bg: "rgba(34,197,94,0.14)",
+      iconBg: "rgba(34,197,94,0.2)",
+      countBg: "rgba(34,197,94,0.2)",
+    },
+  },
+  contracts: {
+    icon: "sword-cross",
+    light: {
+      border: "rgba(220,38,38,0.45)",
+      bg: "rgba(220,38,38,0.14)",
+      iconBg: "rgba(220,38,38,0.18)",
+      countBg: "rgba(220,38,38,0.2)",
+    },
+    dark: {
+      border: "rgba(248,113,113,0.34)",
+      bg: "rgba(248,113,113,0.14)",
+      iconBg: "rgba(248,113,113,0.2)",
+      countBg: "rgba(248,113,113,0.2)",
+    },
+  },
+  enchants: {
+    icon: "creation",
+    light: {
+      border: "rgba(3,105,161,0.5)",
+      bg: "rgba(3,105,161,0.14)",
+      iconBg: "rgba(3,105,161,0.18)",
+      countBg: "rgba(3,105,161,0.2)",
+    },
+    dark: {
+      border: "rgba(14,165,233,0.36)",
+      bg: "rgba(14,165,233,0.14)",
+      iconBg: "rgba(14,165,233,0.2)",
+      countBg: "rgba(14,165,233,0.2)",
+    },
+  },
+  services: {
+    icon: "medical-bag",
+    light: {
+      border: "rgba(13,148,136,0.5)",
+      bg: "rgba(13,148,136,0.14)",
+      iconBg: "rgba(13,148,136,0.18)",
+      countBg: "rgba(13,148,136,0.2)",
+    },
+    dark: {
+      border: "rgba(45,212,191,0.36)",
+      bg: "rgba(45,212,191,0.14)",
+      iconBg: "rgba(45,212,191,0.2)",
+      countBg: "rgba(45,212,191,0.2)",
+    },
+  },
+};
 
 const RARITY_ORDER: Record<string, number> = {
   common: 0,
@@ -169,6 +263,16 @@ export function ShopScreen() {
     if (activeCatalog === "contracts") return shopContracts.length;
     return shopEnchants.length;
   }, [activeCatalog, shopContracts.length, shopEnchants.length, shopServices.length, shopXpScrolls.length, visibleItems.length]);
+  const catalogCounts = useMemo(
+    () => ({
+      equipment: shopItems.length,
+      xp_scrolls: shopXpScrolls.length,
+      contracts: shopContracts.length,
+      enchants: shopEnchants.length,
+      services: shopServices.length,
+    }),
+    [shopContracts.length, shopEnchants.length, shopItems.length, shopServices.length, shopXpScrolls.length],
+  );
 
   const shopGold = hero?.crystals ?? shopPayload?.crystals ?? 0;
   const heroLevel = hero?.level ?? shopPayload?.character_level ?? 1;
@@ -229,6 +333,16 @@ export function ShopScreen() {
       services: "Услуги",
     };
     return translateOrFallback(t, `screens.shop.quick.catalogs.${value}`, fallbackMap[value]);
+  }, [t]);
+  const getCatalogHint = useCallback((value: ShopCatalogTab) => {
+    const fallbackMap: Record<ShopCatalogTab, string> = {
+      equipment: "Оружие, броня и сундуки",
+      xp_scrolls: "Быстрый прирост опыта",
+      contracts: "Бонусы к наградам квестов",
+      enchants: "Усиление активного оружия",
+      services: "Лечение и боевая помощь",
+    };
+    return translateOrFallback(t, `screens.shop.quick.catalogHints.${value}`, fallbackMap[value]);
   }, [t]);
 
   const loadShop = useCallback(async (forceRefresh = false) => {
@@ -567,19 +681,56 @@ export function ShopScreen() {
           </View>
         </View>
 
-        <View style={styles.catalogRow}>
-          {SHOP_CATALOGS.map((entry) => (
-            <Pressable
-              key={entry}
-              onPress={() => setActiveCatalog(entry)}
-              style={[styles.filterTab, activeCatalog === entry ? styles.filterTabActive : null]}
-            >
-              <Text style={[styles.filterTabText, activeCatalog === entry ? styles.filterTabTextActive : null]}>
-                {getCatalogLabel(entry)}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.catalogRow}
+        >
+          {SHOP_CATALOGS.map((entry) => {
+            const isActive = activeCatalog === entry;
+            const visual = CATALOG_VISUALS[entry];
+            const palette = themeMode === "light" ? visual.light : visual.dark;
+            return (
+              <Pressable
+                key={entry}
+                onPress={() => setActiveCatalog(entry)}
+                style={({ pressed }) => [
+                  styles.catalogTab,
+                  isActive ? [styles.catalogTabActive, { borderColor: palette.border, backgroundColor: palette.bg }] : null,
+                  pressed ? styles.catalogTabPressed : null,
+                ]}
+              >
+                <View style={styles.catalogTabTop}>
+                  <View
+                    style={[
+                      styles.catalogIconWrap,
+                      isActive ? { borderColor: palette.border, backgroundColor: palette.iconBg } : null,
+                    ]}
+                  >
+                    <GameIcon name={visual.icon} size={16} color={isActive ? colors.text : colors.textMuted} />
+                  </View>
+                  <View
+                    style={[
+                      styles.catalogCountChip,
+                      isActive ? { borderColor: palette.border, backgroundColor: palette.countBg } : null,
+                    ]}
+                  >
+                    <Text style={[styles.catalogCountText, isActive ? styles.catalogCountTextActive : null]}>
+                      {catalogCounts[entry]}
+                    </Text>
+                  </View>
+                </View>
+
+                <Text style={[styles.catalogTabTitle, isActive ? styles.catalogTabTitleActive : null]}>
+                  {getCatalogLabel(entry)}
+                </Text>
+                <Text style={[styles.catalogTabHint, isActive ? styles.catalogTabHintActive : null]} numberOfLines={2}>
+                  {getCatalogHint(entry)}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
 
         {activeCatalog === "equipment" ? (
           <>
@@ -1363,8 +1514,77 @@ function createStyles(colors: ReturnType<typeof useThemeColors>, themeMode: Retu
     },
     catalogRow: {
       flexDirection: "row",
-      flexWrap: "wrap",
-      gap: 8,
+      gap: 10,
+      paddingRight: 4,
+    },
+    catalogTab: {
+      width: 172,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: themeMode === "light" ? "rgba(214,199,170,0.9)" : "rgba(255,255,255,0.12)",
+      backgroundColor: themeMode === "light" ? "rgba(239,231,215,0.88)" : "rgba(255,255,255,0.04)",
+      paddingHorizontal: 10,
+      paddingVertical: 10,
+      gap: 6,
+    },
+    catalogTabActive: {
+      shadowColor: themeMode === "light" ? "rgba(120,79,23,0.26)" : "rgba(0,0,0,0.46)",
+      shadowOffset: { width: 0, height: 6 },
+      shadowOpacity: 1,
+      shadowRadius: 10,
+      elevation: 4,
+    },
+    catalogTabPressed: {
+      transform: [{ scale: 0.98 }],
+    },
+    catalogTabTop: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+    },
+    catalogIconWrap: {
+      width: 28,
+      height: 28,
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: themeMode === "light" ? "rgba(214,199,170,0.9)" : "rgba(255,255,255,0.12)",
+      backgroundColor: themeMode === "light" ? "rgba(251,247,239,0.95)" : "rgba(9,14,24,0.8)",
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    catalogCountChip: {
+      minWidth: 30,
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: themeMode === "light" ? "rgba(214,199,170,0.9)" : "rgba(255,255,255,0.12)",
+      backgroundColor: themeMode === "light" ? "rgba(251,247,239,0.95)" : "rgba(9,14,24,0.8)",
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      alignItems: "center",
+    },
+    catalogCountText: {
+      color: colors.textMuted,
+      fontSize: 11,
+      fontWeight: "900",
+    },
+    catalogCountTextActive: {
+      color: colors.text,
+    },
+    catalogTabTitle: {
+      color: colors.text,
+      fontSize: 13,
+      fontWeight: "900",
+    },
+    catalogTabTitleActive: {
+      color: colors.text,
+    },
+    catalogTabHint: {
+      color: colors.textMuted,
+      fontSize: 11,
+      lineHeight: 15,
+    },
+    catalogTabHintActive: {
+      color: colors.text,
     },
     filterRow: {
       flexDirection: "row",
