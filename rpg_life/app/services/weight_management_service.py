@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta, tzinfo
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -352,8 +352,12 @@ def _safe_timezone_name(profile: UserHealthProfile | None) -> str:
         return "UTC"
 
 
-def _zone(profile: UserHealthProfile | None) -> ZoneInfo:
-    return ZoneInfo(_safe_timezone_name(profile))
+def _zone(profile: UserHealthProfile | None) -> tzinfo:
+    try:
+        return ZoneInfo(_safe_timezone_name(profile))
+    except ZoneInfoNotFoundError:
+        # Container images can miss tzdata; keep the program usable by falling back to UTC.
+        return UTC
 
 
 def _to_local_datetime(dt: datetime, profile: UserHealthProfile | None) -> datetime:

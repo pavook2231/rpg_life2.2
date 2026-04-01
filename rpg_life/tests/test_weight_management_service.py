@@ -94,6 +94,22 @@ def test_weight_program_blocks_before_anamnesis(db_session) -> None:
     assert payload["goal"]["anamnesis_completed"] is False
 
 
+def test_weight_program_falls_back_to_utc_when_zoneinfo_data_is_missing(db_session, monkeypatch) -> None:
+    user = _create_user(db_session, "tz-fallback@example.com")
+    _create_progress(db_session, user.id)
+
+    def _missing_zoneinfo(_name: str):
+        raise weight_management_service.ZoneInfoNotFoundError("tzdata unavailable")
+
+    monkeypatch.setattr(weight_management_service, "ZoneInfo", _missing_zoneinfo)
+
+    payload = quest_service.get_daily_quests(db_session, user.id)
+
+    assert payload["goal"]["program_phase"] == "anamnesis_required"
+    assert payload["goal"]["timezone_name"] == "UTC"
+    assert [item["quest_code"] for item in payload["items"] if not item["is_completed"]] == ["onboarding_anamnesis"]
+
+
 def test_anamnesis_unlocks_baseline_checklist_but_not_walking(db_session) -> None:
     user = _create_user(db_session, "anamnesis@example.com")
     _create_progress(db_session, user.id)
