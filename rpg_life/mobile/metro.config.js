@@ -13,9 +13,5 @@ watchFolders.add(path.join(projectRoot, 'node_modules'));
 watchFolders.add(path.join(realProjectRoot, 'node_modules'));
 
 config.watchFolders = Array.from(watchFolders);
-config.resolver = {
-  ...config.resolver,
-  unstable_enableSymlinks: true,
-};
 
 module.exports = config;

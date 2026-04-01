@@ -1,9 +1,12 @@
 import asyncio
 import json
 
+import pytest
+
 from app import auth
 from app.api import mobile_routes
 from app.api.mobile_routes import router
+from app.core import request_ip
 from tests.route_test_utils import build_request, dependency_calls_for
 
 
@@ -361,6 +364,147 @@ def test_auth_logout_route_uses_rate_limit_and_service(monkeypatch) -> None:
     assert body["data"]["ok"] is True
 
 
+@pytest.mark.parametrize(
+    ("path", "route_key"),
+    [
+        ("/api/v1/steps/sync", "steps"),
+        ("/api/v1/program/anamnesis", "anamnesis"),
+        ("/api/v1/items/buy", "buy_item"),
+        ("/api/v1/rewards/daily-bonus/claim", "daily_bonus"),
+        ("/api/v1/profile/update", "profile_update"),
+    ],
+)
+def test_mobile_write_routes_verify_csrf(monkeypatch, path: str, route_key: str) -> None:
+    request = build_request(router, path, method="POST")
+    captured = {"csrf": 0}
+
+    async def fake_verify_csrf(request_obj):
+        captured["csrf"] += 1
+
+    async def fake_enforce_rate_limit(request_obj, bucket, limit, window_seconds):
+        return None
+
+    monkeypatch.setattr(mobile_routes, "verify_csrf_token", fake_verify_csrf)
+    monkeypatch.setattr(mobile_routes, "enforce_rate_limit", fake_enforce_rate_limit)
+
+    if route_key == "steps":
+        monkeypatch.setattr(mobile_routes.mobile_service, "sync_today_steps", lambda db, current_user, steps, day_started_at, source: {"ok": True})
+        asyncio.run(
+            mobile_routes.sync_steps(
+                payload=mobile_routes.StepsSyncSchema(steps=6000, source="manual"),
+                db="demo-db",
+                current_user="demo-user",
+                request=request,
+            )
+        )
+    elif route_key == "anamnesis":
+        monkeypatch.setattr(mobile_routes.weight_management_service, "submit_anamnesis", lambda db, current_user, **kwargs: {"ok": True})
+        asyncio.run(
+            mobile_routes.submit_program_anamnesis(
+                payload=mobile_routes.WeightAnamnesisSchema(
+                    sex="male",
+                    height_cm=180,
+                    weight_kg=85,
+                    goal_type="lose",
+                    daily_activity_level="light",
+                    timezone_name="Europe/Moscow",
+                ),
+                db="demo-db",
+                current_user="demo-user",
+                request=request,
+            )
+        )
+    elif route_key == "buy_item":
+        monkeypatch.setattr(mobile_routes.mobile_service, "buy_catalog_item", lambda db, current_user, item_id, target_inventory_id, client_request_id: {"ok": True, "kind": "item"})
+        asyncio.run(
+            mobile_routes.buy_item_alias(
+                payload=mobile_routes.ShopPurchaseSchema(item_id=205),
+                db="demo-db",
+                current_user="demo-user",
+                request=request,
+            )
+        )
+    elif route_key == "daily_bonus":
+        monkeypatch.setattr(mobile_routes.quest_service, "claim_daily_bonus", lambda db, user_id: {"ok": True})
+        asyncio.run(
+            mobile_routes.claim_daily_bonus(
+                db="demo-db",
+                current_user=type("DemoUser", (), {"id": 7})(),
+                request=request,
+            )
+        )
+    else:
+        monkeypatch.setattr(mobile_routes.character_service, "update_profile", lambda db, user_id, payload: {"ok": True})
+        asyncio.run(
+            mobile_routes.update_profile(
+                payload=mobile_routes.ProfileUpdateSchema(name="Updated Hero"),
+                db="demo-db",
+                current_user=type("DemoUser", (), {"id": 7})(),
+                request=request,
+            )
+        )
+
+    assert captured["csrf"] == 1
+
+
+@pytest.mark.parametrize(
+    ("path", "route_key"),
+    [
+        ("/api/v1/profile", "profile"),
+        ("/api/v1/bootstrap", "bootstrap"),
+        ("/api/v1/quests/daily", "daily_quests"),
+        ("/api/v1/goals/current", "current_goal"),
+    ],
+)
+def test_mobile_stateful_get_routes_verify_csrf(monkeypatch, path: str, route_key: str) -> None:
+    request = build_request(router, path, method="GET")
+    captured = {"csrf": 0}
+
+    async def fake_verify_csrf(request_obj):
+        captured["csrf"] += 1
+
+    monkeypatch.setattr(mobile_routes, "verify_csrf_token", fake_verify_csrf)
+
+    if route_key == "profile":
+        monkeypatch.setattr(mobile_routes.mobile_service, "get_profile", lambda db, current_user: {"ok": True})
+        asyncio.run(
+            mobile_routes.get_profile(
+                request=request,
+                db="demo-db",
+                current_user="demo-user",
+            )
+        )
+    elif route_key == "bootstrap":
+        monkeypatch.setattr(mobile_routes.mobile_service, "get_bootstrap_payload", lambda db, current_user: {"ok": True})
+        asyncio.run(
+            mobile_routes.get_bootstrap(
+                request=request,
+                db="demo-db",
+                current_user="demo-user",
+            )
+        )
+    elif route_key == "daily_quests":
+        monkeypatch.setattr(mobile_routes.mobile_service, "get_daily_quests", lambda db, current_user, page, limit, sort, bucket: {"items": []})
+        asyncio.run(
+            mobile_routes.get_daily_quests(
+                request=request,
+                db="demo-db",
+                current_user="demo-user",
+            )
+        )
+    else:
+        monkeypatch.setattr(mobile_routes.quest_service, "get_goal_state", lambda db, current_user: {"ok": True})
+        asyncio.run(
+            mobile_routes.get_current_goal(
+                request=request,
+                db="demo-db",
+                current_user="demo-user",
+            )
+        )
+
+    assert captured["csrf"] == 1
+
+
 def test_telegram_login_page_renders_widget_with_normalized_bot_username(monkeypatch) -> None:
     request = build_request(router, "/api/v1/auth/telegram/login")
     monkeypatch.setattr(mobile_routes, "TELEGRAM_AUTH_ENABLED", True)
@@ -480,7 +624,9 @@ def test_vk_callback_redirects_to_error_when_cookie_is_missing() -> None:
     assert response.headers["location"] == "rpglife://auth/vk?error=vk_auth_cookie_missing"
 
 
-def test_external_url_for_prefers_forwarded_proto_and_host() -> None:
+def test_external_url_for_ignores_forwarded_proto_and_host_from_untrusted_peer(monkeypatch) -> None:
+    monkeypatch.setattr(request_ip, "TRUST_PROXY_HEADERS", True)
+    monkeypatch.setattr(request_ip, "TRUSTED_PROXY_IPS", {"10.0.0.1"})
     request = build_request(
         router,
         "/api/v1/auth/vk/login",
@@ -489,6 +635,24 @@ def test_external_url_for_prefers_forwarded_proto_and_host() -> None:
             (b"x-forwarded-host", b"rpglife.online"),
             (b"host", b"backend:8000"),
         ],
+        client=("198.51.100.7", 12345),
+    )
+
+    assert mobile_routes._external_url_for(request, "auth_vk_callback") == "https://backend:8000/api/v1/auth/vk/callback"
+
+
+def test_external_url_for_prefers_forwarded_proto_and_host_from_trusted_proxy(monkeypatch) -> None:
+    monkeypatch.setattr(request_ip, "TRUST_PROXY_HEADERS", True)
+    monkeypatch.setattr(request_ip, "TRUSTED_PROXY_IPS", {"10.0.0.1"})
+    request = build_request(
+        router,
+        "/api/v1/auth/vk/login",
+        headers=[
+            (b"x-forwarded-proto", b"https"),
+            (b"x-forwarded-host", b"rpglife.online"),
+            (b"host", b"backend:8000"),
+        ],
+        client=("10.0.0.1", 12345),
     )
 
     assert mobile_routes._external_url_for(request, "auth_vk_callback") == "https://rpglife.online/api/v1/auth/vk/callback"

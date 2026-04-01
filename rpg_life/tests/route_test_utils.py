@@ -9,6 +9,7 @@ def build_request(
     method: str = "GET",
     headers: list[tuple[bytes, bytes]] | None = None,
     query_string: bytes = b"",
+    client: tuple[str, int] | None = None,
 ) -> Request:
     app = FastAPI()
     app.include_router(router)
@@ -22,6 +23,7 @@ def build_request(
             "router": app.router,
             "scheme": "https",
             "server": ("example.com", 443),
+            "client": client,
             "root_path": "",
             "query_string": query_string,
         }

@@ -1,7 +1,9 @@
 ﻿from datetime import datetime, date, timedelta
+import json
 from sqlalchemy.orm import Session, joinedload, selectinload
 from sqlalchemy import func, or_
 from .models import User, UserClassProgress, Quest, CompletedQuest, Achievement, UserAchievement, DailyBonus, DailySteps, Challenge, ChallengeParticipant
+from .models import StepDay
 from .auth import verify_password, get_password_hash
 from .config import CLASS_GROWTH, STAT_EFFECTS, XP_BASE, XP_MULTIPLIER, MAX_CUSTOM_QUESTS_PER_DAY
 from .achievements import ACHIEVEMENTS, build_achievement_stats, evaluate_achievement, get_earned_achievement_map
@@ -477,13 +479,29 @@ def complete_quest(db: Session, user_id: int, quest_id: int):
     )
 
     if is_verified_completion:
-        objective_progress = get_objective_progress(
-            db,
-            user_id,
-            quest.objective_type,
-            quest.created_at,
-            quest.expires_at,
-        )
+        objective_progress = None
+        if getattr(quest, "domain", None) == "weight_management" and quest.objective_type == "steps":
+            payload = {}
+            try:
+                payload = json.loads(getattr(quest, "payload_json", None) or "{}")
+            except json.JSONDecodeError:
+                payload = {}
+            date_local = str(payload.get("dateLocal") or "").strip()
+            if date_local:
+                step_day = (
+                    db.query(StepDay)
+                    .filter(StepDay.user_id == user_id, StepDay.date_local == date_local)
+                    .first()
+                )
+                objective_progress = int(step_day.steps or 0) if step_day else 0
+        if objective_progress is None:
+            objective_progress = get_objective_progress(
+                db,
+                user_id,
+                quest.objective_type,
+                quest.created_at,
+                quest.expires_at,
+            )
         target_value = int(quest.target_value or 0)
         if objective_progress is None or objective_progress < target_value:
             raise ValueError(
@@ -608,7 +626,7 @@ def get_or_create_class_progress(db: Session, user_id: int, class_name: str, is_
 
 def authenticate_user(db: Session, email: str, password: str):
     user = db.query(User).filter(User.email == email).first()
-    if not user or not verify_password(password, user.hashed_password):
+    if not user or user.is_active != True or not verify_password(password, user.hashed_password):
         return None
     return user
 
@@ -622,7 +640,7 @@ def create_user(
     username: str | None = None,
     birth_year: int | None = None,
     gender: str = "unspecified",
-    goal_type: str = "personal_development",
+    goal_type: str = "lose",
     goal_term_months: int = 6,
 ) -> User:
     hashed_password = get_password_hash(password)

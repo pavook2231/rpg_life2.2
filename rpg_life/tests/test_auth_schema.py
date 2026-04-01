@@ -11,5 +11,5 @@ def test_user_create_allows_minimal_mobile_signup_payload() -> None:
     assert payload.birth_year is None
     assert payload.gender == "unspecified"
     assert payload.character_class == "mage"
-    assert payload.goal_type == "personal_development"
+    assert payload.goal_type == "lose"
     assert payload.goal_term_months == 6

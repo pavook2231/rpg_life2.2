@@ -1,4 +1,0 @@
-from app.tasks.challenge_result_task import challenge_result_task
-from app.tasks.daily_quests_task import daily_quests_task
-from app.tasks.reward_distribution_task import reward_distribution_task
-from app.tasks.world_events_task import world_events_task

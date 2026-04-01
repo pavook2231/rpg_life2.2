@@ -50,6 +50,7 @@ async def send_friend_request(
     db: Session = Depends(get_db),
     current_user: User = Depends(auth.get_current_user),
 ):
+    await verify_csrf_token(request)
     await enforce_rate_limit(request, bucket="social-friend-request", limit=10, window_seconds=60)
     return social_service.send_friend_request(db, current_user, payload.receiver_id)
 
@@ -61,6 +62,7 @@ async def add_friend(
     db: Session = Depends(get_db),
     current_user: User = Depends(auth.get_current_user),
 ):
+    await verify_csrf_token(request)
     await enforce_rate_limit(request, bucket="social-friend-request", limit=10, window_seconds=60)
     return social_service.send_friend_request(db, current_user, payload.receiver_id)
 
@@ -72,6 +74,7 @@ async def respond_friend_request(
     db: Session = Depends(get_db),
     current_user: User = Depends(auth.get_current_user),
 ):
+    await verify_csrf_token(request)
     await enforce_rate_limit(request, bucket="social-friend-response", limit=20, window_seconds=60)
     return social_service.respond_friend_request(db, current_user, payload.request_id, payload.action)
 
@@ -83,6 +86,7 @@ async def decline_friend_request(
     db: Session = Depends(get_db),
     current_user: User = Depends(auth.get_current_user),
 ):
+    await verify_csrf_token(request)
     await enforce_rate_limit(request, bucket="social-friend-response", limit=20, window_seconds=60)
     return social_service.respond_friend_request(db, current_user, payload.request_id, "decline")
 
@@ -137,19 +141,23 @@ async def search_users(
 
 @router.post("/challenge/create")
 async def create_pvp_challenge(
+    request: Request,
     payload: BetaChallengeCreateSchema,
     db: Session = Depends(get_db),
     current_user: User = Depends(auth.get_current_user),
 ):
+    await verify_csrf_token(request)
     return beta_service.create_challenge(db, current_user, payload)
 
 
 @router.post("/challenge/accept")
 async def respond_pvp_challenge(
+    request: Request,
     payload: ChallengeDecisionSchema,
     db: Session = Depends(get_db),
     current_user: User = Depends(auth.get_current_user),
 ):
+    await verify_csrf_token(request)
     return social_service.respond_pvp_challenge(db, current_user, payload.challenge_id, payload.action)
 
 
@@ -206,10 +214,12 @@ async def get_friends_leaderboard(
 
 @router.post("/coop-quests/create")
 async def create_coop_quest(
+    request: Request,
     payload: CoopQuestCreateSchema,
     db: Session = Depends(get_db),
     current_user: User = Depends(auth.get_current_user),
 ):
+    await verify_csrf_token(request)
     return social_service.create_coop_quest(db, current_user, payload)
 
 
@@ -258,6 +268,7 @@ async def send_challenge_invitation(
     db: Session = Depends(get_db),
     current_user: User = Depends(auth.get_current_user),
 ):
+    await verify_csrf_token(request)
     await enforce_rate_limit(request, bucket="social-challenge-invitation-write", limit=10, window_seconds=60)
     invitation = social_service.send_challenge_invitation(
         db,
@@ -281,6 +292,7 @@ async def respond_challenge_invitation(
     db: Session = Depends(get_db),
     current_user: User = Depends(auth.get_current_user),
 ):
+    await verify_csrf_token(request)
     await enforce_rate_limit(request, bucket="social-challenge-invitation-write", limit=20, window_seconds=60)
     result = social_service.respond_challenge_invitation(db, current_user, payload.invitation_id, payload.action)
     return result

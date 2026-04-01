@@ -22,6 +22,28 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+def _has_table(table_name: str) -> bool:
+    return table_name in sa.inspect(op.get_bind()).get_table_names()
+
+
+def _has_column(table_name: str, column_name: str) -> bool:
+    if not _has_table(table_name):
+        return False
+    return column_name in {column["name"] for column in sa.inspect(op.get_bind()).get_columns(table_name)}
+
+
+def _has_index(table_name: str, index_name: str) -> bool:
+    if not _has_table(table_name):
+        return False
+    return index_name in {index["name"] for index in sa.inspect(op.get_bind()).get_indexes(table_name)}
+
+
+def _has_unique_constraint(table_name: str, constraint_name: str) -> bool:
+    if not _has_table(table_name):
+        return False
+    return constraint_name in {item["name"] for item in sa.inspect(op.get_bind()).get_unique_constraints(table_name)}
+
+
 def _build_unique_username(base: str | None, used: set[str], fallback_user_id: int) -> str:
     candidate = normalize_username(base) or normalize_username(f"hero_{fallback_user_id}") or f"hero_{fallback_user_id}"
     if candidate not in used:
@@ -64,11 +86,18 @@ def upgrade() -> None:
         )
 
     session.commit()
-    op.create_unique_constraint("uq_users_username", "users", ["username"])
-    op.create_index("ix_users_username", "users", ["username"], unique=False)
+    if not (_has_unique_constraint("users", "uq_users_username") or _has_index("users", "uq_users_username")):
+        op.create_index("uq_users_username", "users", ["username"], unique=True)
+    if not _has_index("users", "ix_users_username"):
+        op.create_index("ix_users_username", "users", ["username"], unique=False)
 
 
 def downgrade() -> None:
-    op.drop_index("ix_users_username", table_name="users")
-    op.drop_constraint("uq_users_username", "users", type_="unique")
-    op.drop_column("users", "username")
+    if _has_index("users", "ix_users_username"):
+        op.drop_index("ix_users_username", table_name="users")
+    if _has_unique_constraint("users", "uq_users_username"):
+        op.drop_constraint("uq_users_username", "users", type_="unique")
+    elif _has_index("users", "uq_users_username"):
+        op.drop_index("uq_users_username", table_name="users")
+    if _has_column("users", "username"):
+        op.drop_column("users", "username")

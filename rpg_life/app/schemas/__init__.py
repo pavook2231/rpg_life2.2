@@ -17,3 +17,4 @@ from .social_schema import (
     PaginationParams,
     PvpChallengeCreateSchema,
 )
+from .weight_management_schema import WeeklyReviewSubmitSchema, WeightAnamnesisSchema, WeightBaselineSchema

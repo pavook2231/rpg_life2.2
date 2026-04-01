@@ -3,7 +3,7 @@ const path = require("path");
 
 const appJson = require("./app.json");
 
-const baseExpoConfig = appJson.expo ?? {};
+const fallbackExpoConfig = appJson.expo ?? {};
 const projectEnvPath = path.resolve(__dirname, "..", ".env");
 
 function readEnvFile(filePath) {
@@ -60,7 +60,36 @@ function envFlag(name, fallback) {
   return ["1", "true", "yes", "on"].includes(String(value).trim().toLowerCase());
 }
 
-module.exports = () => {
+function buildBaseExpoConfig(config) {
+  const resolvedConfig = config ?? fallbackExpoConfig;
+  return {
+    ...fallbackExpoConfig,
+    ...resolvedConfig,
+    ios: {
+      ...(fallbackExpoConfig.ios ?? {}),
+      ...(resolvedConfig.ios ?? {}),
+      infoPlist: {
+        ...((fallbackExpoConfig.ios && fallbackExpoConfig.ios.infoPlist) ?? {}),
+        ...((resolvedConfig.ios && resolvedConfig.ios.infoPlist) ?? {}),
+      },
+    },
+    android: {
+      ...(fallbackExpoConfig.android ?? {}),
+      ...(resolvedConfig.android ?? {}),
+    },
+    extra: {
+      ...(fallbackExpoConfig.extra ?? {}),
+      ...(resolvedConfig.extra ?? {}),
+    },
+  };
+}
+
+function uniqueStrings(values) {
+  return Array.from(new Set(values.filter((value) => typeof value === "string" && value)));
+}
+
+module.exports = ({ config }) => {
+  const baseExpoConfig = buildBaseExpoConfig(config);
   const isProduction = (getEnvValue("APP_ENV", process.env.NODE_ENV || "") || "").toLowerCase() === "production";
   let apiBaseUrl = getEnvValue("EXPO_PUBLIC_API_BASE_URL", baseExpoConfig.extra?.apiBaseUrl);
   if (isProduction && typeof apiBaseUrl === "string" && apiBaseUrl.startsWith("http://")) {
@@ -88,6 +117,17 @@ module.exports = () => {
     "EXPO_PUBLIC_SOCIAL_AUTH_REDIRECT_SCHEME",
     getEnvValue("SOCIAL_AUTH_REDIRECT_SCHEME", "rpglife")
   );
+  const androidPermissions = uniqueStrings([
+    ...(((baseExpoConfig.android && baseExpoConfig.android.permissions) || [])),
+    "android.permission.ACTIVITY_RECOGNITION",
+  ]).filter(
+    (permission) =>
+      permission !== "android.permission.BODY_SENSORS" &&
+      permission !== "com.google.android.gms.permission.ACTIVITY_RECOGNITION"
+  );
+  const motionUsageDescription =
+    baseExpoConfig.ios?.infoPlist?.NSMotionUsageDescription ||
+    "This app reads your motion activity to sync daily step progress.";
 
   return {
     ...baseExpoConfig,
@@ -97,7 +137,12 @@ module.exports = () => {
       infoPlist: {
         ...((baseExpoConfig.ios && baseExpoConfig.ios.infoPlist) ?? {}),
         ITSAppUsesNonExemptEncryption: false,
+        NSMotionUsageDescription: motionUsageDescription,
       },
+    },
+    android: {
+      ...(baseExpoConfig.android ?? {}),
+      permissions: androidPermissions,
     },
     extra: {
       ...(baseExpoConfig.extra ?? {}),

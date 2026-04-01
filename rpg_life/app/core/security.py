@@ -98,7 +98,7 @@ async def get_current_user(request: Request, db: Session = Depends(get_db)) -> U
         raise credentials_exception
 
     user = db.query(User).filter(User.email == email).first()
-    if not user:
+    if not user or user.is_active != True:
         raise credentials_exception
     return user
 
@@ -125,7 +125,7 @@ async def get_current_user_from_token(token: str = Depends(oauth2_scheme), db: S
     if not email:
         raise credentials_exception
     user = db.query(User).filter(User.email == email).first()
-    if not user:
+    if not user or user.is_active != True:
         raise credentials_exception
     return user
 

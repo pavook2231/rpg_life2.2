@@ -18,11 +18,25 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+def _inspector():
+    return sa.inspect(op.get_bind())
+
+
+def _has_table(table_name: str) -> bool:
+    return table_name in _inspector().get_table_names()
+
+
+def _has_column(table_name: str, column_name: str) -> bool:
+    if not _has_table(table_name):
+        return False
+    return column_name in {column["name"] for column in _inspector().get_columns(table_name)}
+
+
 def upgrade() -> None:
-    # Add source column to daily_steps table
-    op.add_column('daily_steps', sa.Column('source', sa.String(), nullable=True, default='manual'))
+    if not _has_column('daily_steps', 'source'):
+        op.add_column('daily_steps', sa.Column('source', sa.String(), nullable=True, default='manual'))
 
 
 def downgrade() -> None:
-    # Remove source column from daily_steps table
-    op.drop_column('daily_steps', 'source')
+    if _has_column('daily_steps', 'source'):
+        op.drop_column('daily_steps', 'source')

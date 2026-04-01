@@ -43,6 +43,10 @@ def _has_unique_constraint(table_name: str, constraint_name: str) -> bool:
     return constraint_name in {item["name"] for item in _inspector().get_unique_constraints(table_name)}
 
 
+def _has_unique_index_or_constraint(table_name: str, name: str) -> bool:
+    return _has_unique_constraint(table_name, name) or _has_index(table_name, name)
+
+
 def upgrade() -> None:
     if not _has_column("items", "power"):
         op.add_column("items", sa.Column("power", sa.Integer(), nullable=False, server_default="0"))
@@ -120,12 +124,15 @@ def upgrade() -> None:
         op.create_index("ix_user_bosses_boss_id", "user_bosses", ["boss_id"], unique=False)
     if not _has_index("user_bosses", "ix_user_bosses_completed"):
         op.create_index("ix_user_bosses_completed", "user_bosses", ["completed"], unique=False)
-    if not _has_unique_constraint("user_bosses", "uq_user_bosses_user_boss"):
-        op.create_unique_constraint("uq_user_bosses_user_boss", "user_bosses", ["user_id", "boss_id"])
+    if not _has_unique_index_or_constraint("user_bosses", "uq_user_bosses_user_boss"):
+        op.create_index("uq_user_bosses_user_boss", "user_bosses", ["user_id", "boss_id"], unique=True)
 
 
 def downgrade() -> None:
-    op.drop_constraint("uq_user_bosses_user_boss", "user_bosses", type_="unique")
+    if _has_unique_constraint("user_bosses", "uq_user_bosses_user_boss"):
+        op.drop_constraint("uq_user_bosses_user_boss", "user_bosses", type_="unique")
+    elif _has_index("user_bosses", "uq_user_bosses_user_boss"):
+        op.drop_index("uq_user_bosses_user_boss", table_name="user_bosses")
     op.drop_index("ix_user_bosses_completed", table_name="user_bosses")
     op.drop_index("ix_user_bosses_boss_id", table_name="user_bosses")
     op.drop_index("ix_user_bosses_user_id", table_name="user_bosses")

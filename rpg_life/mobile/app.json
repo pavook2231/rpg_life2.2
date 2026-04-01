@@ -3,6 +3,7 @@
     "name": "RPG Life",
     "slug": "rpg-life",
     "version": "1.4",
+    "newArchEnabled": false,
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "scheme": "rpglife",
@@ -21,6 +22,7 @@
       "buildNumber": "7",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
+        "NSMotionUsageDescription": "This app reads your motion activity to sync daily step progress.",
         "NSHealthShareUsageDescription": "This app uses HealthKit to track your daily steps for fitness goals.",
         "NSHealthUpdateUsageDescription": "This app updates HealthKit with your step data."
       }
@@ -29,8 +31,7 @@
       "package": "com.rpglife.mobile",
       "versionCode": 7,
       "permissions": [
-        "android.permission.BODY_SENSORS",
-        "com.google.android.gms.permission.ACTIVITY_RECOGNITION"
+        "android.permission.ACTIVITY_RECOGNITION"
       ],
       "adaptiveIcon": {
         "foregroundImage": "./android/app/src/main/res/drawable-xxxhdpi/splashscreen_logo.png",
@@ -63,6 +64,7 @@
       }
     },
     "plugins": [
+      "expo-font",
       "expo-secure-store",
       "expo-web-browser",
       "expo-notifications"

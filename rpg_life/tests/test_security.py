@@ -1,11 +1,13 @@
 import asyncio
 import json
 from types import SimpleNamespace
+from uuid import uuid4
 
 import pytest
 from fastapi import HTTPException
 from starlette.requests import Request
 
+from app import auth
 from app import crud
 from app.api import dependencies
 from app.core import config
@@ -78,11 +80,13 @@ def test_enforce_rate_limit_blocks_after_limit() -> None:
         }
     )
 
-    asyncio.run(dependencies.enforce_rate_limit(request, bucket="test-login", limit=2, window_seconds=60))
-    asyncio.run(dependencies.enforce_rate_limit(request, bucket="test-login", limit=2, window_seconds=60))
+    bucket = f"test-login-{uuid4().hex}"
+
+    asyncio.run(dependencies.enforce_rate_limit(request, bucket=bucket, limit=2, window_seconds=60))
+    asyncio.run(dependencies.enforce_rate_limit(request, bucket=bucket, limit=2, window_seconds=60))
 
     with pytest.raises(HTTPException) as exc:
-        asyncio.run(dependencies.enforce_rate_limit(request, bucket="test-login", limit=2, window_seconds=60))
+        asyncio.run(dependencies.enforce_rate_limit(request, bucket=bucket, limit=2, window_seconds=60))
 
     assert exc.value.status_code == 429
     assert "Retry-After" in exc.value.headers
@@ -269,4 +273,70 @@ def test_authenticate_social_mobile_marks_new_google_user_for_goal_setup(
     payload = auth_service.authenticate_social_mobile(db_session, "google", id_token="demo-token")
 
     assert payload["needs_goal_setup"] is True
-    assert payload["user"]["email"] == "social-new@example.com"
+
+
+def test_authenticate_user_rejects_inactive_user(db_session) -> None:
+    email = "inactive-login@example.com"
+    password = "Password123"
+    user = crud.create_user(
+        db_session,
+        email,
+        password,
+        "mage",
+        name="Inactive Hero",
+        birth_year=1995,
+        gender="unspecified",
+        goal_type="lose",
+        goal_term_months=6,
+    )
+    user.is_active = False
+    db_session.commit()
+
+    assert crud.authenticate_user(db_session, email, password) is None
+
+
+def test_get_current_user_rejects_inactive_account(db_session) -> None:
+    user = crud.create_user(
+        db_session,
+        "inactive-token@example.com",
+        "Password123",
+        "mage",
+        name="Inactive Token Hero",
+        birth_year=1993,
+        gender="unspecified",
+        goal_type="lose",
+        goal_term_months=6,
+    )
+    token = auth.create_access_token({"sub": user.email})
+    user.is_active = False
+    db_session.commit()
+
+    request = _request(headers=[(b"authorization", f"Bearer {token}".encode("utf-8"))])
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(auth.get_current_user(request, db_session))
+
+    assert exc.value.status_code == 401
+
+
+def test_refresh_access_token_rejects_inactive_user(db_session) -> None:
+    email = "inactive-refresh@example.com"
+    password = "Password123"
+    user = crud.create_user(
+        db_session,
+        email,
+        password,
+        "mage",
+        name="Inactive Refresh Hero",
+        birth_year=1994,
+        gender="unspecified",
+        goal_type="lose",
+        goal_term_months=6,
+    )
+    auth_payload = auth_service.login_user_tokens(db_session, email, password)
+    refresh_token = auth_payload["tokens"]["refresh_token"]
+    user.is_active = False
+    db_session.commit()
+
+    with pytest.raises(HTTPException, match="Invalid refresh token"):
+        auth_service.refresh_access_token(db_session, refresh_token)

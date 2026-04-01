@@ -58,6 +58,56 @@ export type StepsSyncPayload = {
   source: string;
 };
 
+export type WeightProgramPhase =
+  | "anamnesis_required"
+  | "baseline_required"
+  | "walking_active"
+  | "unsupported_goal";
+
+export type WeightProgramMode = "inactive" | "normal" | "recovery" | "plateau_hold";
+
+export type WeightHealthProfilePayload = {
+  sex?: "male" | "female" | "other" | null;
+  height_cm?: number | null;
+  weight_kg?: number | null;
+  goal_type?: "lose" | "maintain" | "gain" | null;
+  daily_activity_level?: "sedentary" | "light" | "moderate" | "high" | "very_high" | null;
+  target_weight_kg?: number | null;
+  kilos_to_lose?: number | null;
+  anamnesis_completed_at?: string | null;
+  program_started_at?: string | null;
+};
+
+export type WeightWalkingPlanPayload = {
+  current_program_week: number;
+  current_daily_target_steps: number;
+  current_mode: WeightProgramMode;
+  last_week_achieved_days: number;
+  last_week_average_steps: number;
+  last_adjustment_type?: string | null;
+  last_adjustment_reason?: string | null;
+};
+
+export type WeightMotivationPayload = {
+  score: number;
+  band: "low" | "medium" | "high";
+  adherence_14d_pct: number;
+  quest_completion_14d_pct: number;
+  checkin_consistency_14d_pct: number;
+  self_report_component_pct?: number | null;
+};
+
+export type WeightWeeklyReviewPreviewPayload = {
+  week_number: number;
+  week_start_date_local: string;
+  week_end_date_local: string;
+  target_daily_steps: number;
+  achieved_days: number;
+  average_steps: number;
+  previous_weight_kg?: number | null;
+  review_due: boolean;
+};
+
 export type LeaderboardPeriod = "all_time" | "weekly" | "season";
 export type LeaderboardScope = "global" | "friends";
 export type LeaderboardMetric = "power" | "level" | "quests" | "steps" | "challenge_wins";
@@ -230,6 +280,15 @@ export type QuestItem = {
   can_complete?: boolean;
   is_completed: boolean;
   expires_at?: string | null;
+  domain?: string | null;
+  quest_code?: string | null;
+  phase_code?: string | null;
+  is_required?: boolean;
+  is_repeatable?: boolean;
+  quest_state?: "locked" | "available" | "active" | "completed" | "skipped" | "expired" | "archived" | string;
+  reason_text?: string | null;
+  payload?: Record<string, unknown>;
+  program_priority?: number;
 };
 
 export type GoalTemplatePayload = {
@@ -269,8 +328,40 @@ export type GoalStatePayload = {
   goal_days_total: number;
   goal_days_remaining: number;
   phase: number;
+  program_phase?: WeightProgramPhase;
+  program_mode?: WeightProgramMode;
+  anamnesis_completed?: boolean;
+  baseline_completed?: boolean;
+  unsupported_goal?: boolean;
+  review_due?: boolean;
+  timezone_name?: string | null;
+  weekly_review_preview?: WeightWeeklyReviewPreviewPayload | null;
+  walking_plan?: WeightWalkingPlanPayload;
+  motivation?: WeightMotivationPayload;
+  health_profile?: WeightHealthProfilePayload;
   daily_limits?: DailyLimitsPayload;
   health?: HealthStatePayload;
+};
+
+export type WeightAnamnesisInput = {
+  sex: "male" | "female" | "other";
+  height_cm: number;
+  weight_kg: number;
+  goal_type: "lose" | "maintain" | "gain";
+  daily_activity_level: "sedentary" | "light" | "moderate" | "high" | "very_high";
+  timezone_name?: string;
+};
+
+export type WeightBaselineInput = {
+  measurements?: Record<string, number>;
+  target_weight_kg?: number;
+  kilos_to_lose?: number;
+};
+
+export type WeeklyReviewInput = {
+  current_weight_kg?: number;
+  motivation_self_rating?: number;
+  difficulty_self_rating?: number;
 };
 
 export type InventoryItem = CanonicalInventoryItem;
@@ -603,6 +694,41 @@ export function fetchCurrentGoal() {
 
 export function selectGoal(payload: { goal_type: string; goal_term_months: number; start_new_cycle?: boolean }) {
   return apiRequest<GoalStatePayload>("/goals/select", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function submitProgramAnamnesis(payload: WeightAnamnesisInput) {
+  return apiRequest<GoalStatePayload>("/program/anamnesis", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function submitProgramBaseline(payload: WeightBaselineInput) {
+  return apiRequest<GoalStatePayload>("/program/baseline", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function submitProgramWeeklyReview(payload: WeeklyReviewInput) {
+  return apiRequest<{
+    review: {
+      week_number: number;
+      achieved_days: number;
+      average_steps: number;
+      current_weight_kg?: number | null;
+      previous_weight_kg?: number | null;
+      weight_delta_kg?: number | null;
+      plateau_detected: boolean;
+      lapse_detected: boolean;
+      next_week_target_steps: number;
+      completed_at?: string | null;
+    };
+    goal: GoalStatePayload;
+  }>("/program/weekly-review", {
     method: "POST",
     body: JSON.stringify(payload),
   });

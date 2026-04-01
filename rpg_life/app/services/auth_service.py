@@ -5,7 +5,6 @@ import hmac
 import logging
 from datetime import datetime, timezone
 from secrets import token_urlsafe
-from threading import Lock
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qsl
 from urllib.parse import urlencode
@@ -40,6 +39,7 @@ from app.core.config import (
     YANDEX_AUTH_ENABLED,
     YANDEX_AUTH_MOBILE_CLIENT_ID,
 )
+from app.core.cache import cache_acquire_lock, cache_delete, cache_get_json, cache_release_lock, cache_set_json
 from app.core.dates import utc_now
 from app.core.security import get_password_hash, verify_password
 from app.models import RefreshTokenSession, User, UserSocialAccount
@@ -47,8 +47,8 @@ from app.schemas import UserCreate
 import app.services.goal_service as goal_service
 
 
-_SOCIAL_BRIDGE_TICKETS: dict[str, tuple[float, dict]] = {}
-_SOCIAL_BRIDGE_TICKETS_LOCK = Lock()
+_SOCIAL_BRIDGE_TICKET_KEY_PREFIX = "social-bridge-ticket:"
+_SOCIAL_BRIDGE_TICKET_LOCK_PREFIX = "social-bridge-ticket-lock:"
 logger = logging.getLogger(__name__)
 
 
@@ -111,34 +111,34 @@ def _normalize_email_for_social(provider: str, provider_user_id: str, email: str
     return f"{provider}_{provider_user_id}@social.rpglife.local"
 
 
-def _purge_expired_social_bridge_tickets(now_ts: float | None = None) -> None:
-    current_ts = now_ts or datetime.now(timezone.utc).timestamp()
-    expired_keys = [ticket for ticket, (expires_at, _) in _SOCIAL_BRIDGE_TICKETS.items() if expires_at <= current_ts]
-    for ticket in expired_keys:
-        _SOCIAL_BRIDGE_TICKETS.pop(ticket, None)
+def _social_bridge_ticket_key(ticket: str) -> str:
+    return f"{_SOCIAL_BRIDGE_TICKET_KEY_PREFIX}{ticket}"
+
+
+def _social_bridge_ticket_lock_key(ticket: str) -> str:
+    return f"{_SOCIAL_BRIDGE_TICKET_LOCK_PREFIX}{ticket}"
 
 
 def issue_social_bridge_ticket(payload: dict) -> str:
     ticket = token_urlsafe(24)
-    expires_at = datetime.now(timezone.utc).timestamp() + SOCIAL_BRIDGE_TICKET_MAX_AGE_SECONDS
-    with _SOCIAL_BRIDGE_TICKETS_LOCK:
-        _purge_expired_social_bridge_tickets()
-        _SOCIAL_BRIDGE_TICKETS[ticket] = (expires_at, payload)
+    cache_set_json(_social_bridge_ticket_key(ticket), payload, ttl=SOCIAL_BRIDGE_TICKET_MAX_AGE_SECONDS)
     return ticket
 
 
 def consume_social_bridge_ticket(ticket: str) -> dict | None:
-    with _SOCIAL_BRIDGE_TICKETS_LOCK:
-        _purge_expired_social_bridge_tickets()
-        entry = _SOCIAL_BRIDGE_TICKETS.pop(ticket, None)
-
-    if not entry:
+    cache_key = _social_bridge_ticket_key(ticket)
+    lock_key = _social_bridge_ticket_lock_key(ticket)
+    owner_token = token_urlsafe(16)
+    if not cache_acquire_lock(lock_key, owner_token, ttl_seconds=5):
         return None
-
-    expires_at, payload = entry
-    if expires_at <= datetime.now(timezone.utc).timestamp():
-        return None
-    return payload
+    try:
+        payload = cache_get_json(cache_key)
+        if not isinstance(payload, dict):
+            return None
+        cache_delete(cache_key)
+        return payload
+    finally:
+        cache_release_lock(lock_key, owner_token)
 
 
 def _resolve_or_create_social_user(
@@ -173,7 +173,7 @@ def _resolve_or_create_social_user(
                 name=fallback_name,
                 birth_year=None,
                 gender="unspecified",
-                goal_type="personal_development",
+                goal_type="lose",
                 goal_term_months=6,
             )
             is_new_user = True
@@ -682,8 +682,8 @@ def refresh_access_token(db: Session, refresh_token: str) -> dict:
         raise HTTPException(status_code=401, detail="Invalid refresh token")
 
     user = db.query(User).filter(User.email == email).first()
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
+    if not user or user.is_active != True:
+        raise HTTPException(status_code=401, detail="Invalid refresh token")
 
     token_session = (
         db.query(RefreshTokenSession)

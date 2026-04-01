@@ -47,6 +47,26 @@ def _is_ip_in_trusted_networks(ip_value: str, trusted_values: Iterable[str]) -> 
     return False
 
 
+def should_trust_forwarded_headers(
+    request: Request,
+    *,
+    trust_proxy_headers: bool | None = None,
+    trusted_proxy_ips: Iterable[str] | None = None,
+) -> bool:
+    client_ip = request.client.host if request.client and request.client.host else ""
+    if not client_ip:
+        return False
+
+    use_proxy_headers = TRUST_PROXY_HEADERS if trust_proxy_headers is None else trust_proxy_headers
+    if use_proxy_headers:
+        allowed_proxy_ips = set(TRUSTED_PROXY_IPS if trusted_proxy_ips is None else trusted_proxy_ips)
+        if allowed_proxy_ips:
+            return _is_ip_in_trusted_networks(client_ip, allowed_proxy_ips)
+        return True
+
+    return _is_private_or_loopback_ip(client_ip)
+
+
 def get_client_ip(
     request: Request,
     *,

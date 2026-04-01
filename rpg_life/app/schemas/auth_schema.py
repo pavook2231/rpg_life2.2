@@ -17,7 +17,7 @@ class UserCreate(BaseModel):
     gender: str = "unspecified"
     character_class: str = "mage"
     language_preference: str = "ru"
-    goal_type: str = "personal_development"
+    goal_type: str = "lose"
     goal_term_months: int = 6
 
     @field_validator("password")

@@ -114,15 +114,16 @@ async function getStepsFromGoogleFit(start: Date, end: Date): Promise<number | n
 }
 
 async function ensurePedometerAccessDetails(): Promise<{ granted: boolean; state: StepTrackingState }> {
-  const isSimulator = !__DEV__ || (Platform.OS === "ios" && !AppleHealthKit) || (Platform.OS === "android" && !GoogleFit);
+  const hasNativeHealthBridge =
+    (Platform.OS === "ios" && Boolean(AppleHealthKit)) || (Platform.OS === "android" && Boolean(GoogleFit));
 
-  if (Platform.OS === "ios" && !isSimulator) {
+  if (Platform.OS === "ios" && hasNativeHealthBridge) {
     const hkInit = await initHealthKit();
     if (hkInit) {
       return { granted: true, state: "connected" };
     }
     return { granted: false, state: "permission_required" };
-  } else if (Platform.OS === "android" && !isSimulator) {
+  } else if (Platform.OS === "android" && hasNativeHealthBridge) {
     const gfInit = await initGoogleFit();
     if (gfInit) {
       return { granted: true, state: "connected" };

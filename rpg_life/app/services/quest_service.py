@@ -9,6 +9,7 @@ from app.schemas import QuestCreate
 import app.services.goal_service as goal_service
 import app.services.social_service as social_service
 import app.services.notification_service as notification_service
+import app.services.weight_management_service as weight_management_service
 from app.text_utils import normalize_item_model, normalize_nested_strings
 
 
@@ -88,7 +89,10 @@ def complete_quest(db: Session, user_id: int, quest_id: int):
             db, friend_ids=friend_ids, achiever=current_user, quest_title=quest.title
         )
 
-    goal_service.apply_goal_progress_on_completion(db, user_id, quest_id)
+    if current_user and getattr(quest, "domain", None) == weight_management_service.QUEST_DOMAIN:
+        weight_management_service.post_complete_program_quest(db, current_user, quest)
+    else:
+        goal_service.apply_goal_progress_on_completion(db, user_id, quest_id)
     invalidate_leaderboard_cache()
     payload = _serialize_completion_result(result)
     if current_user:
@@ -189,132 +193,7 @@ def get_daily_quests(
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         return {"items": [], "pagination": {"page": page, "limit": limit, "total_items": 0, "total_pages": 1}}
-
-    is_first_page = page == 1
-    if is_first_page:
-        # Preserve legacy boss/rare generation, but avoid running it on every paginated read.
-        daily_window_start = goal_service._daily_window_start()
-        has_recent_legacy_quest = (
-            db.query(Quest.id)
-            .filter(
-                Quest.user_id == user_id,
-                Quest.is_custom == False,
-                Quest.quest_type.in_(["boss_daily", "boss_weekly", "boss_challenge", "rare_mission"]),
-                Quest.created_at >= daily_window_start,
-                or_(Quest.is_archived == False, Quest.is_archived == None),
-            )
-            .first()
-        )
-        if not has_recent_legacy_quest:
-            for progress in crud.get_all_unlocked_classes(db, user_id):
-                crud.generate_boss_quests(db, user_id, progress.class_name)
-                crud.generate_rare_mission(db, user_id, progress.class_name)
-
-    payload = goal_service.get_user_goal_quests(
-        db,
-        user,
-        page=page,
-        limit=limit,
-        sort=sort,
-        bucket=bucket if bucket in {"daily", "weekly", "long_term"} else None,
-    )
-    if not is_first_page:
-        return normalize_nested_strings(payload)
-
-    system_items = payload.get("items", [])
-    custom_rows = (
-        db.query(Quest)
-        .filter(
-            Quest.user_id == user_id,
-            Quest.is_custom == True,
-            Quest.created_at >= daily_window_start,
-            or_(Quest.is_archived == False, Quest.is_archived == None),
-        )
-        .order_by(Quest.is_completed.asc(), Quest.created_at.asc())
-        .all()
-    )
-    custom_items = []
-    for quest in custom_rows:
-        custom_items.append(
-            {
-                "id": quest.id,
-                "title": quest.title,
-                "description": quest.description,
-                "xp_reward": quest.xp_reward,
-                "crystal_reward": quest.crystal_reward,
-                "rarity": quest.rarity or "common",
-                "quest_type": quest.quest_type or "daily",
-                "quest_bucket": "daily",
-                "goal_type": quest.goal_type,
-                "goal_id": quest.goal_id,
-                "difficulty_level": quest.difficulty_level or "easy",
-                "goal_progress_percent": 0,
-                "is_universal": False,
-                "is_accepted": True,
-                "objective_type": quest.objective_type,
-                "objective_label": crud.describe_objective(quest.objective_type) if quest.objective_type else None,
-                "target_value": int(quest.target_value) if quest.target_value is not None else None,
-                "progress_value": None,
-                "supports_live_progress": False,
-                "tracking_mode": "manual",
-                "can_complete": True,
-                "is_completed": bool(quest.is_completed),
-                "expires_at": quest.expires_at.isoformat() if quest.expires_at else None,
-            }
-        )
-
-    legacy_rows = (
-        db.query(Quest)
-        .filter(
-            Quest.user_id == user_id,
-            Quest.is_custom == False,
-            Quest.quest_type.in_(["boss_daily", "boss_weekly", "boss_challenge", "rare_mission"]),
-            or_(Quest.expires_at == None, Quest.expires_at >= daily_window_start),
-            or_(Quest.is_archived == False, Quest.is_archived == None),
-        )
-        .order_by(Quest.is_completed.asc(), Quest.created_at.asc())
-        .all()
-    )
-    legacy_items = []
-    for quest in legacy_rows:
-        legacy_items.append(
-            {
-                "id": quest.id,
-                "title": quest.title,
-                "description": quest.description,
-                "xp_reward": quest.xp_reward,
-                "crystal_reward": quest.crystal_reward,
-                "rarity": quest.rarity or "common",
-                "quest_type": quest.quest_type or "daily",
-                "quest_bucket": "daily",
-                "goal_type": quest.goal_type,
-                "goal_id": quest.goal_id,
-                "difficulty_level": quest.difficulty_level or "hard",
-                "goal_progress_percent": 0,
-                "is_universal": False,
-                "is_accepted": True,
-                "objective_type": quest.objective_type,
-                "objective_label": crud.describe_objective(quest.objective_type) if quest.objective_type else None,
-                "target_value": int(quest.target_value) if quest.target_value is not None else None,
-                "progress_value": None,
-                "supports_live_progress": False,
-                "tracking_mode": "manual",
-                "can_complete": True,
-                "is_completed": bool(quest.is_completed),
-                "expires_at": quest.expires_at.isoformat() if quest.expires_at else None,
-            }
-        )
-
-    combined_items = sorted(
-        [*system_items, *custom_items, *legacy_items],
-        key=lambda item: (bool(item.get("is_completed")), int(item.get("id", 0))),
-    )
-    payload["items"] = combined_items[:limit]
-
-    base_total_items = int(payload.get("pagination", {}).get("total_items", len(system_items)))
-    total_items = base_total_items + len(custom_items) + len(legacy_items)
-    payload["pagination"]["total_items"] = total_items
-    payload["pagination"]["total_pages"] = max(1, (total_items + limit - 1) // limit)
+    payload = weight_management_service.ensure_program_quests(db, user)
     payload["pagination"]["page"] = page
     payload["pagination"]["limit"] = limit
     return normalize_nested_strings(payload)
@@ -324,13 +203,13 @@ def regenerate_today_quests(db: Session, user_id: int) -> dict:
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         return {"ok": True, "generated_for": 0}
-    generated = goal_service.generate_goal_quests_for_user(db, user, source="ai", force_regenerate=True)
-    return {"ok": True, "generated_for": generated.get("generated", 0)}
+    payload = weight_management_service.ensure_program_quests(db, user)
+    return {"ok": True, "generated_for": len(payload.get("items", []))}
 
 
 def regenerate_ai_goal_quests(db: Session, user: User) -> dict:
-    generated = goal_service.generate_goal_quests_for_user(db, user, source="ai", force_regenerate=True)
-    return {"ok": True, "generated_for": generated.get("generated", 0)}
+    payload = weight_management_service.ensure_program_quests(db, user)
+    return {"ok": True, "generated_for": len(payload.get("items", []))}
 
 
 def get_goal_templates() -> dict:
@@ -355,15 +234,8 @@ def select_goal(db: Session, user: User, goal_type: str, goal_term_months: int, 
 
 
 def accept_goal_quest(db: Session, user: User, quest_id: int) -> dict:
-    try:
-        return goal_service.accept_goal_quest(db, user, quest_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+    raise HTTPException(status_code=400, detail="Детерминированные program-квесты не требуют принятия")
 
 
 def replace_goal_quest(db: Session, user: User, quest_id: int, source: str = "base") -> dict:
-    try:
-        selected_source = "ai" if source == "ai" else "base"
-        return goal_service.replace_goal_quest(db, user, quest_id, selected_source)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+    raise HTTPException(status_code=400, detail="Детерминированные program-квесты нельзя заменять")

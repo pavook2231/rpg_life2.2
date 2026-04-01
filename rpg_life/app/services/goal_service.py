@@ -18,7 +18,7 @@ from app.goals import (
     normalize_goal_type,
 )
 from app.models import CompletedQuest, Quest, User, UserClassProgress
-from app.services import ai_goal_quest_service, health_service, openai_goal_rewriter, progression_service
+from app.services import ai_goal_quest_service, health_service, openai_goal_rewriter, progression_service, weight_management_service
 
 GoalQuestSource = Literal["base", "ai"]
 GoalQuestBucket = Literal["daily", "weekly", "long_term"]
@@ -182,18 +182,7 @@ def _serialize_goal_card(card: dict) -> dict:
 
 
 def get_goal_templates_payload() -> dict:
-    return {
-        "goals": [_serialize_goal_card(card) for card in list_goal_cards(include_optional=True)],
-        "terms": [
-            {
-                "months": int(term["id"]),
-                "title": term["title"],
-                "title_ru": term["ru_title"],
-                "tempo": term["tempo"],
-            }
-            for term in GOAL_TERMS.values()
-        ],
-    }
+    return weight_management_service.get_goal_templates_payload()
 
 
 def _template_identity_from_values(template_key: str | None, title: str | None) -> str:
@@ -474,42 +463,10 @@ def _build_quest_from_template(
 
 
 def get_user_goal_state(db: Session, user: User) -> dict:
-    user = ensure_user_goal_defaults(db, user)
-    health_context = health_service.sync_character_health(db, user.id)
-    goal = get_goal_info(user.selected_goal_type)
-    started_at = _safe_goal_cycle_start(user)
-    deadline_at = _safe_goal_cycle_deadline(user)
-    progress = int(getattr(user, "goal_progress_percent", 0) or 0)
-    goal_cycle_xp = int(getattr(user, "goal_cycle_xp", 0) or 0)
-    goal_target_xp = int(
-        getattr(user, "goal_target_xp", 0) or progression_service.resolve_goal_target_xp(user.goal_term_months)
-    )
-    day_index = goal_cycle_day_index(user)
-    total_days = max(1, int((deadline_at.date() - started_at.date()).days))
-    days_remaining = max(0, int((deadline_at.date() - utc_now().date()).days))
-    daily_limits = progression_service.get_daily_completion_limits(db, user.id)
-
-    return {
-        "goal_id": _build_goal_id(user),
-        "goal_type": user.selected_goal_type,
-        "goal_title": goal["title"],
-        "goal_description": goal["description"],
-        "goal_icon": goal["icon"],
-        "goal_accent_color": goal["accent_color"],
-        "goal_term_months": user.goal_term_months,
-        "goal_cycle_index": user.goal_cycle_index,
-        "goal_cycle_xp": goal_cycle_xp,
-        "goal_target_xp": goal_target_xp,
-        "goal_progress_percent": progress,
-        "goal_started_at": started_at.isoformat(),
-        "goal_deadline_at": deadline_at.isoformat(),
-        "goal_days_passed": day_index,
-        "goal_days_total": total_days,
-        "goal_days_remaining": days_remaining,
-        "phase": resolve_goal_phase(user),
-        "daily_limits": daily_limits,
-        "health": health_context["health"],
-    }
+    payload = weight_management_service.get_goal_state(db, user)
+    payload["daily_limits"] = progression_service.get_daily_completion_limits(db, user.id)
+    payload["health"] = health_service.sync_character_health(db, user.id)["health"]
+    return payload
 
 
 def _goal_change_is_locked(user: User, now: datetime) -> tuple[bool, datetime]:
@@ -530,50 +487,10 @@ def set_user_goal(
     goal_term_months: int,
     start_new_cycle: bool,
 ) -> dict:
-    user = ensure_user_goal_defaults(db, user)
-    normalized_goal = normalize_goal_type(goal_type)
     normalized_term = normalize_goal_term_months(goal_term_months)
-    current_goal = normalize_goal_type(user.selected_goal_type)
-    current_term = normalize_goal_term_months(user.goal_term_months)
-
-    is_same_setup = normalized_goal == current_goal and normalized_term == current_term
-    if is_same_setup and not start_new_cycle:
-        return get_user_goal_state(db, user)
-
-    now = utc_now()
-    goal_changed = normalized_goal != current_goal
-    if goal_changed:
-        is_locked, next_change_at = _goal_change_is_locked(user, now)
-        if is_locked:
-            raise ValueError(
-                f"Цель можно менять только раз в 7 дней. Следующая смена доступна {next_change_at.strftime('%d.%m в %H:%M')}."
-            )
-
-    effective_start_new_cycle = bool(start_new_cycle or goal_changed)
-    if effective_start_new_cycle:
-        user.goal_cycle_index = int(user.goal_cycle_index or 1) + 1
-        user.goal_cycle_xp = 0
-        user.goal_progress_percent = 0
-        user.goal_cycle_started_at = now
-    else:
-        user.goal_cycle_started_at = user.goal_cycle_started_at or now
-
-    user.selected_goal_type = normalized_goal
-    user.goal_term_months = normalized_term
     user.goal_target_xp = progression_service.resolve_goal_target_xp(normalized_term)
-    user.goal_cycle_deadline_at = user.goal_cycle_started_at + timedelta(days=30 * normalized_term)
-    if goal_changed:
-        user.last_goal_change_at = now
-    elif getattr(user, "last_goal_change_at", None) is None:
-        user.last_goal_change_at = user.goal_cycle_started_at
     progression_service.sync_goal_progress(user)
-    db.flush()
-
-    _archive_visible_goal_quests(db, user)
-    db.commit()
-    db.refresh(user)
-    generate_goal_quests_for_user(db, user, source="ai", force_regenerate=True)
-    return get_user_goal_state(db, user)
+    return weight_management_service.set_goal(db, user, goal_type, normalized_term, start_new_cycle)
 
 
 def generate_goal_quests_for_user(
@@ -583,80 +500,9 @@ def generate_goal_quests_for_user(
     force_regenerate: bool = False,
 ) -> dict:
     _ = source
-    user = ensure_user_goal_defaults(db, user)
-
-    visible_rows = _visible_goal_quests_query(db, user).all()
-    visible_today = len(visible_rows)
-    visible_keys = {_quest_identity_key(row) for row in visible_rows if _quest_identity_key(row)}
-    visible_titles = {_normalize_title(row.title) for row in visible_rows if _normalize_title(row.title)}
-    has_valid_daily_set = (
-        visible_today == SYSTEM_GOAL_QUESTS_PER_DAY
-        and len(visible_keys) == visible_today
-        and len(visible_titles) == visible_today
-    )
-
-    if visible_today > 0 and (force_regenerate or not has_valid_daily_set):
-        _archive_visible_goal_quests(db, user)
-        db.commit()
-        visible_rows = []
-        visible_today = 0
-
-    if has_valid_daily_set and not force_regenerate:
-        return {"generated": 0}
-
-    progress = _main_class_progress(db, user.id)
-    used_template_keys = _todays_generated_template_keys(db, user)
-    used_titles = _todays_generated_titles(db, user)
-    used_categories = _todays_generated_categories(db, user)
-    phase = resolve_goal_phase(user)
-    level = int(progress.level if progress else 1)
-    target_count = SYSTEM_GOAL_QUESTS_PER_DAY - visible_today
-    pool = _build_adaptive_daily_pool(
-        db,
-        user,
-        phase=phase,
-        level=level,
-        target_count=target_count,
-        used_template_keys=used_template_keys,
-        used_titles=used_titles,
-        used_categories=used_categories,
-    )
-    pool = openai_goal_rewriter.rewrite_generated_quests(
-        db,
-        user,
-        pool,
-        phase=phase,
-        level=level,
-        blocked_titles=used_titles,
-    )
-
-    if len(pool) < target_count:
-        fallback_templates = _build_fallback_goal_daily_pool(
-            progress,
-            target_count=target_count - len(pool),
-            used_titles=used_titles
-            | {
-                _normalize_title(template.get("title"))
-                for template in pool
-                if _normalize_title(template.get("title"))
-            },
-        )
-        pool.extend(fallback_templates)
-
-    created: list[Quest] = []
-    for template in pool:
-        title_key = _normalize_title(template.get("title"))
-        if title_key and title_key in used_titles:
-            continue
-        quest = _build_quest_from_template(db, user, progress, template)
-        created.append(quest)
-        used_template_keys.add(_quest_identity_key(quest))
-        if title_key:
-            used_titles.add(title_key)
-
-    if created:
-        db.commit()
-    return {"generated": len(created)}
+    _ = force_regenerate
+    payload = weight_management_service.ensure_program_quests(db, user)
+    return {"generated": len(payload.get("items", []))}
 
 
 def _serialize_quest(db: Session, user: User, quest: Quest) -> dict:
@@ -703,40 +549,11 @@ def get_user_goal_quests(
     sort: str = "created_at",
     bucket: GoalQuestBucket | None = None,
 ) -> dict:
-    _ = bucket
+    _ = page
+    _ = limit
     _ = sort
-    generate_goal_quests_for_user(db, user, source="ai", force_regenerate=False)
-    user = ensure_user_goal_defaults(db, user)
-
-    query = db.query(Quest).filter(
-        Quest.user_id == user.id,
-        Quest.is_custom == False,
-        Quest.quest_type == "daily",
-        Quest.created_at >= _daily_window_start(),
-        or_(
-            Quest.is_completed == True,
-            Quest.is_archived == False,
-            Quest.is_archived == None,
-        ),
-    )
-    total = query.count()
-    rows = (
-        query.order_by(Quest.is_completed.asc(), Quest.created_at.asc())
-        .offset((page - 1) * limit)
-        .limit(limit)
-        .all()
-    )
-    items = [_serialize_quest(db, user, quest) for quest in rows]
-    return {
-        "items": items,
-        "goal": get_user_goal_state(db, user),
-        "pagination": {
-            "page": page,
-            "limit": limit,
-            "total_items": total,
-            "total_pages": max(1, (total + limit - 1) // limit),
-        },
-    }
+    _ = bucket
+    return weight_management_service.ensure_program_quests(db, user)
 
 
 def accept_goal_quest(db: Session, user: User, quest_id: int) -> dict:
@@ -809,6 +626,9 @@ def apply_goal_progress_on_completion(db: Session, user_id: int, quest_id: int) 
     )
     if not quest:
         return 0
+    if getattr(quest, "domain", None) == weight_management_service.QUEST_DOMAIN:
+        user = db.query(User).filter(User.id == user_id).first()
+        return int(getattr(user, "goal_progress_percent", 0) or 0) if user else 0
 
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
@@ -838,7 +658,8 @@ def apply_goal_progress_on_completion(db: Session, user_id: int, quest_id: int) 
 def validate_goal_choice(goal_type: str, term_months: int) -> tuple[str, int]:
     normalized_goal = normalize_goal_type(goal_type)
     normalized_term = normalize_goal_term_months(term_months)
-    if normalized_goal not in {card["id"] for card in list_goal_cards(include_optional=True)}:
+    supported_goals = {card["id"] for card in weight_management_service.get_goal_templates_payload()["goals"]}
+    if normalized_goal not in supported_goals:
         raise ValueError("Неподдерживаемая цель")
     if normalized_term not in SUPPORTED_GOAL_TERMS:
         raise ValueError("Неподдерживаемый срок цели")

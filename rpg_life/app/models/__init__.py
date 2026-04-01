@@ -22,3 +22,4 @@ from .quest import Challenge, ChallengeParticipant, CompletedQuest, Quest
 from .social import ChallengeInvitation, CoopQuest, CoopQuestParticipant, FriendRequest, Friendship, GameEvent
 from .social_auth import UserSocialAccount
 from .user import Achievement, DailyBonus, User, UserAchievement
+from .weight_management import MotivationState, StepDay, UserHealthProfile, WalkingPlanState, WeeklyReview, WeightBaseline, WeightEntry

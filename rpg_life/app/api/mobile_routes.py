@@ -12,7 +12,7 @@ import time
 
 from app import auth
 from app import shop_runtime
-from app.api.dependencies import enforce_rate_limit
+from app.api.dependencies import enforce_rate_limit, verify_csrf_token
 from app.core.config import (
     COOKIE_SAMESITE,
     COOKIE_SECURE,
@@ -31,6 +31,7 @@ from app.core.config import (
     VK_AUTH_MAX_AGE_SECONDS,
 )
 from app.core.database import get_db
+from app.core.request_ip import should_trust_forwarded_headers
 from app.core.responses import success_response
 from app.models import User
 from app.schemas import (
@@ -50,8 +51,11 @@ from app.schemas import (
     ShopPurchaseSchema,
     StepsSyncSchema,
     UserCreate,
+    WeightAnamnesisSchema,
+    WeightBaselineSchema,
+    WeeklyReviewSubmitSchema,
 )
-from app.services import auth_service, character_service, mobile_service, multiplayer_service, notification_service, quest_service
+from app.services import auth_service, character_service, mobile_service, multiplayer_service, notification_service, quest_service, weight_management_service
 
 router = APIRouter(prefix="/api/v1", tags=["РњРѕР±РёР»СЊРЅРѕРµ API"])
 GOOGLE_OAUTH_COOKIE_NAME = "google_oauth_flow"
@@ -89,6 +93,9 @@ def _external_url_for(request: Request, route_name: str) -> str:
     if PUBLIC_BASE_URL:
         public_base = urlsplit(PUBLIC_BASE_URL)
         return urlunsplit((public_base.scheme or internal_url.scheme, public_base.netloc or internal_url.netloc, internal_url.path, internal_url.query, internal_url.fragment))
+
+    if not should_trust_forwarded_headers(request):
+        return internal_url.geturl()
 
     forwarded_proto = request.headers.get("x-forwarded-proto", "").split(",", 1)[0].strip()
     forwarded_host = request.headers.get("x-forwarded-host", "").split(",", 1)[0].strip()
@@ -136,6 +143,18 @@ def _attach_shop_purchase_audit_details(
         }
     )
     request.state.audit_details = merged
+
+
+async def _verify_mobile_write_request(request: Request | None) -> None:
+    if request is None:
+        return
+    await verify_csrf_token(request)
+
+
+async def _verify_mobile_stateful_read_request(request: Request | None) -> None:
+    if request is None:
+        return
+    await verify_csrf_token(request)
 
 
 @router.get("/auth/telegram/bridge", summary="Telegram auth bridge", include_in_schema=False)
@@ -777,7 +796,9 @@ async def auth_change_password(
     payload: ChangePasswordSchema,
     db: Session = Depends(get_db),
     current_user: User = Depends(auth.get_current_user),
+    request: Request = None,
 ):
+    await _verify_mobile_write_request(request)
     return success_response(
         auth_service.change_password(db, current_user, payload.current_password, payload.new_password),
         "Password updated",
@@ -791,7 +812,12 @@ async def auth_recover_account(request: Request, payload: RecoverAccountSchema, 
 
 
 @router.get("/profile", summary="РџСЂРѕС„РёР»СЊ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ")
-async def get_profile(db: Session = Depends(get_db), current_user: User = Depends(auth.get_current_user)):
+async def get_profile(
+    request: Request = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(auth.get_current_user),
+):
+    await _verify_mobile_stateful_read_request(request)
     return success_response(mobile_service.get_profile(db, current_user))
 
 
@@ -805,7 +831,12 @@ async def get_public_user_profile(
 
 
 @router.get("/bootstrap", summary="Core bootstrap payload for mobile app")
-async def get_bootstrap(db: Session = Depends(get_db), current_user: User = Depends(auth.get_current_user)):
+async def get_bootstrap(
+    request: Request = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(auth.get_current_user),
+):
+    await _verify_mobile_stateful_read_request(request)
     return success_response(mobile_service.get_bootstrap_payload(db, current_user))
 
 
@@ -816,6 +847,7 @@ async def register_notification_device(
     current_user: User = Depends(auth.get_current_user),
     request: Request = None,
 ):
+    await _verify_mobile_write_request(request)
     if request is not None:
         await enforce_rate_limit(request, bucket="mobile-push-register", limit=30, window_seconds=60)
     return success_response(
@@ -831,6 +863,7 @@ async def unregister_notification_device(
     current_user: User = Depends(auth.get_current_user),
     request: Request = None,
 ):
+    await _verify_mobile_write_request(request)
     if request is not None:
         await enforce_rate_limit(request, bucket="mobile-push-unregister", limit=30, window_seconds=60)
     return success_response(
@@ -851,6 +884,7 @@ async def sync_steps(
     current_user: User = Depends(auth.get_current_user),
     request: Request = None,
 ):
+    await _verify_mobile_write_request(request)
     if request is not None:
         await enforce_rate_limit(request, bucket="mobile-steps-sync", limit=30, window_seconds=60)
     return success_response(mobile_service.sync_today_steps(db, current_user, payload.steps, payload.day_started_at, payload.source))
@@ -862,9 +896,11 @@ async def get_daily_quests(
     limit: int = Query(20, ge=1, le=100),
     sort: str = "created_at",
     bucket: str | None = Query(default=None, pattern="^(daily|weekly|long_term)$"),
+    request: Request = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(auth.get_current_user),
 ):
+    await _verify_mobile_stateful_read_request(request)
     return success_response(mobile_service.get_daily_quests(db, current_user, page, limit, sort, bucket))
 
 
@@ -872,7 +908,9 @@ async def get_daily_quests(
 async def regenerate_today_quests(
     db: Session = Depends(get_db),
     current_user: User = Depends(auth.get_current_user),
+    request: Request = None,
 ):
+    await _verify_mobile_write_request(request)
     return success_response(
         mobile_service.regenerate_today_quests(db, current_user),
         "Today's quests regenerated",
@@ -883,7 +921,9 @@ async def regenerate_today_quests(
 async def regenerate_ai_quests(
     db: Session = Depends(get_db),
     current_user: User = Depends(auth.get_current_user),
+    request: Request = None,
 ):
+    await _verify_mobile_write_request(request)
     return success_response(
         quest_service.regenerate_ai_goal_quests(db, current_user),
         "AI quests regenerated",
@@ -897,9 +937,11 @@ async def get_goal_templates():
 
 @router.get("/goals/current", summary="Current goal state")
 async def get_current_goal(
+    request: Request = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(auth.get_current_user),
 ):
+    await _verify_mobile_stateful_read_request(request)
     return success_response(quest_service.get_goal_state(db, current_user))
 
 
@@ -908,7 +950,9 @@ async def select_goal(
     payload: GoalSelectSchema,
     db: Session = Depends(get_db),
     current_user: User = Depends(auth.get_current_user),
+    request: Request = None,
 ):
+    await _verify_mobile_write_request(request)
     return success_response(
         quest_service.select_goal(
             db,
@@ -918,6 +962,69 @@ async def select_goal(
             payload.start_new_cycle,
         ),
         "Goal selected",
+    )
+
+
+@router.post("/program/anamnesis", summary="Заполнить обязательный анамнез программы")
+async def submit_program_anamnesis(
+    payload: WeightAnamnesisSchema,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(auth.get_current_user),
+    request: Request = None,
+):
+    await _verify_mobile_write_request(request)
+    return success_response(
+        weight_management_service.submit_anamnesis(
+            db,
+            current_user,
+            sex=payload.sex,
+            height_cm=payload.height_cm,
+            weight_kg=payload.weight_kg,
+            goal_type=payload.goal_type,
+            daily_activity_level=payload.daily_activity_level,
+            timezone_name=payload.timezone_name,
+        ),
+        "Анамнез сохранён",
+    )
+
+
+@router.post("/program/baseline", summary="Сохранить базовую стартовую точку")
+async def submit_program_baseline(
+    payload: WeightBaselineSchema,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(auth.get_current_user),
+    request: Request = None,
+):
+    await _verify_mobile_write_request(request)
+    return success_response(
+        weight_management_service.submit_baseline(
+            db,
+            current_user,
+            measurements=payload.measurements,
+            target_weight_kg=payload.target_weight_kg,
+            kilos_to_lose=payload.kilos_to_lose,
+        ),
+        "Базовая точка обновлена",
+    )
+
+
+@router.post("/program/weekly-review", summary="Завершить недельный обзор программы")
+async def submit_program_weekly_review(
+    payload: WeeklyReviewSubmitSchema,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(auth.get_current_user),
+    request: Request = None,
+):
+    await _verify_mobile_write_request(request)
+    return success_response(
+        weight_management_service.submit_weekly_review(
+            db,
+            current_user,
+            current_weight_kg=payload.current_weight_kg,
+            motivation_self_rating=payload.motivation_self_rating,
+            difficulty_self_rating=payload.difficulty_self_rating,
+        ),
+        "Недельный обзор сохранён",
     )
 
 
@@ -950,6 +1057,7 @@ async def equip_inventory_item(
     current_user: User = Depends(auth.get_current_user),
     request: Request = None,
 ):
+    await _verify_mobile_write_request(request)
     if request is not None:
         await enforce_rate_limit(request, bucket="mobile-equip-write", limit=30, window_seconds=60)
     return success_response(
@@ -965,6 +1073,7 @@ async def equip_item_alias(
     current_user: User = Depends(auth.get_current_user),
     request: Request = None,
 ):
+    await _verify_mobile_write_request(request)
     if request is not None:
         await enforce_rate_limit(request, bucket="mobile-equip-write", limit=30, window_seconds=60)
     return success_response(
@@ -1056,7 +1165,12 @@ async def get_items_catalog(db: Session = Depends(get_db), current_user: User = 
 
 
 @router.post("/shop/refresh", summary="Refresh shop")
-async def refresh_shop(db: Session = Depends(get_db), current_user: User = Depends(auth.get_current_user)):
+async def refresh_shop(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(auth.get_current_user),
+    request: Request = None,
+):
+    await _verify_mobile_write_request(request)
     return success_response(mobile_service.refresh_shop(db, current_user), "Shop refreshed")
 
 
@@ -1067,6 +1181,7 @@ async def buy_shop_item(
     current_user: User = Depends(auth.get_current_user),
     request: Request = None,
 ):
+    await _verify_mobile_write_request(request)
     rate_limit_bucket = "mobile-shop-buy"
     if request is not None:
         rate_limit_bucket, limit, window_seconds = _resolve_shop_buy_rate_limit(payload.item_id)
@@ -1098,6 +1213,7 @@ async def buy_item_alias(
     current_user: User = Depends(auth.get_current_user),
     request: Request = None,
 ):
+    await _verify_mobile_write_request(request)
     rate_limit_bucket = "mobile-shop-buy"
     if request is not None:
         rate_limit_bucket, limit, window_seconds = _resolve_shop_buy_rate_limit(payload.item_id)
@@ -1143,6 +1259,7 @@ async def sell_inventory_item(
     current_user: User = Depends(auth.get_current_user),
     request: Request = None,
 ):
+    await _verify_mobile_write_request(request)
     if request is not None:
         await enforce_rate_limit(request, bucket="mobile-inventory-sell", limit=20, window_seconds=60)
     return success_response(mobile_service.sell_inventory_item(db, current_user, payload.inventory_id), "РџСЂРµРґРјРµС‚ РїСЂРѕРґР°РЅ")
@@ -1155,6 +1272,7 @@ async def unequip_inventory_item(
     current_user: User = Depends(auth.get_current_user),
     request: Request = None,
 ):
+    await _verify_mobile_write_request(request)
     if request is not None:
         await enforce_rate_limit(request, bucket="mobile-equip-write", limit=30, window_seconds=60)
     return success_response(mobile_service.unequip_inventory_item(db, current_user, payload.inventory_id), "РџСЂРµРґРјРµС‚ СЃРЅСЏС‚")
@@ -1165,7 +1283,9 @@ async def create_custom_quest(
     payload: QuestCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(auth.get_current_user),
+    request: Request = None,
 ):
+    await _verify_mobile_write_request(request)
     return success_response(quest_service.create_custom_quest(db, current_user, payload), "Р—Р°РґР°РЅРёРµ СЃРѕР·РґР°РЅРѕ", status_code=201)
 
 
@@ -1176,6 +1296,7 @@ async def complete_quest(
     current_user: User = Depends(auth.get_current_user),
     request: Request = None,
 ):
+    await _verify_mobile_write_request(request)
     if request is not None:
         await enforce_rate_limit(request, bucket="mobile-quest-complete", limit=20, window_seconds=60)
     return success_response(quest_service.complete_quest(db, current_user.id, quest_id), "Р—Р°РґР°РЅРёРµ РІС‹РїРѕР»РЅРµРЅРѕ")
@@ -1186,7 +1307,9 @@ async def accept_goal_quest(
     quest_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(auth.get_current_user),
+    request: Request = None,
 ):
+    await _verify_mobile_write_request(request)
     return success_response(quest_service.accept_goal_quest(db, current_user, quest_id), "Quest accepted")
 
 
@@ -1196,7 +1319,9 @@ async def replace_goal_quest(
     payload: QuestReplaceSchema,
     db: Session = Depends(get_db),
     current_user: User = Depends(auth.get_current_user),
+    request: Request = None,
 ):
+    await _verify_mobile_write_request(request)
     return success_response(
         quest_service.replace_goal_quest(db, current_user, quest_id, payload.source),
         "Quest replaced",
@@ -1208,22 +1333,39 @@ async def delete_quest(
     quest_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(auth.get_current_user),
+    request: Request = None,
 ):
+    await _verify_mobile_write_request(request)
     return success_response(quest_service.delete_quest(db, current_user.id, quest_id), "Р—Р°РґР°РЅРёРµ СѓРґР°Р»РµРЅРѕ")
 
 
 @router.post("/rewards/daily-bonus/claim", summary="Р—Р°Р±СЂР°С‚СЊ РµР¶РµРґРЅРµРІРЅС‹Р№ Р±РѕРЅСѓСЃ")
-async def claim_daily_bonus(db: Session = Depends(get_db), current_user: User = Depends(auth.get_current_user)):
+async def claim_daily_bonus(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(auth.get_current_user),
+    request: Request = None,
+):
+    await _verify_mobile_write_request(request)
     return success_response(quest_service.claim_daily_bonus(db, current_user.id), "Р‘РѕРЅСѓСЃ РїРѕР»СѓС‡РµРЅ")
 
 
 @router.post("/rewards/weekly-goal/claim", summary="Claim weekly goal reward")
-async def claim_weekly_goal_reward(db: Session = Depends(get_db), current_user: User = Depends(auth.get_current_user)):
+async def claim_weekly_goal_reward(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(auth.get_current_user),
+    request: Request = None,
+):
+    await _verify_mobile_write_request(request)
     return success_response(mobile_service.claim_weekly_goal_reward(db, current_user), "Weekly reward claimed")
 
 
 @router.post("/rewards/seasonal-goal/claim", summary="Claim seasonal goal reward")
-async def claim_seasonal_goal_reward(db: Session = Depends(get_db), current_user: User = Depends(auth.get_current_user)):
+async def claim_seasonal_goal_reward(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(auth.get_current_user),
+    request: Request = None,
+):
+    await _verify_mobile_write_request(request)
     return success_response(mobile_service.claim_seasonal_goal_reward(db, current_user), "Seasonal reward claimed")
 
 
@@ -1232,7 +1374,9 @@ async def update_profile(
     payload: ProfileUpdateSchema,
     db: Session = Depends(get_db),
     current_user: User = Depends(auth.get_current_user),
+    request: Request = None,
 ):
+    await _verify_mobile_write_request(request)
     return success_response(character_service.update_profile(db, current_user.id, payload), "РџСЂРѕС„РёР»СЊ РѕР±РЅРѕРІР»РµРЅ")
 
 
@@ -1241,7 +1385,9 @@ async def create_challenge(
     payload: ChallengeCreateSchema,
     db: Session = Depends(get_db),
     current_user: User = Depends(auth.get_current_user),
+    request: Request = None,
 ):
+    await _verify_mobile_write_request(request)
     return success_response(multiplayer_service.create_challenge(db, current_user.id, payload), "РСЃРїС‹С‚Р°РЅРёРµ СЃРѕР·РґР°РЅРѕ", status_code=201)
 
 
@@ -1250,6 +1396,8 @@ async def join_challenge(
     challenge_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(auth.get_current_user),
+    request: Request = None,
 ):
+    await _verify_mobile_write_request(request)
     return success_response(multiplayer_service.join_challenge(db, challenge_id, current_user.id), "РЈС‡Р°СЃС‚РёРµ РїРѕРґС‚РІРµСЂР¶РґРµРЅРѕ")
 

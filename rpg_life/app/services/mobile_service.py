@@ -12,7 +12,7 @@ from app.goals import get_goal_info
 from app.item_service import calculate_set_bonus, sync_catalog_items
 from app.models import DailyBonus, DailySteps, Item, User, UserClassProgress, UserInventory
 from app.stat_effects import StatEffects
-from app.services import character_service, engagement_service, health_service, inventory_service, quest_service, social_service
+from app.services import character_service, engagement_service, health_service, inventory_service, quest_service, social_service, weight_management_service
 from app.text_utils import normalize_item_model, normalize_nested_strings
 
 MAX_SYNCABLE_STEPS_PER_DAY = 70_000
@@ -389,6 +389,14 @@ def sync_today_steps(
     delta = max(0, int(record.steps or 0) - previous_steps)
     if delta > 0:
         invalidate_leaderboard_cache()
+    weight_management_service.sync_steps(
+        db,
+        current_user,
+        steps=int(record.steps or 0),
+        source=normalized_source,
+        day_started_at=day_started_at,
+    )
+    db.commit()
 
     return {
         "steps": int(record.steps or 0),

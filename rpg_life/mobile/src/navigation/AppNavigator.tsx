@@ -305,9 +305,9 @@ export function AppNavigator() {
       {user ? (
         <>
           <Stack.Screen name="MainTabs" component={MainTabs} options={{ headerShown: false }} />
-          <Stack.Screen name="GoalProgress" component={QuestsScreen} options={{ title: "Прогресс цели" }} />
-          <Stack.Screen name="GoalSelect" component={GoalSelectScreen} options={{ title: "Выбор цели" }} />
-          <Stack.Screen name="QuestBoard" component={QuestsScreen} options={{ title: "Доска заданий" }} />
+          <Stack.Screen name="GoalProgress" component={QuestsScreen} options={{ title: "Программа снижения веса" }} />
+          <Stack.Screen name="GoalSelect" component={GoalSelectScreen} options={{ title: "Режим по весу" }} />
+          <Stack.Screen name="QuestBoard" component={QuestsScreen} options={{ title: "План программы" }} />
           <Stack.Screen name="RewardScreen" component={AchievementsScreen} options={{ title: "Награды" }} />
           <Stack.Screen name="SkillTree" component={CharacterScreen} options={{ title: "Навыки" }} />
           <Stack.Screen name="Stats" component={CharacterScreen} options={{ title: "Статы" }} />

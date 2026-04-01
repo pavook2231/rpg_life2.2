@@ -1,5 +1,7 @@
 import asyncio
 
+import pytest
+
 from app import auth
 from app.api import social_routes
 from app.api.social_routes import router
@@ -271,3 +273,72 @@ def test_decline_friend_request_route_forces_decline_action(monkeypatch) -> None
         "action": "decline",
     }
     assert payload["status"] == "declined"
+
+
+@pytest.mark.parametrize(
+    ("path", "caller"),
+    [
+        (
+            "/api/v1/social/friends/request",
+            lambda request: social_routes.send_friend_request(
+                request=request,
+                payload=type("Payload", (), {"receiver_id": 9})(),
+                db="demo-db",
+                current_user="demo-user",
+            ),
+        ),
+        (
+            "/api/v1/social/challenge/create",
+            lambda request: social_routes.create_pvp_challenge(
+                request=request,
+                payload=type("Payload", (), {})(),
+                db="demo-db",
+                current_user="demo-user",
+            ),
+        ),
+        (
+            "/api/v1/social/coop-quests/create",
+            lambda request: social_routes.create_coop_quest(
+                request=request,
+                payload=type("Payload", (), {})(),
+                db="demo-db",
+                current_user="demo-user",
+            ),
+        ),
+        (
+            "/api/v1/social/challenges/invitations/respond",
+            lambda request: social_routes.respond_challenge_invitation(
+                request=request,
+                payload=type("Payload", (), {"invitation_id": 4, "action": "accept"})(),
+                db="demo-db",
+                current_user="demo-user",
+            ),
+        ),
+    ],
+)
+def test_social_write_routes_verify_csrf(monkeypatch, path, caller) -> None:
+    captured: dict[str, int] = {"csrf": 0}
+    request = build_request(router, path, method="POST")
+
+    async def fake_verify_csrf(request_obj):
+        captured["csrf"] += 1
+        return True
+
+    async def fake_rate_limit(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(social_routes, "verify_csrf_token", fake_verify_csrf)
+    monkeypatch.setattr(social_routes, "enforce_rate_limit", fake_rate_limit)
+    monkeypatch.setattr(social_routes.social_service, "send_friend_request", lambda *args, **kwargs: {"ok": True})
+    monkeypatch.setattr(social_routes.beta_service, "create_challenge", lambda *args, **kwargs: {"ok": True})
+    monkeypatch.setattr(social_routes.social_service, "create_coop_quest", lambda *args, **kwargs: {"ok": True})
+    monkeypatch.setattr(
+        social_routes.social_service,
+        "respond_challenge_invitation",
+        lambda *args, **kwargs: {"ok": True, "status": "accepted"},
+    )
+
+    payload = asyncio.run(caller(request))
+
+    assert captured["csrf"] == 1
+    assert payload["ok"] is True

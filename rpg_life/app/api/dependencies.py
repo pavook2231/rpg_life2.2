@@ -1,14 +1,11 @@
-﻿import secrets
-from collections import defaultdict, deque
-from datetime import datetime
-from threading import Lock
+import secrets
 
 from fastapi import HTTPException, Request
+
 from app.core.config import ACCESS_COOKIE_NAME, ADMIN_EMAILS, CSRF_COOKIE_NAME
+from app.core.rate_limit import consume_rate_limit
 from app.core.request_ip import get_client_ip
 from app.models import User
-_RATE_LIMIT_STORAGE: dict[str, deque[float]] = defaultdict(deque)
-_RATE_LIMIT_LOCK = Lock()
 
 
 async def verify_csrf_token(request: Request):
@@ -46,18 +43,14 @@ async def enforce_rate_limit(
     limit: int,
     window_seconds: int,
 ) -> None:
-    now_ts = datetime.now().timestamp()
-    key = f"{bucket}:{_client_ip(request)}"
-
-    with _RATE_LIMIT_LOCK:
-        attempts = _RATE_LIMIT_STORAGE[key]
-        while attempts and now_ts - attempts[0] >= window_seconds:
-            attempts.popleft()
-        if len(attempts) >= limit:
-            retry_after = max(1, int(window_seconds - (now_ts - attempts[0])))
-            raise HTTPException(
-                status_code=429,
-                detail=f"Слишком много запросов. Повторите через {retry_after} сек.",
-                headers={"Retry-After": str(retry_after)},
-            )
-        attempts.append(now_ts)
+    allowed, retry_after = consume_rate_limit(
+        f"{bucket}:{_client_ip(request)}",
+        limit=limit,
+        window_seconds=window_seconds,
+    )
+    if not allowed:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Слишком много запросов. Повторите через {retry_after} сек.",
+            headers={"Retry-After": str(retry_after)},
+        )

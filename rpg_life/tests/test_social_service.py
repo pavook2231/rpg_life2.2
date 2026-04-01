@@ -154,7 +154,7 @@ def test_list_friends_includes_presence_status_and_rating_rank(db_session) -> No
     assert items_by_id[leader.id]["rating_rank"] == 1
     assert items_by_id[sleeper.id]["rating_rank"] == 2
     assert items_by_id[leader.id]["class_name"] == "warrior"
-    assert items_by_id[leader.id]["goal_type"] == "personal_development"
+    assert items_by_id[leader.id]["goal_type"] == "lose"
     assert items_by_id[leader.id]["goal_title"]
 
 

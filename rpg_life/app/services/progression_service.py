@@ -179,6 +179,9 @@ def can_complete_quest_today(
     quest: Quest,
     progress: UserClassProgress | None = None,
 ) -> tuple[bool, str | None]:
+    if getattr(quest, "domain", None) == "weight_management":
+        return True, None
+
     limits = get_daily_completion_limits(db, user_id, progress)
 
     if limits["completed_total"] >= limits["total_cap"]:

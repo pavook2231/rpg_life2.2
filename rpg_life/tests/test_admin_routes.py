@@ -161,3 +161,46 @@ def test_admin_audit_test_alert_route_uses_write_bucket(monkeypatch) -> None:
     assert captured["limit"] == 10
     assert captured["requested_by"] == "admin@example.com"
     assert payload["ok"] is True
+
+
+def test_admin_write_routes_verify_csrf(monkeypatch) -> None:
+    captured = {"csrf": 0}
+    purge_request = build_request(router, "/api/v1/admin/audit/events/purge", method="DELETE")
+    alert_request = build_request(router, "/api/v1/admin/audit/alerts/test", method="POST")
+    current_user = type("DemoUser", (), {"email": "admin@example.com"})()
+
+    async def fake_verify_csrf(request_obj):
+        captured["csrf"] += 1
+        return True
+
+    async def fake_rate_limit(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(admin_routes, "verify_csrf_token", fake_verify_csrf)
+    monkeypatch.setattr(admin_routes, "require_admin_user", lambda user: None)
+    monkeypatch.setattr(admin_routes, "enforce_rate_limit", fake_rate_limit)
+    monkeypatch.setattr(
+        admin_routes.audit_service,
+        "purge_audit_events",
+        lambda db, *, older_than: {"ok": True, "older_than": older_than.isoformat()},
+    )
+    monkeypatch.setattr(admin_routes, "send_test_telegram_alert", lambda *, requested_by: {"ok": True})
+
+    purge_payload = asyncio.run(
+        admin_routes.purge_old_audit_events(
+            request=purge_request,
+            retention_days=7,
+            db="demo-db",
+            current_user=current_user,
+        )
+    )
+    alert_payload = asyncio.run(
+        admin_routes.send_audit_test_alert(
+            request=alert_request,
+            current_user=current_user,
+        )
+    )
+
+    assert captured["csrf"] == 2
+    assert purge_payload["ok"] is True
+    assert alert_payload["ok"] is True

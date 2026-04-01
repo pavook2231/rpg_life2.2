@@ -16,54 +16,34 @@ import { Button, Card, GameIcon, Modal, ProfileHeroCard, radii, useThemeColors, 
 function getFallbackGoals(t: (key: string, params?: Record<string, string | number>) => string): GoalTemplatePayload["goals"] {
   return [
     {
-      id: "weight_health",
-      title: t("goals.fallback.weight_health.title"),
-      description: t("goals.fallback.weight_health.description"),
-      result_example: t("goals.fallback.weight_health.result"),
+      id: "lose",
+      title: "Снижение веса",
+      description: "Детерминированная программа снижения веса с обязательным стартовым блоком и адаптивной ходьбой.",
+      result_example: "Понятный маршрут и регулярный weekly review вместо случайных задач.",
       icon: "run-fast",
       accent_color: "#2ecc71",
       recommended_term_months: 6,
       is_primary: true,
     },
     {
-      id: "new_profession",
-      title: t("goals.fallback.new_profession.title"),
-      description: t("goals.fallback.new_profession.description"),
-      result_example: t("goals.fallback.new_profession.result"),
-      icon: "briefcase-variant-outline",
-      accent_color: "#8b5cf6",
-      recommended_term_months: 9,
-      is_primary: true,
-    },
-    {
-      id: "financial_growth",
-      title: t("goals.fallback.financial_growth.title"),
-      description: t("goals.fallback.financial_growth.description"),
-      result_example: t("goals.fallback.financial_growth.result"),
-      icon: "cash-multiple",
-      accent_color: "#f1c40f",
-      recommended_term_months: 6,
-      is_primary: true,
-    },
-    {
-      id: "discipline_productivity",
-      title: t("goals.fallback.discipline_productivity.title"),
-      description: t("goals.fallback.discipline_productivity.description"),
-      result_example: t("goals.fallback.discipline_productivity.result"),
-      icon: "timer-check-outline",
+      id: "maintain",
+      title: "Удержание веса",
+      description: "Профиль можно сохранить, но полноценная программа удержания пока ещё не включена.",
+      result_example: "Этот режим будет добавлен отдельным этапом.",
+      icon: "scale-balance",
       accent_color: "#3498db",
-      recommended_term_months: 3,
-      is_primary: true,
+      recommended_term_months: 6,
+      is_primary: false,
     },
     {
-      id: "personal_development",
-      title: t("goals.fallback.personal_development.title"),
-      description: t("goals.fallback.personal_development.description"),
-      result_example: t("goals.fallback.personal_development.result"),
-      icon: "brain",
-      accent_color: "#f39c12",
+      id: "gain",
+      title: "Набор веса",
+      description: "Профиль можно сохранить, но программа набора пока находится в подготовке.",
+      result_example: "Когда режим будет готов, он получит отдельную механику.",
+      icon: "arm-flex",
+      accent_color: "#e67e22",
       recommended_term_months: 6,
-      is_primary: true,
+      is_primary: false,
     },
   ];
 }
@@ -152,7 +132,7 @@ export function ProfileScreen() {
   const [characterName, setCharacterName] = useState("");
   const [birthYear, setBirthYear] = useState("2000");
   const [selectedAchievement, setSelectedAchievement] = useState<any>(null);
-  const [goalType, setGoalType] = useState("personal_development");
+  const [goalType, setGoalType] = useState("lose");
   const [goalTermMonths, setGoalTermMonths] = useState(6);
   const [goalTemplates, setGoalTemplates] = useState<GoalTemplatePayload["goals"]>(fallbackGoals);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
@@ -163,7 +143,7 @@ export function ProfileScreen() {
     setUsername(profile?.user?.username ?? "");
     setCharacterName(hero?.name ?? profile?.user?.name ?? "");
     setBirthYear(String(profile?.user?.birth_year ?? 2000));
-    setGoalType(profile?.user?.goal_type ?? "personal_development");
+    setGoalType(profile?.user?.goal_type ?? "lose");
     setGoalTermMonths(profile?.user?.goal_term_months ?? 6);
   }, [hero?.name, profile?.user?.birth_year, profile?.user?.goal_term_months, profile?.user?.goal_type, profile?.user?.name, profile?.user?.username]);
 

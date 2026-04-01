@@ -3,6 +3,11 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 pytest-cache-files-*/
+.audit_tools/
+.audit_tmp/
+.expo-home/
+.npm-cache/
+.tmp/
 
 .venv/
 venv/

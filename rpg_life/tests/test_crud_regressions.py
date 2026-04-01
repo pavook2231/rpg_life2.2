@@ -147,7 +147,7 @@ def test_generate_rare_mission_creates_single_timed_high_value_mission(db_sessio
     assert same_window_result.id == mission.id
 
 
-def test_get_daily_quests_auto_includes_rare_mission(db_session, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_get_daily_quests_returns_weight_management_onboarding_for_new_user(db_session, monkeypatch: pytest.MonkeyPatch) -> None:
     from app.services import quest_service
 
     monkeypatch.setattr(crud.random, "choice", lambda entries: entries[0])
@@ -157,13 +157,14 @@ def test_get_daily_quests_auto_includes_rare_mission(db_session, monkeypatch: py
 
     payload = quest_service.get_daily_quests(db_session, user.id)
 
-    rare_items = [item for item in payload["items"] if item["quest_type"] == "rare_mission"]
+    active_items = [item for item in payload["items"] if not item["is_completed"]]
     assert progress.id > 0
-    assert len(rare_items) == 1
-    assert rare_items[0]["xp_reward"] >= 300
+    assert [item["quest_code"] for item in active_items] == ["onboarding_anamnesis"]
+    assert all(item["domain"] == "weight_management" for item in active_items)
+    assert all(item["quest_type"] == "daily" for item in active_items)
 
 
-def test_get_daily_quests_auto_generates_daily_and_boss_quests_when_missing(db_session, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_get_daily_quests_no_longer_surfaces_boss_or_rare_runtime_quests(db_session, monkeypatch: pytest.MonkeyPatch) -> None:
     from app.services import quest_service
 
     monkeypatch.setattr(crud.random, "choice", lambda entries: entries[0])
@@ -174,10 +175,13 @@ def test_get_daily_quests_auto_generates_daily_and_boss_quests_when_missing(db_s
     payload = quest_service.get_daily_quests(db_session, user.id)
 
     quest_types = {item["quest_type"] for item in payload["items"]}
+    quest_codes = {item.get("quest_code") for item in payload["items"]}
 
     assert progress.id > 0
     assert "daily" in quest_types
-    assert "boss_daily" in quest_types
+    assert "boss_daily" not in quest_types
+    assert "rare_mission" not in quest_types
+    assert quest_codes == {"onboarding_anamnesis"}
 
 
 def test_create_custom_quest_uses_server_side_reward_even_for_legacy_payload(db_session) -> None:

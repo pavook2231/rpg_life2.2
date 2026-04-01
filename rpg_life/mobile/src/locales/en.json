@@ -1,7 +1,7 @@
 {
   "navigation": {
     "home": "Home",
-    "quests": "Quests",
+    "quests": "Plan",
     "character": "Character",
     "inventory": "Inventory",
     "shop": "Shop",
@@ -20,7 +20,7 @@
       "syncMessage": "Syncing progress...",
       "heroName": "Hero",
       "levelProgress": "Level progress",
-      "toQuests": "To quests",
+      "toQuests": "Open plan",
       "character": "Character",
       "shop": "Shop",
       "claimDaily": "Claim",
@@ -37,7 +37,7 @@
         "heroSubtitle": "Current hero status and progress",
         "goalTitle": "Current goal",
         "goalEmptyTitle": "No goal selected yet",
-        "goalSummary": "{progress}% progress • {days} days left • completed today {completed}/{total} • 10 unique tasks available",
+        "goalSummary": "{progress}% progress • {days} days left • completed today {completed}/{total}",
         "goalEmptyDescription": "Choose a goal in your profile so the app can suggest better tasks and track your progress more accurately.",
         "goalCtaTitle": "Choose a goal first",
         "goalCtaDescription": "After that, the app will suggest tasks more accurately and show clearer progress.",
@@ -173,8 +173,8 @@
       }
     },
     "quests": {
-      "title": "Quests",
-      "subtitle": "Daily quests, an animated XP bar, and a unified RPG card style",
+      "title": "Program plan",
+      "subtitle": "Deterministic weight-loss steps without random quests",
       "progress": "Level progress",
       "addQuest": "+ Quest",
       "level": "Level",
