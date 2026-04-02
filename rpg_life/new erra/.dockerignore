@@ -1,0 +1,12 @@
+node_modules
+apps/mobile/node_modules
+apps/api/node_modules
+packages/shared/node_modules
+apps/mobile/.expo
+apps/mobile/android
+apps/mobile/ios
+apps/api/dist
+packages/shared/dist
+*.log
+.git
+.DS_Store

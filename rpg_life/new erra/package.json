@@ -1,0 +1,16 @@
+{
+  "name": "new-erra",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:api": "npm --workspace @new-erra/api run dev",
+    "dev:mobile": "npm --workspace @new-erra/mobile run start",
+    "build:shared": "npm --workspace @new-erra/shared run build",
+    "build:api": "npm --workspace @new-erra/api run build",
+    "typecheck:mobile": "npm --workspace @new-erra/mobile run typecheck"
+  }
+}

@@ -1,0 +1,123 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Gender {
+  male
+  female
+  other
+}
+
+enum ActivityLevel {
+  low
+  light
+  moderate
+  high
+}
+
+enum EatingPattern {
+  balanced
+  emotional
+  late_snacking
+  irregular
+}
+
+enum SleepQuality {
+  poor
+  average
+  good
+}
+
+enum QuestKind {
+  water
+  steps
+  calories
+}
+
+enum QuestStatus {
+  available
+  completed
+  skipped
+}
+
+enum AppLanguage {
+  ru
+  en
+}
+
+enum ThemePreference {
+  system
+  light
+  dark
+}
+
+model User {
+  id             String               @id @default(cuid())
+  email          String               @unique
+  passwordHash   String
+  fullName       String
+  currentWeight  Float
+  goalWeight     Float
+  streakDays     Int                  @default(0)
+  totalXp        Int                  @default(0)
+  language       AppLanguage          @default(ru)
+  theme          ThemePreference      @default(system)
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+  profile        HealthProfile?
+  dailyQuests    DailyQuest[]
+  resetTokens    PasswordResetToken[]
+}
+
+model HealthProfile {
+  id             String         @id @default(cuid())
+  userId         String         @unique
+  age            Int
+  gender         Gender
+  heightCm       Int
+  weightKg       Float
+  activityLevel  ActivityLevel
+  eatingPattern  EatingPattern
+  sleepQuality   SleepQuality
+  goalWeightKg   Float
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model DailyQuest {
+  id              String      @id @default(cuid())
+  userId          String
+  questDay        Int
+  kind            QuestKind
+  title           String
+  description     String
+  reasonText      String
+  targetValue     Float
+  unit            String
+  xpReward        Int
+  difficultyLevel Int
+  status          QuestStatus @default(available)
+  availableAt     DateTime    @default(now())
+  completedAt     DateTime?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  user            User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, questDay])
+}
+
+model PasswordResetToken {
+  id         String   @id @default(cuid())
+  userId     String
+  token      String   @unique
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  usedAt     DateTime?
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}

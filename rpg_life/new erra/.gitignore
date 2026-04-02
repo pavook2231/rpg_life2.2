@@ -1,0 +1,14 @@
+node_modules/
+apps/api/dist/
+packages/shared/dist/
+packages/shared/src/*.js
+apps/mobile/.expo/
+apps/mobile/android/
+apps/mobile/ios/
+*.log
+.env
+apps/api/.env
+apps/mobile/.env
+!.env.vds.example
+!apps/api/.env.example
+!apps/mobile/.env.example
